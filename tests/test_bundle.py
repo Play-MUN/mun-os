@@ -5,6 +5,7 @@ stand in for the web; no QEMU or guest is used."""
 
 import argparse
 import contextlib
+import errno
 import hashlib
 import http.server
 import io
@@ -129,13 +130,60 @@ class GetTests(Fixture):
         self.assertEqual([card.name for card in installed], ["demo.img"])
         self.assertEqual(sorted(p.name for p in cards.iterdir()), ["collect.img", "demo.img"], "no temporary left")
 
-    def test_without_hard_links_an_exclusive_create_still_never_replaces(self):
+    def test_without_hard_links_nothing_partial_ever_takes_a_card_name(self):
+        # The follow-up review's case: with no hard links, a copy into the
+        # final name that fails half-way left a partial card, which the next
+        # attempt then kept as a player's. Now such a file system is refused
+        # with the name left free, and a later attempt installs the card.
         source = self.bundle()
         cards = self.root / "cards"
-        with patch.object(bundle.os, "link", side_effect=OSError("no links on this file system")):
-            _build, installed = self.get(source)
+        with patch.object(bundle, "WINDOWS", False), \
+                patch.object(bundle.os, "link", side_effect=OSError(errno.EOPNOTSUPP, "no hard links")):
+            with self.assertRaises(bundle.BundleError) as refused:
+                self.get(source)
+        self.assertIn("no hard links", str(refused.exception))
+        self.assertEqual(sorted(p.name for p in cards.iterdir()), [], "no card and no temporary left")
+        _build, installed = self.get(source)
         self.assertEqual(sorted(card.name for card in installed), ["collect.img", "demo.img"])
         self.assertEqual((cards / "demo.img").read_bytes(), b"demo" * 100)
+
+    def test_on_windows_without_hard_links_a_rename_publishes_and_never_replaces(self):
+        # Windows' rename refuses an existing name (os.rename there); emulated
+        # here, where it would replace.
+        source = self.bundle()
+        cards = self.root / "cards"
+        cards.mkdir()
+        (cards / "collect.img").write_bytes(b"my saves")
+        real_rename = bundle.os.rename
+
+        def windows_rename(old, new):
+            if Path(new).exists():
+                raise FileExistsError(errno.EEXIST, "exists", str(new))
+            real_rename(old, new)
+        with patch.object(bundle, "WINDOWS", True), \
+                patch.object(bundle.os, "link", side_effect=OSError(errno.EOPNOTSUPP, "no hard links")), \
+                patch.object(bundle.os, "rename", side_effect=windows_rename):
+            _build, installed = self.get(source)
+        self.assertEqual([card.name for card in installed], ["demo.img"])
+        self.assertEqual((cards / "collect.img").read_bytes(), b"my saves")
+        self.assertEqual((cards / "demo.img").read_bytes(), b"demo" * 100)
+        self.assertEqual(sorted(p.name for p in cards.iterdir()), ["collect.img", "demo.img"], "no temporary left")
+
+    def test_a_failed_publication_leaves_neither_a_card_nor_a_temporary(self):
+        # Interrupted at the last step (a rename that fails on Windows): the
+        # name stays free and the retry installs the whole card.
+        source = self.bundle()
+        cards = self.root / "cards"
+        with patch.object(bundle, "WINDOWS", True), \
+                patch.object(bundle.os, "link", side_effect=OSError(errno.EOPNOTSUPP, "no hard links")), \
+                patch.object(bundle.os, "rename", side_effect=OSError(errno.ENOSPC, "disk full")):
+            with self.assertRaises(OSError):
+                self.get(source)
+        self.assertFalse((cards / "collect.img").exists())
+        self.assertFalse(any(p.name.endswith(".part") for p in cards.iterdir()))
+        _build, installed = self.get(source)
+        self.assertIn("collect.img", [card.name for card in installed])
+        self.assertEqual((cards / "collect.img").read_bytes(), b"ext4" + b"\0" * 4096)
 
     def test_a_tampered_file_is_refused_and_nothing_is_installed(self):
         source = self.bundle()

@@ -48,6 +48,8 @@ CARD_NAME = re.compile(r"[a-z0-9][a-z0-9_-]{0,15}")
 DIGEST = re.compile(r"[0-9a-f]{64}")
 KINDS = ("image", "build-info", "card", "licence")
 CHUNK = 1 << 20
+# A rename there refuses a name that exists; elsewhere it replaces it.
+WINDOWS = os.name == "nt"
 
 
 class BundleError(Exception):
@@ -246,14 +248,39 @@ def fetch_file(source: Source, entry: Dict[str, Any], target: Path, report: Call
     os.replace(part, target)
 
 
+def publish_new(complete: Path, destination: Path) -> bool:
+    """Give the complete, checked file `complete` the name `destination` if
+    that name is free: True if it now holds it, False if something took the
+    name first (left as it is). A card is never replaced, and no partial file
+    ever appears under the name: only operations that add the whole file at
+    once and fail on an existing name are used, a hard link or, on Windows, a
+    rename. A file system with neither is refused, the name left free."""
+    try:
+        os.link(complete, destination)
+        return True
+    except FileExistsError:
+        return False
+    except OSError as exc:
+        failure = exc
+    if WINDOWS:
+        try:
+            os.rename(complete, destination)
+            return True
+        except FileExistsError:
+            return False
+    raise BundleError(f"cannot install {destination.name} in {destination.parent}: its file system has no hard "
+                      f"links ({failure.strerror or failure}), and without them a card could be replaced or left "
+                      "half-written; keep .local/ on another file system") from failure
+
+
 def install_card(packed: Path, entry: Dict[str, Any], cards_root: Path) -> Optional[Path]:
     """Unpack a card into cards_root unless one of that name exists (it may
     hold saves). Returns the new card, or None if it was left alone.
 
-    The card is unpacked into a temporary file of its own, checked, and then
-    published under its name with a hard link, which fails rather than
+    The card is unpacked into a temporary file of its own, checked, and only
+    then published under its name (publish_new), which fails rather than
     replace a card that appeared meanwhile (another download, a card made by
-    hand); where links are not available an exclusive create does the same."""
+    hand)."""
     destination = cards_root / f"{entry['card']}.img"
     if destination.exists() or destination.is_symlink():
         return None
@@ -271,17 +298,7 @@ def install_card(packed: Path, entry: Dict[str, Any], cards_root: Path) -> Optio
                 sink.write(block)
         if size != entry["image_size"] or digest.hexdigest() != entry["image_sha256"]:
             raise BundleError(f"card {entry['card']} does not match the manifest once unpacked")
-        try:
-            os.link(temporary, destination)
-        except FileExistsError:
-            return None
-        except OSError:
-            try:
-                with open(destination, "xb") as sink, temporary.open("rb") as source:
-                    shutil.copyfileobj(source, sink, CHUNK)
-            except FileExistsError:
-                return None
-        return destination
+        return destination if publish_new(temporary, destination) else None
     finally:
         with contextlib.suppress(FileNotFoundError):
             temporary.unlink()

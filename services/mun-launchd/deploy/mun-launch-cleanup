@@ -1,0 +1,35 @@
+#!/bin/sh
+# Runs as root when a game unit stops (as mun-launch-cleanup@<sid>.service,
+# started by the game unit's OnSuccess=/OnFailure=) or from the restore unit.
+# Removes the session's staged copy and, when no launcher is there to do it,
+# starts the shell unless another game session is still running.
+# Idempotent; safe to run twice.
+# A removal that fails does not stop the shell from coming back: the unit
+# still ends failed, so the failure stays visible (systemctl --failed, the
+# journal, and the session result when the launcher sees it).
+set -u
+SID="${1:-}"
+LAUNCH_ROOT="${MUN_LAUNCH_ROOT:-/run/mun/launch}"
+status=0
+
+if [ "$SID" != "--restore-only" ]; then
+    case "$SID" in
+        ""|*/*|.*) echo "mun-launch-cleanup: bad session id" >&2; exit 64 ;;
+    esac
+    # Only the staged copy goes. The rest of the session directory is its
+    # record (session.json) and, for directory saves, the files the last
+    # capture reads (docs/saves.md): the launcher, running now or at its next
+    # start, records the session's result from them and then removes them.
+    rm -f -- "$LAUNCH_ROOT/$SID/game" || status=1
+    # A running launcher brings the shell back itself, once the session's last
+    # save has been answered (docs/saves.md); starting it here would show the Home
+    # screen while that write is still in flight.
+    if systemctl is-active --quiet mun-launchd.service; then
+        exit "$status"
+    fi
+fi
+
+if ! systemctl list-units --plain --no-legend --state=active 'mun-game-*' | grep -q mun-game-; then
+    systemctl start --no-block mun-shell.service || status=1
+fi
+exit "$status"

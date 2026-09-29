@@ -1,0 +1,13 @@
+#!/bin/sh
+# Privileged helper for MUN Shell. Accepts a fixed vocabulary so the sudoers
+# rule can stay exact; anything else is rejected before touching systemctl.
+set -eu
+
+case "${1:-}" in
+    poweroff) exec /usr/bin/systemctl poweroff ;;
+    reboot)   exec /usr/bin/systemctl reboot ;;
+    *)
+        echo "mun-power: unsupported action '${1:-}' (use poweroff|reboot)" >&2
+        exit 64
+        ;;
+esac

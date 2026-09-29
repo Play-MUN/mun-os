@@ -1,0 +1,45 @@
+# mun-cardd: Game Card detection, validation and read-only mounting.
+# Runs as root because mount(2) needs CAP_SYS_ADMIN, but with the smallest
+# footprint systemd can enforce; it never executes card content.
+[Unit]
+Description=MUN card service (Game Card detection and validation)
+Documentation=file:///opt/mun/cardd/README.md
+After=systemd-udevd.service local-fs.target
+Before=mun-shell.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/mun/cardd/cardd.py
+Restart=on-failure
+RestartSec=2
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONUNBUFFERED=1
+# Test hook, off by default: seconds of artificial validation delay.
+# Environment=MUN_CARDD_VALIDATION_DELAY=8
+
+RuntimeDirectory=mun mun/cards
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=yes
+
+# CAP_DAC_OVERRIDE: saves are written under saves/ on the card, whose directories
+# carry whatever ownership the card's author gave them (docs/saves.md).
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_CHOWN CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_FOWNER
+AmbientCapabilities=
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/run/mun
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
+DevicePolicy=closed
+DeviceAllow=block-blkext rw
+DeviceAllow=block-virtblk rw
+DeviceAllow=/dev/null rw
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,75 @@
+# MUN Shell: the console UI, started on tty1 instead of a login prompt.
+# Runs as an unprivileged user; power actions go through the mun-power
+# helper under a narrow sudoers rule (see mun-shell.sudoers).
+[Unit]
+Description=MUN Shell (console UI on tty1)
+Documentation=file:///opt/mun/shell/README.md
+Conflicts=getty@tty1.service
+After=systemd-user-sessions.service getty@tty1.service systemd-udevd.service
+ConditionPathExists=/dev/dri/card0
+
+[Service]
+Type=simple
+User=mun-shell
+Group=mun-shell
+SupplementaryGroups=video input render
+RuntimeDirectory=mun-shell
+# Kept across the launcher's stop/start around each game, cleared at boot: the
+# shell marks there that the start-up sequence has played (src/main.cpp).
+RuntimeDirectoryPreserve=yes
+# The player's settings (language, clock, resolution, safe area, automatic power off):
+# /var/lib/mun-shell/settings.ini, writable here despite ProtectSystem=strict.
+# That is also the user's home, so caches (fontconfig's) are sent to their
+# own directory rather than kept with the settings.
+StateDirectory=mun-shell
+CacheDirectory=mun-shell
+Environment=XDG_CACHE_HOME=/var/cache/mun-shell
+WorkingDirectory=/opt/mun/shell
+
+# systemd opens tty1 and hands it to the service user, which is how an
+# unprivileged process gets to switch the VT into graphics mode.
+TTYPath=/dev/tty1
+StandardInput=tty
+StandardOutput=journal
+StandardError=journal
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+
+# Platform: Qt's linuxfb plugin drawing into DRM dumb buffers with page flips
+# (QT_QPA_FB_DRM=1), software Qt Quick renderer, evdev keyboard/mouse. No GPU
+# acceleration is assumed (services/mun-shell/README.md). Not /dev/fb0: on
+# virtio-gpu that is the kernel's fbdev emulation, whose deferred updates made
+# motion uneven; a game that draws on /dev/fb0 gets it back once the shell has
+# stopped and released the display.
+Environment=QT_QPA_PLATFORM=linuxfb:tty=/dev/tty1
+Environment=QT_QPA_FB_DRM=1
+Environment=QT_QUICK_BACKEND=software
+# The interface is laid out on a 1920x1080 logical canvas; the shell scales it
+# to the display mode (1x at 1920x1080, 2/3 at 1280x720, 4/3 at 2560x1440)
+# and chooses that mode itself, through QT_QPA_KMS_CONFIG. Setting
+# QT_SCALE_FACTOR here would override the scale, and a KMS configuration the
+# player's choice of resolution.
+Environment=QT_QPA_FB_HIDECURSOR=1
+Environment=QT_QPA_EVDEV_KEYBOARD_PARAMETERS=grab=1
+Environment=XDG_RUNTIME_DIR=/run/mun-shell
+Environment=QT_LOGGING_RULES=qt.qpa.*=false
+
+ExecStart=/opt/mun/shell/bin/mun-shell
+Restart=on-failure
+RestartSec=2
+# Qt's framebuffer VT handler exits with status 1 after SIGTERM; that is a clean stop.
+# 75 is the shell asking to start again: Qt opens the display once, so a new
+# resolution takes a new process (src/displaymode.h).
+SuccessExitStatus=1 75
+RestartForceExitStatus=75
+
+# Hardening that does not interfere with fb/evdev access.
+NoNewPrivileges=no
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/run/mun-shell
+
+[Install]
+WantedBy=graphical.target

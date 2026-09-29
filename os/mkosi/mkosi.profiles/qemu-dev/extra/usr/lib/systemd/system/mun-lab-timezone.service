@@ -1,0 +1,14 @@
+# Development image only (profile qemu-dev): the laboratory's time zone,
+# before the shell reads it. See /usr/lib/mun/lab-timezone.
+[Unit]
+Description=MUN laboratory: the host computer's time zone
+ConditionVirtualization=qemu
+After=local-fs.target
+Before=mun-shell.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/mun/lab-timezone
+
+[Install]
+WantedBy=multi-user.target

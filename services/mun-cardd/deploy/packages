@@ -1,0 +1,5 @@
+# Debian packages mun-cardd needs at run time, mirrored in
+# os/mkosi/mkosi.conf (image); tests/test_os.py checks that the two agree.
+python3
+python3-pyudev
+util-linux

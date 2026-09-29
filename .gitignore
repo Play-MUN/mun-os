@@ -1,0 +1,86 @@
+# Host and editor state
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Local hook extensions
+lefthook-local.yml
+
+# Credentials and local environment; examples must contain placeholders only
+.env
+.env.*
+!.env.example
+.envrc
+secrets/
+.ssh/
+.aws/
+.netrc
+.pypirc
+id_rsa
+id_ed25519
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+
+# Generated lab artifacts, logs and worktrees
+/.local/
+/.worktrees/
+*.log
+*.log.*
+*.qcow
+*.qcow2
+*.img
+*.raw
+*.iso
+*.vmdk
+*.vdi
+*.vhd
+*.vhdx
+*.utm/
+
+# Rust and native build products; dependency lockfiles remain versioned
+target/
+build/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+CMakeUserPresets.json
+compile_commands.json
+*.o
+*.obj
+*.a
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+*.dSYM/
+
+# Python and optional web tooling
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+node_modules/
+dist/
+examples/mun-collect/tests/test_save
+examples/mun-gl-probe/mun-gl-probe
+
+# Commercial game installers stay out of the repository
+*.dmg

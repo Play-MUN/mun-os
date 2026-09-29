@@ -1,0 +1,59 @@
+#!/bin/sh
+# Build step of the MUN OS image, run by mkosi inside the image with the build
+# overlay (compilers and headers) on top. The components are compiled and
+# staged by their own services/*/deploy scripts into $DESTDIR, which mkosi
+# copies into the image. The example games are built
+# against the image's own libraries and left in $BUILDDIR/artifacts: they go
+# on Game Cards, beside the image, never into it.
+set -eu
+MUN="$SRCDIR/mun"
+ART="$BUILDDIR/artifacts"
+rm -rf "$ART"
+mkdir -p "$ART/games"
+
+echo "== components"
+sh "$MUN/services/mun-shell/deploy/build.sh" "$MUN/services/mun-shell" "$BUILDDIR/mun-shell" "$MUN_BUILD_ID"
+sh "$MUN/services/mun-shell/deploy/stage.sh" "$MUN/services/mun-shell" "$BUILDDIR/mun-shell" "$DESTDIR"
+sh "$MUN/services/mun-cardd/deploy/stage.sh" "$MUN/services/mun-cardd" "$MUN/tools/mun-card/mun_card" "$DESTDIR"
+sh "$MUN/services/mun-launchd/deploy/stage.sh" "$MUN/services/mun-launchd" "$DESTDIR"
+
+echo "== licences"
+# MUN OS's own licence; each component's third-party texts come with it
+# (mun-shell: the typefaces) and each Debian package keeps its own in
+# /usr/share/doc/<package>/copyright.
+install -D -m 0644 "$MUN/LICENSE" "$DESTDIR/usr/share/doc/mun-os/LICENSE"
+
+echo "== MUN Collect"
+rm -rf "$BUILDDIR/mun-collect"
+cp -R "$MUN/examples/mun-collect" "$BUILDDIR/mun-collect"
+make -s -C "$BUILDDIR/mun-collect" clean
+make -s -C "$BUILDDIR/mun-collect"
+install -d "$ART/games/mun-collect"
+install -m 0755 "$BUILDDIR/mun-collect/mun-collect" "$ART/games/mun-collect/mun-collect"
+
+echo "== MUN GL Probe"
+rm -rf "$BUILDDIR/mun-gl-probe"
+cp -R "$MUN/examples/mun-gl-probe" "$BUILDDIR/mun-gl-probe"
+make -s -C "$BUILDDIR/mun-gl-probe" clean
+make -s -C "$BUILDDIR/mun-gl-probe"
+install -d "$ART/games/mun-gl-probe"
+install -m 0755 "$BUILDDIR/mun-gl-probe/mun-gl-probe" "$ART/games/mun-gl-probe/mun-gl-probe"
+
+if [ "${MUN_WITH_RECIPES:-0}" = 1 ]; then
+    # Games from recipes kept outside this repository (os/builder/recipes.py),
+    # compiled here like the examples: against the image's own libraries,
+    # left beside the image, never in it.
+    for recipe in "$SRCDIR"/recipes/*/; do
+        name="$(basename "$recipe")"
+        echo "== recipe $name"
+        rm -rf "$BUILDDIR/recipes/$name"
+        mkdir -p "$BUILDDIR/recipes/$name" "$ART/games/$name"
+        RECIPE="${recipe%/}" WORKDIR="$BUILDDIR/recipes/$name" OUT="$ART/games/$name" sh "$recipe/build.sh"
+        [ -n "$(find "$ART/games/$name" -type f -perm -u+x)" ] \
+            || { echo "recipe $name left no executable in its OUT" >&2; exit 1; }
+    done
+    cp "$SRCDIR/recipes/recipes.json" "$ART/recipes.json"
+fi
+
+# The toolchain that produced all of the above, recorded by mkosi.prepare.chroot.
+cp /var/lib/mun-build/toolchain.tsv "$ART/toolchain.tsv"

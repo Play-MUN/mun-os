@@ -1,0 +1,24 @@
+# Cleanup after game session %i, started by the game unit's OnSuccess= and
+# OnFailure= (a unit of its own, not ExecStopPost=: see unit_properties() in
+# launchd.py). It runs in the host's mount namespace, so a card that the card
+# service holds read-write for a save cannot keep it from running, and it runs
+# whether or not the launcher is alive.
+[Unit]
+Description=Clean up after game session %i
+
+[Service]
+Type=oneshot
+# Success stays visible (active, exited) until the launcher has seen it and
+# stops the unit: a finished cleanup that systemd had already unloaded would
+# look exactly like one that never started. A failure stays until reset.
+RemainAfterExit=yes
+# A cleanup that hangs fails instead of running on; the launcher waits a
+# little longer than this before it reports the cleanup as unconfirmed.
+TimeoutStartSec=10s
+ExecStart=/usr/local/libexec/mun-launch-cleanup %i
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/run/mun/launch
+ProtectHome=yes
+PrivateTmp=yes
+PrivateNetwork=yes

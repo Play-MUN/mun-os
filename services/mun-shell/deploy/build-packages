@@ -1,0 +1,7 @@
+# Debian packages build.sh needs to compile MUN Shell, present in the image
+# build's overlay (os/mkosi/mkosi.conf BuildPackages).
+qt6-base-dev
+qt6-declarative-dev
+cmake
+ninja-build
+g++

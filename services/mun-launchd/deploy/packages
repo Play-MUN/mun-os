@@ -1,0 +1,5 @@
+# Debian packages mun-launchd needs at run time, mirrored in
+# os/mkosi/mkosi.conf (image); tests/test_os.py checks that the two agree.
+python3
+systemd
+util-linux

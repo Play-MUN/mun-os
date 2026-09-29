@@ -1,0 +1,4 @@
+# MUN Shell may request exactly these power actions and nothing else.
+# Installed as /etc/sudoers.d/mun-shell (mode 0440) by deploy/stage.sh.
+Defaults:mun-shell !requiretty
+mun-shell ALL=(root) NOPASSWD: /usr/local/libexec/mun-power poweroff, /usr/local/libexec/mun-power reboot

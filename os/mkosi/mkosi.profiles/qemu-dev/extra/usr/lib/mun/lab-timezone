@@ -1,0 +1,20 @@
+#!/bin/sh
+# Development image only: set the console's time zone to the one the
+# laboratory passes from the host computer (vm/munvm.py, QEMU
+# `-fw_cfg name=opt/mun/timezone`), so the clock and the time-of-day light of
+# MUN Shell match the person in front of it. Without that entry the zone
+# stays as it is. The name is checked before it is used: letters, digits and
+# `_+-/`, an existing file under /usr/share/zoneinfo.
+set -eu
+modprobe qemu_fw_cfg 2>/dev/null || true
+entry=/sys/firmware/qemu_fw_cfg/by_name/opt/mun/timezone/raw
+[ -r "$entry" ] || exit 0
+zone="$(head -c 64 "$entry")"
+case "$zone" in
+    ""|/*|*..*|*[!A-Za-z0-9_+/-]*) echo "lab-timezone: ignoring an invalid zone name" >&2; exit 0 ;;
+esac
+[ -f "/usr/share/zoneinfo/$zone" ] || { echo "lab-timezone: unknown zone $zone" >&2; exit 0; }
+[ "$(readlink /etc/localtime || true)" = "../usr/share/zoneinfo/$zone" ] && exit 0
+ln -sfn "../usr/share/zoneinfo/$zone" /etc/localtime
+printf '%s\n' "$zone" > /etc/timezone
+echo "lab-timezone: $zone"

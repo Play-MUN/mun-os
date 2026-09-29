@@ -1,0 +1,24 @@
+{
+  "_comment": "Pinned inputs of the MUN OS image build. Everything a build downloads is named here with a version and a hash, or resolved from the dated Debian snapshot below; see os/README.md.",
+  "name": "MUN OS",
+  "version": "0.1.0-dev",
+  "debian": {
+    "suite": "trixie",
+    "snapshot": "20260926T000000Z",
+    "archives": [
+      {"url": "https://snapshot.debian.org/archive/debian/20260926T000000Z", "suites": ["trixie", "trixie-updates"]},
+      {"url": "https://snapshot.debian.org/archive/debian-security/20260926T000000Z", "suites": ["trixie-security"]}
+    ],
+    "components": ["main"],
+    "keyring": "/usr/share/keyrings/debian-archive-keyring.gpg",
+    "license": "Debian main: DFSG-free packages, each under its own license (usr/share/doc/*/copyright in the package)"
+  },
+  "builder": {
+    "image": "debian-13-generic-arm64-20260914-2601.qcow2",
+    "url": "https://cloud.debian.org/images/cloud/trixie/20260914-2601/debian-13-generic-arm64-20260914-2601.qcow2",
+    "sums_url": "https://cloud.debian.org/images/cloud/trixie/20260914-2601/SHA512SUMS",
+    "sha512": "bef60fa5c4f5511cf83fe1ade0279edd5318dccbbb44f14eb0aa7f3b467e038d7a7c0b6f837be0ad1c3b2e06c5ed8e27adfdf0fd111a201b8f4c9347cd414863",
+    "packages": ["mkosi", "qemu-utils", "git", "python3", "zstd", "ca-certificates"],
+    "license": "Debian official cloud image; DFSG-free packages"
+  }
+}

@@ -1,0 +1,62 @@
+# mun-card
+
+Host tool for laboratory Game Card images: create, inspect offline, hash,
+convert. It shares the `mun_card` package with the console's card service,
+so the host and the guest apply exactly the same rules
+([card format](../../docs/game-cards.md)).
+
+```sh
+./mun card tools                # e2fsprogs binaries and versions in use
+./mun card create demo          # valid "MUN Test Card" → .local/gamecards/demo.img
+./mun card inspect demo         # offline validation; exit 0 valid, 2 invalid
+./mun card variants             # list of deliberate defects
+./mun card create broken --variant bad-arch
+./mun card hash demo
+./mun card hash demo --files --ignore saves   # per-file digests of the content, saves left out
+./mun card create old --earlier-names         # a card of the earlier naming generation (neptune.toml)
+./mun card convert old new --game-supports-mun-names   # a MUN-names copy; old is never changed
+```
+
+New cards carry `mun.toml` and their saves `mun-save/1`; `--earlier-names`
+makes a card with `neptune.toml` and `neptune-save/1` for compatibility
+tests, and `inspect` says which names a card uses
+([naming generations](../../docs/game-cards.md#naming-generations)). A card
+with both manifest names is refused.
+
+`convert SOURCE DEST` makes a MUN-names copy of an earlier card in
+`.local/gamecards`: it holds both names in the laboratory's attach registry,
+so no guest can attach them meanwhile; refuses a source that is attached,
+unclean, invalid, already MUN, holds special files or has a save the console
+would not restore (decided from the image, links in the save path refused
+before anything is read); renames the manifest
+and rewrites the `format` of `save.json` and `save.json.prev`, nothing else;
+builds under a temporary name and publishes only after checking that every
+other file is byte-identical and each save's content is unchanged; and never
+replaces an existing card. It refuses a game whose executable shows it knows
+only the earlier names, and otherwise needs `--game-supports-mun-names`: the
+tool verifies structure, not the game. The conversion is complete when a
+guest restores the save from the copy; until then use the original.
+
+A `game-gl` card may declare directory saves ([saves](../../docs/saves.md#directory-saves)): `--saves-directory
+PATH` (relative to the game's `HOME`), one `--saves-unit PATTERN:CHECK` per
+file name pattern that is a complete save by itself (`zlib-xml`, `zlib`,
+`xml` or `any`; the check is never implied), and `--saves-max-bytes BYTES`
+(1 KiB to 8 MiB for the sum of the files). The four fields go together or
+not at all, and `inspect` prints them.
+
+Requires Python 3.9+ and e2fsprogs (`brew install e2fsprogs`, keg-only; the
+tool finds `mke2fs`/`debugfs` through `brew --prefix`, no PATH changes).
+Images are 64 MiB ext4 by default, built with `mke2fs -d` from a temporary
+staging tree, fixed timestamps, null UUID and fixed hash seed: the same
+content yields the same bytes. Only regular image files are ever written.
+
+`inspect` reads the image through `debugfs`, never mounts it, and prints
+whether the SHA-256 changed during inspection (it must not).
+
+Package layout: `minitoml` (strict TOML subset used on both sides),
+`validate` (manifest v0 rules, naming generations and `CardInfo`), `source`
+(mounted directory or `debugfs` image), `ext4` (superblock checks), `image`
+(creation, variants, generated cover), `saves` (save bounds, payload
+integrity and the envelope rule the console restores by, shared with the
+card service and kept equal to the launcher's by a test), `convert` (the
+conversion to MUN names), `errors` (stable codes and messages).

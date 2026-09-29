@@ -1,0 +1,8 @@
+# Safety net: if the launcher fails while the shell is stopped and no game unit
+# is running, bring the shell back.
+[Unit]
+Description=Restore MUN Shell after a launcher failure
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/mun-launch-cleanup --restore-only

@@ -1,0 +1,27 @@
+#!/bin/sh
+# Last step inside the image before mkosi applies users, presets and the
+# output format: the image's identity, and checks that what was staged can
+# run on the packages the image actually has.
+set -eu
+
+# The identity every MUN OS image carries; the shell's system information
+# screen shows it. BUILD-INFO.json beside the image has the full record.
+install -d /usr/lib/mun
+cat > /usr/lib/mun/release <<RELEASE
+name = "MUN OS"
+version = "$IMAGE_VERSION"
+environment = "$MUN_ENVIRONMENT"
+release = $MUN_RELEASE
+profile = "$MUN_PROFILE"
+build_id = "$MUN_BUILD_ID"
+source_commit = "$MUN_SOURCE_COMMIT"
+debian_snapshot = "$MUN_SNAPSHOT"
+RELEASE
+
+visudo -cf /etc/sudoers.d/mun-shell
+missing="$(ldd /opt/mun/shell/bin/mun-shell | grep 'not found' || true)"
+[ -z "$missing" ] || { echo "the shell needs libraries the image lacks:" >&2; echo "$missing" >&2; exit 1; }
+python3 -c 'import pyudev' || { echo "the card service cannot import pyudev" >&2; exit 1; }
+for script in /opt/mun/cardd/cardd.py /opt/mun/launchd/launchd.py; do
+    python3 -c 'import ast, sys; ast.parse(open(sys.argv[1]).read(), sys.argv[1])' "$script"
+done

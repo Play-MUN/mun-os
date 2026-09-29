@@ -1,0 +1,39 @@
+# mun-launchd: game session supervisor. Root because it starts transient
+# systemd units as another user and stops/starts the shell; it needs no device
+# access, no mounts and no network, and touches only /run/mun.
+[Unit]
+Description=MUN game launcher (Game Card session supervisor)
+Documentation=file:///opt/mun/launchd/README.md
+Requires=run-mun-launch.mount
+After=run-mun-launch.mount mun-cardd.service
+# If the launcher itself fails, get the shell back regardless.
+OnFailure=mun-shell-restore.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/mun/launchd/launchd.py
+Restart=always
+RestartSec=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONUNBUFFERED=1
+
+# Responsibility-shaped privileges: talk to systemd, own /run/mun/launch.
+# CAP_LEASE: a read lease on a save file the game owns is how the launcher
+# proves that nothing is writing it at a capture (docs/saves.md).
+CapabilityBoundingSet=CAP_CHOWN CAP_FOWNER CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_KILL CAP_LEASE
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateNetwork=yes
+ReadWritePaths=/run/mun
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

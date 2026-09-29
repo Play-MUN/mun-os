@@ -1,0 +1,13 @@
+# MUN OS: the console's services start at boot. Read before Debian's
+# 90-systemd.preset (the first match wins), which enables everything else.
+enable run-mun-launch.mount
+enable mun-cardd.service
+enable mun-launchd.service
+enable mun-shell.service
+# The shell owns tty1: no login prompt there.
+disable getty@.service
+# MUN OS has no network configuration: nothing waits for a network.
+disable systemd-networkd.service
+disable systemd-networkd.socket
+disable systemd-networkd-wait-online.service
+disable systemd-network-generator.service

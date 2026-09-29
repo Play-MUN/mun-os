@@ -1,0 +1,2 @@
+# Development image only: the laboratory time zone (profile qemu-dev).
+enable mun-lab-timezone.service

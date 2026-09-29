@@ -1,0 +1,14 @@
+# Exec-capable, size-bounded tmpfs for staged game executables. /run itself is
+# mounted noexec on Debian and stays that way; only this subtree allows exec.
+[Unit]
+Description=MUN staged game executables (exec-capable tmpfs)
+Before=mun-launchd.service
+
+[Mount]
+What=tmpfs
+Where=/run/mun/launch
+Type=tmpfs
+Options=mode=0711,size=128M,nosuid,nodev,noatime
+
+[Install]
+WantedBy=multi-user.target

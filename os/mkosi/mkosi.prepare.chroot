@@ -1,0 +1,12 @@
+#!/bin/sh
+# mkosi runs this twice: after the image's packages ("final") and after the
+# build packages, with the build overlay on top ("build"). Only the second
+# does something: it records the build overlay's packages for BUILD-INFO.
+# The build step cannot read them itself: while it runs, mkosi 25.3 stacks
+# the image above the overlay, so the image's package database hides the
+# overlay's (the compilers themselves stay visible).
+set -eu
+[ "${1:-}" = build ] || exit 0
+mkdir -p /var/lib/mun-build
+/usr/bin/dpkg-query -W -f '${Package}\t${Version}\t${Architecture}\n' | LC_ALL=C sort > /var/lib/mun-build/toolchain.tsv
+grep -q '^gcc	' /var/lib/mun-build/toolchain.tsv || { echo "no gcc in the build overlay's package list" >&2; exit 1; }

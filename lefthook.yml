@@ -1,0 +1,4 @@
+pre-commit:
+  commands:
+    foundation:
+      run: make check

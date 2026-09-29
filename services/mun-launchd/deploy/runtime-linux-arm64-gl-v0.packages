@@ -1,0 +1,12 @@
+# System libraries the console promises a game on the provisional
+# linux-arm64-gl-v0 profile (docs/runtime.md). The image build lists them in
+# os/mkosi/mkosi.conf and records their installed versions in BUILD-INFO.
+libsdl2-2.0-0
+libopenal1
+libtinyxml2-11
+libgl1
+libegl1
+libgbm1
+libgl1-mesa-dri
+libasound2t64
+libstdc++6

@@ -1,7 +1,8 @@
 // SystemSounds plays the interface's sounds for moving, entering and going
 // back on the menus (qml/Main.qml asks for them by name: "move", "enter",
 // "back"). They are compiled in (sounds/*.wav: PCM, 16-bit, 48 kHz, stereo)
-// and played through ALSA's default device, the one the games use; the
+// and played through ALSA's default device, the one the games use, which
+// converts them if the device runs at another rate or format; the
 // shell has it only while it runs, and the launcher stops the shell before a
 // game starts.
 //

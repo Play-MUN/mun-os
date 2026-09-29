@@ -92,7 +92,8 @@ fades and moves away and the Settings arc comes in its place; while a
 panel's options have the focus, its arc dims. Three minutes after the last
 input the network, the float and the gear slow to a stop in 1.5 s and the
 scene holds still until the next key, which brings the motion back the same
-way, so a console left alone draws nothing. There is no sound in the shell.
+way, so a console left alone draws nothing. The menus' sounds are described
+under *Sounds*.
 
 ### How it is drawn
 
@@ -235,9 +236,12 @@ console: games and saves live on their Game Cards.
 Moving the focus or changing a choice plays `move`, going in or running an
 action `enter`, going back or closing a dialog `back`: only when a key or
 the pointer changed something, never for the console's own changes (a card
-arriving, a result shown). They are MUN's own, compiled in from `sounds/`:
-PCM, 16-bit, 48 kHz, stereo, only the format and the samples (no metadata
-chunks), under a second each (`tests/test_os.py` checks all of that).
+arriving, a result shown). They are MUN's own, compiled in from `sounds/`,
+all in one chosen format: PCM, 16-bit, 48 kHz, stereo, only the format and
+the samples (no metadata chunks), under a second each (`tests/test_os.py`
+checks all of that). The shell asks ALSA for that format and lets it convert
+when a device plays another; it has been heard only through the virtual
+console's sound device, and physical outputs are tested on the chosen board.
 
 `src/systemsounds.*` plays them through ALSA's default device, the one the
 games use: the unit adds the `audio` group. A worker thread mixes up to

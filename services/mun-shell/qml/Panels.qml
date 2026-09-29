@@ -167,7 +167,8 @@ QtObject {
                 head("AUDIO"),
                 unavailable(t("Output", "Salida")),
                 unavailable(t("Format", "Formato")),
-                unavailable(t("System sounds", "Sonidos del sistema")),
+                choice(t("System sounds", "Sonidos del sistema"), [t("On", "Activados"), t("Off", "Desactivados")],
+                       ShellSettings.systemSounds ? 0 : 1, i => ShellSettings.systemSounds = i === 0),
                 unavailable(t("Startup sound", "Sonido de arranque"))
             ]
         }

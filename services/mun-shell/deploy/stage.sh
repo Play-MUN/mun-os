@@ -28,5 +28,5 @@ install -m 0644 "$SRC/deploy/sysusers.conf" "$DESTDIR/usr/lib/sysusers.d/mun-she
 {
     echo "component=mun-shell"
     echo "build_id=$(sed -n 's/^MUN_BUILD_ID:STRING=//p' "$BUILD_DIR/CMakeCache.txt")"
-    echo "source_sha256=$(cd "$SRC" && find src qml fonts CMakeLists.txt deploy -type f | LC_ALL=C sort | xargs sha256sum | sha256sum | cut -d' ' -f1)"
+    echo "source_sha256=$(cd "$SRC" && find src qml fonts sounds CMakeLists.txt deploy -type f | LC_ALL=C sort | xargs sha256sum | sha256sum | cut -d' ' -f1)"
 } > "$DESTDIR$PREFIX/BUILD-INFO"

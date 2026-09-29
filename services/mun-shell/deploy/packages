@@ -11,4 +11,6 @@ qml6-module-qtquick-window
 qml6-module-qtquick-templates
 qml6-module-qtqml-workerscript
 fonts-inter
+# interface sounds (ALSA)
+libasound2t64
 sudo

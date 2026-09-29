@@ -109,18 +109,33 @@ Window {
         return 0
     }
 
+    // The menus' sounds, by what the player did: "move" (the focus or a
+    // choice changed), "enter" (in, or an action run), "back". Only a key or
+    // a pointer that changed something sounds; the console's own changes
+    // (a card arriving, a result shown) do not.
+    function sound(name) {
+        if (ShellSettings.systemSounds)
+            SystemSounds.play(name)
+    }
+
     function move(step) {
         if (modal) {
-            modalIndex = (modalIndex + step + modal.actions.length) % modal.actions.length
+            const count = modal.actions.length
+            modalIndex = (modalIndex + step + count) % count
+            if (count > 1)
+                sound("move")
             return
         }
         feedback = ""
+        const before = [level, mainIndex, settingsIndex, optionIndex].join()
         if (level === 0)
             mainIndex = (mainIndex + step + mainEntries.length) % mainEntries.length
         else if (level === 1)
             settingsIndex = (settingsIndex + step + settingsEntries.length) % settingsEntries.length
         else
             optionIndex = firstSelectable(optionIndex + step, step)
+        if ([level, mainIndex, settingsIndex, optionIndex].join() !== before)
+            sound("move")
     }
 
     function side(step) {
@@ -144,29 +159,36 @@ Window {
     function change(option, step) {
         const n = option.values.length
         option.choose((option.index + step + n) % n)
+        sound("move")
     }
 
     function enter() {
         if (modal) {
+            sound("enter")
             modal.actions[modalIndex].run()
             return
         }
         feedback = ""
         if (level === 0 && focusedEntry.key === "power") {
+            sound("enter")
             askPowerOff()
         } else if (level === 0 && focusedEntry.key === "settings") {
+            sound("enter")
             level = 1
             settingsIndex = 0
         } else if (level < 2 && options.length > 0) {
+            sound("enter")
             previousLevel = level
             level = 2
             optionIndex = firstSelectable(0, 1)
         } else if (level === 2) {
             const option = options[optionIndex]
-            if (option && option.kind === "choice")
+            if (option && option.kind === "choice") {
                 change(option, 1)
-            else if (option && option.run)
+            } else if (option && option.run) {
+                sound("enter")
                 option.run()
+            }
         }
     }
 
@@ -179,10 +201,10 @@ Window {
         feedback = ""
         if (arc === 0) {
             level = 0
-            if (mainIndex === index) enter(); else mainIndex = index
+            if (mainIndex === index) enter(); else { mainIndex = index; sound("move") }
         } else {
             level = 1
-            if (settingsIndex === index) enter(); else settingsIndex = index
+            if (settingsIndex === index) enter(); else { settingsIndex = index; sound("move") }
         }
     }
     function clickOption(index) {
@@ -198,13 +220,17 @@ Window {
 
     function back() {
         if (modal) {
-            (modal.dismiss || closeModal)()
+            sound("back")
+            const dismiss = modal.dismiss || closeModal
+            dismiss()
             return
         }
         feedback = ""
         if (level === 2) {
+            sound("back")
             level = previousLevel
         } else if (level === 1) {
+            sound("back")
             level = 0
             mainIndex = 2
         }

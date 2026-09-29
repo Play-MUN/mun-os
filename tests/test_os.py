@@ -169,6 +169,34 @@ class ShellTests(unittest.TestCase):
             self.assertIn(fields[9], ("+hsync", "-hsync"))
             self.assertIn(fields[10], ("+vsync", "-vsync"))
 
+    def test_the_interface_sounds_are_plain_pcm_and_all_accounted_for(self):
+        # What the player (src/systemsounds.cpp) accepts, and nothing but the
+        # samples: authoring tools add chunks (metadata, provenance) that have
+        # no place in the console.
+        sounds = sorted((self.SHELL / "sounds").glob("*.wav"))
+        self.assertEqual([p.stem for p in sounds], ["back", "enter", "move"])
+        cmake = (self.SHELL / "CMakeLists.txt").read_text()
+        player = (self.SHELL / "src" / "systemsounds.cpp").read_text()
+        for path in sounds:
+            data = path.read_bytes()
+            self.assertEqual((data[:4], data[8:12]), (b"RIFF", b"WAVE"), path.name)
+            chunks, at = [], 12
+            while at < len(data):
+                size = int.from_bytes(data[at + 4:at + 8], "little")
+                chunks.append((data[at:at + 4], data[at + 8:at + 8 + size]))
+                at += 8 + size + (size & 1)
+            self.assertEqual([name for name, _ in chunks], [b"fmt ", b"data"], f"{path.name}: only the format and the samples")
+            fmt, samples = chunks[0][1], chunks[1][1]
+            tag, channels, rate = int.from_bytes(fmt[0:2], "little"), int.from_bytes(fmt[2:4], "little"), int.from_bytes(fmt[4:8], "little")
+            self.assertEqual((tag, channels, rate, int.from_bytes(fmt[14:16], "little")), (1, 2, 48000, 16), path.name)
+            self.assertLessEqual(len(samples) / (48000 * 4), 1.0, f"{path.name}: a menu sound lasts under a second")
+            self.assertIn(f"sounds/{path.name}", cmake, "compiled in")
+            self.assertIn(f'"{path.stem}"', player, "loaded by the player")
+        played = set(re.findall(r'sound\("([a-z]+)"\)', (self.SHELL / "qml" / "Main.qml").read_text()))
+        self.assertEqual(played, {p.stem for p in sounds}, "every sound the menus ask for exists, and every one is used")
+        unit = (self.SHELL / "deploy" / "mun-shell.service").read_text()
+        self.assertRegex(unit, r"(?m)^SupplementaryGroups=.*\baudio\b", "the shell may open the sound device")
+
     def test_every_compiled_in_font_carries_its_licence(self):
         cmake = (self.SHELL / "CMakeLists.txt").read_text()
         fonts = sorted((self.SHELL / "fonts").glob("*.ttf"))

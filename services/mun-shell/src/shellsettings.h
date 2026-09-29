@@ -1,6 +1,6 @@
 // ShellSettings keeps the player's choices across restarts and reboots: the
-// interface language, the clock format, the resolution, the safe area and the
-// automatic power off. They live in an INI file in the service's state directory
+// interface language, the clock format, the resolution, the safe area, the
+// interface sounds and the automatic power off. They live in an INI file in the service's state directory
 // ($STATE_DIRECTORY, /var/lib/mun-shell in the image); outside systemd, in the
 // user's configuration directory. Nothing else is stored: games and saves
 // live on their Game Cards.
@@ -34,6 +34,9 @@ class ShellSettings : public QObject {
     Q_PROPERTY(QString clockFormat READ clockFormat WRITE setClockFormat NOTIFY changed)
     // Percentage of the screen the interface uses: 100 (the default), 97, 94 or 91.
     Q_PROPERTY(int safeArea READ safeArea WRITE setSafeArea NOTIFY changed)
+    // The sounds of moving, entering and going back on the menus: on (the
+    // default) or off.
+    Q_PROPERTY(bool systemSounds READ systemSounds WRITE setSystemSounds NOTIFY changed)
     // Hours without input on the console's menus before it turns itself off:
     // 0 (never), 1 (the default), 3 or 6. A game in progress does not count.
     Q_PROPERTY(int autoPowerOffHours READ autoPowerOffHours WRITE setAutoPowerOffHours NOTIFY changed)
@@ -63,6 +66,8 @@ public:
     void setClockFormat(const QString &format);
     int safeArea() const { return m_safeArea; }
     void setSafeArea(int percent);
+    bool systemSounds() const { return m_systemSounds; }
+    void setSystemSounds(bool on);
     int autoPowerOffHours() const { return m_autoPowerOffHours; }
     void setAutoPowerOffHours(int hours);
     QString activeResolution() const;
@@ -102,6 +107,7 @@ private:
     QString m_language;
     QString m_clockFormat;
     int m_safeArea = 100;
+    bool m_systemSounds = true;
     int m_autoPowerOffHours = 1;
     bool m_resolutionOnTrial = false;
     bool m_restarting = false;

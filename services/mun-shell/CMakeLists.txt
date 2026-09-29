@@ -12,6 +12,11 @@ set(CMAKE_AUTOMOC ON)
 set(MUN_BUILD_ID "dev" CACHE STRING "Opaque build identifier shown in the system info screen")
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Network Qml Quick)
+# The interface sounds go straight to ALSA (src/systemsounds.h), the library
+# the games' profile already brings into the image.
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(ALSA REQUIRED IMPORTED_TARGET alsa)
+find_package(Threads REQUIRED)
 qt_standard_project_setup(REQUIRES 6.5)
 
 qt_add_executable(mun-shell
@@ -28,6 +33,8 @@ qt_add_executable(mun-shell
     src/launchclient.h
     src/shellsettings.cpp
     src/shellsettings.h
+    src/systemsounds.cpp
+    src/systemsounds.h
     src/blur.cpp
     src/blur.h
     src/hairline.cpp
@@ -88,9 +95,12 @@ qt_add_qml_module(mun-shell
     RESOURCES
         fonts/Archivo-Variable.ttf
         fonts/Michroma-Regular.ttf
+        sounds/move.wav
+        sounds/enter.wav
+        sounds/back.wav
 )
 
-target_link_libraries(mun-shell PRIVATE Qt6::Core Qt6::Gui Qt6::Network Qt6::Qml Qt6::Quick)
+target_link_libraries(mun-shell PRIVATE Qt6::Core Qt6::Gui Qt6::Network Qt6::Qml Qt6::Quick PkgConfig::ALSA Threads::Threads)
 
 include(GNUInstallDirs)
 install(TARGETS mun-shell RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

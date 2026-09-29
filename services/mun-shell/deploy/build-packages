@@ -5,3 +5,5 @@ qt6-declarative-dev
 cmake
 ninja-build
 g++
+pkgconf
+libasound2-dev

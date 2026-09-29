@@ -3,7 +3,7 @@
 The console's interface: the start-up, Home with its menu arcs and the
 panel of the entry in focus, the Game Card states, playing and the session
 result, safe eject, settings (language, clock, resolution, safe area,
-automatic power off), information about the console and a confirmed clean power-off, in
+interface sounds, automatic power off), the menus' sounds, information about the console and a confirmed clean power-off, in
 English or Spanish. What the console cannot do yet is shown in its place as
 "Not available yet", never imitated. Launch contract:
 [docs/runtime.md](../../docs/runtime.md).
@@ -21,6 +21,7 @@ display, and a game drawing on `/dev/fb0` has it (see *Display path*).
 | `src/displaymode.*` | The display mode: the player's resolution if the display takes it, else the display's own; Qt's KMS configuration and the canvas's scale for it; the one-shot trial of a new mode |
 | `src/systeminfo.*` | Real system facts read from `/proc`, `/sys`, `/etc/os-release`, `/usr/lib/mun/release`, `statvfs` and `getifaddrs` (identity, hardware, display, time zone, network interfaces), raw so the interface words them in its language |
 | `src/shellsettings.*` | The player's settings, validated and kept in the service's state directory |
+| `src/systemsounds.*` | The menus' sounds (move, enter, back), mixed on a worker thread and played through ALSA |
 | `src/powercontrol.*` | The only privileged request: runs `mun-power` through `sudo -n`; reports failure to the UI |
 | `src/cardclient.*` | Mirror of the card service over its UNIX socket: snapshot, events, reconnection; exposes state, manifest, error and cover (data URL) to QML |
 | `src/launchclient.*` | Client of `mun-launchd`: `launch(slot, serial, version)`, `release(serial)`, `acknowledge()`, launcher state and the last session result (read from `/run/mun/launch/last-result.json` at start, then over the socket) |
@@ -33,6 +34,7 @@ display, and a game drawing on `/dev/fb0` has it (see *Display path*).
 | `qml/Theme.qml`, `qml/I18n.qml` | Design tokens and motion; the two languages |
 | `qml/ArcMenu.qml`, `ArcNode`, `DetailPanel`, `OptionRow`, `StatusBar`, `MoonPhase`, `ModalLayer`, `BootLayer`, `UiText`, `MarkText`, `Shadow`, `Logo.js` | Components: the arcs and their entries, the panel and its options, the status line, dialogs, the start-up and power-off screen, text and shadows |
 | `fonts/` | Archivo and Michroma, compiled in, with their licences |
+| `sounds/` | The menus' sounds, compiled in: `move.wav`, `enter.wav`, `back.wav` |
 | `deploy/mun-shell.service` | systemd unit on tty1 as user `mun-shell` with the display (DRM) and evdev environment and the state directory |
 | `deploy/mun-shell.sudoers` | Allows exactly `mun-power poweroff|reboot` for that user |
 | `deploy/mun-power` | Root-side helper with a fixed vocabulary in front of `systemctl` |
@@ -216,16 +218,38 @@ displays that crop their edges.
 | Clock format | 24-hour (default) or 12-hour; kept |
 | Resolution | Automatic (default), or 720p, 1080p or 1440p where the display takes them; kept once confirmed (*Resolution*) |
 | Safe area | 100 (default), 97, 94 or 91 %; kept |
+| System sounds | On (default) or Off: the menus' sounds (*Sounds*); kept |
 | Auto power off | Never, or after 1 (default), 3 or 6 hours without input on the menus; kept. A game in progress does not count: the shell is stopped while it runs |
 | Turn off console, About, Reset settings | Work; reset keeps the language |
 | Time zone, developer mode | Shown as they are (the system's zone, set by the image); changing them is not available yet |
 | Ethernet, Wi-Fi | Shown as the kernel sees them (not detected, not connected, connected; no adapter); joining networks is not available yet |
-| Account, HDR, refresh rate, audio, system and start-up sounds, status light, setting the time, updates | Not available yet |
+| Account, HDR, refresh rate, audio output and format, start-up sound, status light, setting the time, updates | Not available yet |
 
 The settings live in `/var/lib/mun-shell/settings.ini`
 (`StateDirectory=mun-shell`). The file is read as untrusted input: a value
 outside the allowed set reads as its default. Nothing else is stored in the
 console: games and saves live on their Game Cards.
+
+## Sounds
+
+Moving the focus or changing a choice plays `move`, going in or running an
+action `enter`, going back or closing a dialog `back`: only when a key or
+the pointer changed something, never for the console's own changes (a card
+arriving, a result shown). They are MUN's own, compiled in from `sounds/`:
+PCM, 16-bit, 48 kHz, stereo, only the format and the samples (no metadata
+chunks), under a second each (`tests/test_os.py` checks all of that).
+
+`src/systemsounds.*` plays them through ALSA's default device, the one the
+games use: the unit adds the `audio` group. A worker thread mixes up to
+four at once at 3/4 of their level, so quick moves overlap rather than cut
+each other, with about 40 ms buffered ahead. The device is opened on the
+first sound and let go after three seconds of silence, and the shell holds
+none of it while a game runs (the launcher stops the shell first). No
+device, or one that fails, means silence and one line in the journal;
+the next sound tries again after five seconds. Settings › Picture and sound
+› System sounds turns them off. In the laboratory the guest's sound device
+is silent unless it plays to the Mac (`--window`, or `--audio coreaudio`)
+or records to `audio.wav` (`--audio wav`).
 
 ## Languages
 

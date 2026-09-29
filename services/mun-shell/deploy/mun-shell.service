@@ -12,7 +12,8 @@ ConditionPathExists=/dev/dri/card0
 Type=simple
 User=mun-shell
 Group=mun-shell
-SupplementaryGroups=video input render
+# audio: the interface sounds, played through ALSA (src/systemsounds.h).
+SupplementaryGroups=video input render audio
 RuntimeDirectory=mun-shell
 # Kept across the launcher's stop/start around each game, cleared at boot: the
 # shell marks there that the start-up sequence has played (src/main.cpp).

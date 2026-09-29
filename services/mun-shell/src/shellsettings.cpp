@@ -14,9 +14,11 @@ const QString kLanguageKey = QStringLiteral("interface/language");
 const QString kClockKey = QStringLiteral("interface/clock");
 const QString kSafeAreaKey = QStringLiteral("display/safe-area");
 const QString kAutoOffKey = QStringLiteral("power/auto-off-hours");
+const QString kSoundsKey = QStringLiteral("audio/system-sounds");
 
 const QStringList kLanguages{QStringLiteral("en"), QStringLiteral("es")};
 const QStringList kClockFormats{QStringLiteral("24h"), QStringLiteral("12h")};
+const QStringList kOnOff{QStringLiteral("on"), QStringLiteral("off")};
 const QList<int> kSafeAreas{100, 97, 94, 91};
 const QList<int> kAutoOffHours{0, 1, 3, 6};
 
@@ -55,6 +57,7 @@ ShellSettings::ShellSettings(QObject *parent)
     m_language = readChoice(*m_file, kLanguageKey, kLanguages);
     m_clockFormat = readChoice(*m_file, kClockKey, kClockFormats);
     m_safeArea = readNumber(*m_file, kSafeAreaKey, kSafeAreas, 100);
+    m_systemSounds = readChoice(*m_file, kSoundsKey, kOnOff) == kOnOff.first();
     m_autoPowerOffHours = readNumber(*m_file, kAutoOffKey, kAutoOffHours, 1);
     if (m_file->status() == QSettings::FormatError)
         m_lastError = QStringLiteral("%1 is not a valid settings file; the defaults apply").arg(path());
@@ -89,6 +92,14 @@ void ShellSettings::setSafeArea(int percent)
         return;
     m_safeArea = percent;
     store(kSafeAreaKey, percent);
+}
+
+void ShellSettings::setSystemSounds(bool on)
+{
+    if (on == m_systemSounds)
+        return;
+    m_systemSounds = on;
+    store(kSoundsKey, on ? kOnOff.first() : kOnOff.last());
 }
 
 void ShellSettings::setAutoPowerOffHours(int hours)
@@ -160,10 +171,12 @@ void ShellSettings::resetKeepingLanguage()
     m_clockFormat = kClockFormats.first();
     m_safeArea = 100;
     m_autoPowerOffHours = 1;
+    m_systemSounds = true;
     m_resolutionOnTrial = false;
     m_file->remove(kClockKey);
     m_file->remove(kSafeAreaKey);
     m_file->remove(kAutoOffKey);
+    m_file->remove(kSoundsKey);
     m_file->remove(display::kResolutionKey);
     sync();
     emit changed();

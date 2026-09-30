@@ -298,6 +298,17 @@ class CommandLineTests(Fixture):
             self.assertEqual(vm.control_address(self.paths["qmp"]), self.paths["qmp"])
 
 
+class Started:
+    """What host.start_detached returns, as far as the start can tell: a
+    pid, and the exit status once the process has ended (None while it runs)."""
+
+    def __init__(self, status=None, pid=4242):
+        self.pid, self.status = pid, status
+
+    def poll(self):
+        return self.status
+
+
 class StartTests(Fixture):
     def setUp(self):
         self.paths = self.guest_paths(WINDOWS)
@@ -317,7 +328,7 @@ class StartTests(Fixture):
         started = []
         out = io.StringIO()
         with patch.object(vm, "HOST", WINDOWS), \
-                patch.object(vm.host, "start_detached", side_effect=lambda cmd, log: started.append(cmd) or 4242), \
+                patch.object(vm.host, "start_detached", side_effect=lambda cmd, log: started.append(cmd) or Started()), \
                 patch.object(vm, "pid_alive", return_value=True), patch.object(vm.time, "sleep"), \
                 patch.object(vm.time, "monotonic", side_effect=itertools.count(0, 5)), \
                 contextlib.redirect_stdout(out):
@@ -330,10 +341,30 @@ class StartTests(Fixture):
 
     def test_a_qemu_that_exits_at_once_is_reported_with_its_reason(self):
         self.paths["qemu_log"].write_text("qemu-system-aarch64.exe: -device virtio-sound-pci: not found\n")
-        with patch.object(vm, "HOST", WINDOWS), patch.object(vm.host, "start_detached", return_value=4242), \
-                patch.object(vm, "pid_alive", return_value=False), self.assertRaises(vm.LabError) as failed:
+        with patch.object(vm, "HOST", WINDOWS), patch.object(vm.host, "start_detached", return_value=Started(1)), \
+                self.assertRaises(vm.LabError) as failed:
             vm.cmd_start(argparse.Namespace(display="none", print_command=False, wait=0, audio="none"))
         self.assertIn("virtio-sound-pci: not found", str(failed.exception))
+        self.assertIn("status 1:", str(failed.exception))
+
+    def test_a_silent_crash_is_reported_by_its_windows_status(self):
+        # Windows ARM64 in CI: QEMU ended at once and wrote nothing; its
+        # NTSTATUS is the only clue (0xC0000135: a library is missing).
+        self.paths["qemu_log"].write_text("")
+        with patch.object(vm, "HOST", WINDOWS_ARM), \
+                patch.object(vm.host, "start_detached", return_value=Started(0xC0000135)), \
+                self.assertRaises(vm.LabError) as failed:
+            vm.cmd_start(argparse.Namespace(display="none", print_command=False, wait=0, audio="none"))
+        self.assertIn("status 3221225781 (0xC0000135): no output", str(failed.exception))
+
+    def test_card_images_are_locked_where_qemu_can_and_not_on_windows(self):
+        # QEMU's Windows file driver refuses locking=on (the first CI run on
+        # Windows); elsewhere the lock is the registry's second line.
+        for on, locked in ((MAC, True), (LINUX_ARM_NO_KVM, True), (WINDOWS, False), (WINDOWS_ARM, False)):
+            with patch.object(vm, "HOST", on):
+                backend = vm.card_backend(Path("/cards/demo.img"))
+            self.assertEqual(backend.get("locking"), "on" if locked else None, on.label)
+            self.assertEqual((backend["driver"], backend["filename"]), ("file", str(Path("/cards/demo.img"))))
 
     def test_a_qemu_without_the_sound_device_is_refused_unless_sound_is_off(self):
         with patch.object(vm, "HOST", LINUX_PC), patch.object(vm.host, "qemu_version", return_value=(7, 2, 0)), \

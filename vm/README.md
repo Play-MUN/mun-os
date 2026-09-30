@@ -144,7 +144,9 @@ Rules the tool enforces:
   each image, and which attachment of it. `card-attach` refuses an image a
   running guest holds elsewhere ("detach it there first") or that a
   `mun-card convert` has reserved; a stale entry of a QEMU that is gone is
-  dropped. QEMU's own image locking is the second line of defence.
+  dropped. QEMU's own image locking is the second line of defence on macOS
+  and Linux; QEMU for Windows has none, so there the registry is the only
+  one.
 - **Safe removal by default.** `card-detach` asks the guest to release the
   card (`launchd.py release`): refused with `in_use` while a session runs on
   it; otherwise the card service stops accepting writes, finishes the one in

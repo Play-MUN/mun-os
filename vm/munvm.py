@@ -693,21 +693,33 @@ def cmd_start(args: argparse.Namespace) -> None:
             finalize_capture()
 
 
+def card_backend(path: Path) -> Dict[str, Any]:
+    """The file node of a card's image. locking=on: QEMU also refuses an
+    image another process holds for writing. Its Windows file driver has no
+    locking; there the attach registry is the only guard."""
+    backend: Dict[str, Any] = {"driver": "file", "filename": str(path)}
+    if HOST.image_locking:
+        backend["locking"] = "on"
+    return backend
+
+
 def start_in_background(cmd: List[str]) -> None:
     """Where QEMU cannot daemonize (Windows): start it detached, then give it
     a moment to fail on its arguments, as -daemonize would have reported."""
-    pid = host.start_detached(cmd, PATHS["qemu_log"])
+    process = host.start_detached(cmd, PATHS["qemu_log"])
     deadline = time.monotonic() + 3
     while time.monotonic() < deadline:
-        if not pid_alive(pid):
+        status = process.poll()
+        if status is not None:
             try:
                 reason = PATHS["qemu_log"].read_text(errors="replace").strip().splitlines()[-1]
             except (OSError, IndexError):
                 reason = "no output"
-            raise LabError(f"QEMU exited at once: {reason} (see {PATHS['qemu_log']})")
+            raise LabError(f"QEMU exited at once with status {host.exit_status(status)}: {reason} "
+                           f"(see {PATHS['qemu_log']})")
         time.sleep(0.2)
     if read_pid() is None:
-        PATHS["pidfile"].write_text(f"{pid}\n")
+        PATHS["pidfile"].write_text(f"{process.pid}\n")
 
 
 def wait_for_guest(timeout: int) -> None:
@@ -1103,9 +1115,7 @@ def _attach_locked(name: str, path: Path) -> None:
     registry_claim(name, attachment)
     qmp = Qmp(PATHS["qmp"])
     try:
-        # locking=on: QEMU also refuses an image another process holds for writing.
-        qmp.execute("blockdev-add", driver="raw", **{"node-name": node},
-                    file={"driver": "file", "filename": str(path), "locking": "on"})
+        qmp.execute("blockdev-add", driver="raw", **{"node-name": node}, file=card_backend(path))
         try:
             qmp.execute("device_add", driver="virtio-blk-pci", drive=node, id=f"{node}-dev", bus=slot,
                         serial=serial)

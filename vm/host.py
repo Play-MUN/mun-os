@@ -68,6 +68,12 @@ class Host:
     def unix_sockets(self) -> bool:
         return self.system != "windows"
 
+    # QEMU locks image files on macOS and Linux; its Windows file driver has
+    # no locking and refuses locking=on.
+    @property
+    def image_locking(self) -> bool:
+        return self.system != "windows"
+
     # The QEMU window backends to try, in order.
     @property
     def window_displays(self) -> Tuple[str, ...]:
@@ -375,15 +381,22 @@ def _windows_process_alive(pid: int) -> bool:
         kernel32.CloseHandle(handle)
 
 
-def start_detached(command: List[str], log: Path) -> int:
+def start_detached(command: List[str], log: Path) -> "subprocess.Popen[bytes]":
     """Start QEMU in the background where it cannot daemonize itself
     (Windows): detached from this console, its output into `log`. Returns
-    its pid; QEMU writes its own pid file too."""
+    the process, whose exit status says why QEMU ended at once; QEMU writes
+    its own pid file too."""
     flags = 0x00000008 | 0x00000200                     # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
     with log.open("ab") as sink:
-        process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=sink, stderr=sink,
-                                   creationflags=flags, close_fds=True)
-    return process.pid
+        return subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=sink, stderr=sink,
+                                creationflags=flags, close_fds=True)
+
+
+def exit_status(code: int) -> str:
+    """An exit status as a person looks it up: Windows reports a crash or a
+    missing library as an NTSTATUS such as 0xC0000135, which reads as a
+    large number in decimal."""
+    return f"{code}" if 0 <= code <= 255 else f"{code} (0x{code & 0xFFFFFFFF:08X})"
 
 
 # ------------------------------------------------------------------ file locks

@@ -37,6 +37,7 @@ from typing import Any, Dict, List, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bundle  # noqa: E402
+import sources as package_sources  # noqa: E402
 import munvm as vm  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "os" / "builder"))
 import recipes as game_recipes  # noqa: E402
@@ -48,6 +49,7 @@ CACHE_ROOT = Path(os.environ.get("MUN_CACHE_DIR", str(MUN_ROOT / "cache")))
 BUILDERS_ROOT = MUN_ROOT / "builders"
 BUILDS_ROOT = MUN_ROOT / "builds"
 BUNDLES_ROOT = MUN_ROOT / "bundles"
+SOURCES_ROOT = MUN_ROOT / "sources"
 CARD_TOOL = REPO_ROOT / "tools" / "mun-card" / "mun-card"
 GUESTS_ROOT = vm.GUESTS_ROOT
 INPUTS_FILE = REPO_ROOT / "os" / "inputs.json"
@@ -569,7 +571,8 @@ def cmd_bundle(args: argparse.Namespace) -> None:
             if result.returncode:
                 raise vm.LabError(f"making the {name} card failed: {(result.stderr or result.stdout).strip()}")
             cards[name] = (image, title)
-        licences = (REPO_ROOT / "LICENSE", *sorted((REPO_ROOT / "services" / "mun-shell" / "fonts").glob("*-OFL.txt")))
+        licences = (REPO_ROOT / "LICENSE", REPO_ROOT / "NOTICE",
+                    *sorted((REPO_ROOT / "services" / "mun-shell" / "fonts").glob("*-OFL.txt")))
         try:
             manifest = bundle.make(build, destination, cards, licences)
         except bundle.BundleError as exc:
@@ -577,6 +580,22 @@ def cmd_bundle(args: argparse.Namespace) -> None:
     total = sum(entry["size"] for entry in manifest["files"])
     log(f"bundle of build {args.build} ({manifest['build_id']}): {destination} "
         f"({len(manifest['files'])} files, {total / 1e6:.0f} MB); serve the directory, then `./mun get <URL>`")
+
+
+def cmd_sources(args: argparse.Namespace) -> None:
+    """The corresponding source of a build's Debian packages (vm/sources.py)."""
+    build = BUILDS_ROOT / args.build
+    if build not in builds():
+        raise vm.LabError(f"no finished build {args.build} in {BUILDS_ROOT}")
+    info = json.loads((build / "BUILD-INFO.json").read_text())
+    out = Path(args.out) if args.out else SOURCES_ROOT / info["build_id"]
+    try:
+        manifest = package_sources.collect(info, out, fetch_files=not args.list, report=log)
+    except package_sources.SourcesError as exc:
+        raise vm.LabError(f"{exc}; run the same command again to resume") from exc
+    size = sum(int(f["size"]) for s in manifest["sources"] for f in s["files"])
+    log(f"{'listed' if args.list else 'sources in'} {out}: {len(manifest['sources'])} source packages, "
+        f"{size / 1e6:.0f} MB; publish the directory beside the release (docs/licensing.md)")
 
 
 def install(source: str, name: Optional[str] = None) -> Path:
@@ -831,6 +850,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--build", required=True)
     p.add_argument("--out", help="directory to create (default .local/mun/bundles/<build>)")
     p.set_defaults(func=cmd_bundle)
+    p = sub.add_parser("sources", help="fetch the source of a build's Debian packages, to publish beside its release")
+    p.add_argument("--build", required=True)
+    p.add_argument("--out", help="directory (default .local/mun/sources/<build id>)")
+    p.add_argument("--list", action="store_true", help="only resolve and list them (SOURCES.json), fetch nothing")
+    p.set_defaults(func=cmd_sources)
     return parser
 
 

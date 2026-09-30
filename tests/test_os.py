@@ -304,6 +304,9 @@ class InputTests(unittest.TestCase):
     def test_the_image_carries_the_licences(self):
         build = (MKOSI / "mkosi.build.chroot").read_text()
         self.assertIn('"$MUN/LICENSE" "$DESTDIR/usr/share/doc/mun-os/LICENSE"', build)
+        self.assertIn('"$MUN/NOTICE" "$DESTDIR/usr/share/doc/mun-os/NOTICE"', build)
+        notice = (ROOT / "NOTICE").read_text()
+        self.assertIn("Copyright 2026 Iván Moreno Mendoza", notice)
         stage = (ROOT / "services" / "mun-shell" / "deploy" / "stage.sh").read_text()
         self.assertIn('fonts/*-OFL.txt', stage, "the typefaces compiled into the shell go with their licence")
         for font in (ROOT / "services" / "mun-shell" / "fonts").glob("*.ttf"):

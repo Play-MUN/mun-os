@@ -9,7 +9,9 @@ They are not console components: the console runtime lives in the image.
   one and creates guests from builds ([image build](../os/README.md)).
 - `munvm.py` (`./mun vm`) operates a guest: start and stop, Game Cards, keys
   and pointer, screenshots, commands and logs.
-- `host.py` holds what differs between hosts; `bundle.py` the download format.
+- `host.py` holds what differs between hosts; `bundle.py` the download format;
+  `sources.py` (`./mun dev sources`) fetches the source of a build's Debian
+  packages for its release ([releasing](../docs/releasing.md)).
 
 ## Requirements
 

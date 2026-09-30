@@ -18,10 +18,11 @@ sh "$MUN/services/mun-cardd/deploy/stage.sh" "$MUN/services/mun-cardd" "$MUN/too
 sh "$MUN/services/mun-launchd/deploy/stage.sh" "$MUN/services/mun-launchd" "$DESTDIR"
 
 echo "== licences"
-# MUN OS's own licence; each component's third-party texts come with it
+# MUN OS's own licence and notice; each component's third-party texts come with it
 # (mun-shell: the typefaces) and each Debian package keeps its own in
 # /usr/share/doc/<package>/copyright.
 install -D -m 0644 "$MUN/LICENSE" "$DESTDIR/usr/share/doc/mun-os/LICENSE"
+install -D -m 0644 "$MUN/NOTICE" "$DESTDIR/usr/share/doc/mun-os/NOTICE"
 
 echo "== MUN Collect"
 rm -rf "$BUILDDIR/mun-collect"

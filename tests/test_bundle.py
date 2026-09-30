@@ -60,9 +60,11 @@ class Fixture(unittest.TestCase):
         licence = self.root / "made" / "LICENSE"
         licence.parent.mkdir(parents=True, exist_ok=True)
         licence.write_text("Apache License\n")
+        notice = self.root / "made" / "NOTICE"
+        notice.write_text("MUN OS\nCopyright 2026 Iván Moreno Mendoza\n")
         bundle.make(self.build(), destination, {"collect": (self.card("collect"), "MUN Collect"),
                                                 "demo": (self.card("demo", b"demo" * 100), "MUN Test Card")},
-                    (licence,))
+                    (licence, notice))
         return destination
 
     def get(self, location, name=None):
@@ -75,7 +77,7 @@ class MakeTests(Fixture):
         manifest = json.loads((destination / "release.json").read_text())
         self.assertEqual((manifest["format"], manifest["build_id"], manifest["release"]), ("mun-bundle/1", BUILD_ID, False))
         names = {entry["name"]: entry for entry in manifest["files"]}
-        self.assertEqual(set(names), {IMAGE, "BUILD-INFO.json", "card-collect.img.xz", "card-demo.img.xz", "LICENSE"})
+        self.assertEqual(set(names), {IMAGE, "BUILD-INFO.json", "card-collect.img.xz", "card-demo.img.xz", "LICENSE", "NOTICE"})
         for name, entry in names.items():
             self.assertEqual(hashlib.sha256((destination / name).read_bytes()).hexdigest(), entry["sha256"])
         self.assertEqual(lzma.decompress((destination / "card-demo.img.xz").read_bytes()), b"demo" * 100)
@@ -96,6 +98,7 @@ class GetTests(Fixture):
         self.assertEqual(build.name, "d0929-123647", "named after its build id")
         self.assertEqual(sorted(p.name for p in build.iterdir()), sorted([IMAGE, "BUILD-INFO.json", "ORIGIN.json", "licences"]))
         self.assertEqual((build / "licences" / "LICENSE").read_text(), "Apache License\n", "the licence goes with the image")
+        self.assertIn("Iván Moreno Mendoza", (build / "licences" / "NOTICE").read_text(), "and the notice")
         self.assertEqual(json.loads((build / "ORIGIN.json").read_text())["source"], str(source))
         self.assertEqual(sorted(card.name for card in cards), ["collect.img", "demo.img"])
         self.assertEqual((self.root / "cards" / "demo.img").read_bytes(), b"demo" * 100)

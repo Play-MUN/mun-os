@@ -84,7 +84,9 @@ ways, chosen in the manifest:
   while the game runs and when it ends
   ([directory saves](../saves.md#directory-saves)).
 
-Nothing else the game writes survives the session: its home is in RAM.
+Nothing else the game writes is kept for it: its home, `/tmp` and `/var/tmp`
+go with the session ([what the game gets](../runtime.md#what-the-game-gets)),
+and a game must not rely on anything it leaves elsewhere.
 
 ## Try it, then check the whole path
 

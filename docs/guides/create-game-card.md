@@ -24,14 +24,19 @@ progress to. The rules are in [Game Cards](../game-cards.md) and
 
 The console runs AArch64 Linux programs. MUN Collect is one: C, no libraries,
 statically linked, drawing on the framebuffer. Take it from the card you
-downloaded, read-only (`debugfs` comes with e2fsprogs; on macOS it is in
-`$(brew --prefix e2fsprogs)/sbin/`):
+downloaded, read-only, into `.local/`, which Git ignores. `debugfs` comes with
+e2fsprogs but is usually not on the `PATH`: Homebrew keeps it in its own
+directory, and Linux distributions in `/sbin`.
 
 ```sh
-debugfs -R "dump /content/mun-collect mun-collect" .local/gamecards/collect.img
-chmod +x mun-collect
-file mun-collect    # ELF 64-bit LSB executable, ARM aarch64, … statically linked
+debugfs="$(brew --prefix e2fsprogs)/sbin/debugfs"    # on Linux: debugfs=/sbin/debugfs
+mkdir -p .local/mycollect
+"$debugfs" -R "dump /content/mun-collect .local/mycollect/mun-collect" .local/gamecards/collect.img
+chmod +x .local/mycollect/mun-collect
+file .local/mycollect/mun-collect    # ELF 64-bit LSB executable, ARM aarch64, … statically linked
 ```
+
+`./mun card tools` shows which e2fsprogs the card tool itself uses.
 
 Or compile it: an image build leaves it in
 `.local/mun/builds/<build>/games/mun-collect/mun-collect`, and any Debian 13
@@ -57,7 +62,7 @@ optional; without a cover the tool draws one.
 ## 3. Make the card
 
 ```sh
-./mun card create mycollect --variant game --game mun-collect \
+./mun card create mycollect --variant game --game .local/mycollect/mun-collect \
     --title "My Collect" --id org.example.mycollect --version 1.0.0 \
     --accent "#2E7EC5" --background "#BFD9F2"
 ```

@@ -23,8 +23,9 @@ standing in for cards) are validated and shown; a game on a card starts
 sandboxed and hands the console back however it ends; saves are written to
 the card and restored on another console or another build; a card is
 ejected safely; the resolution (720p, 1080p, 1440p) applies at once, and
-games built on SDL or OpenGL start in it; the menus have sound; English and Spanish. The examples
-are MUN Collect, a small game, and a graphics and audio probe.
+games built on SDL or OpenGL start in it; the menus have sound; English and
+Spanish. The examples are MUN Collect, a small game, and a graphics and
+audio probe.
 
 Not there yet: controllers, card and system updates, and any physical
 hardware. [Architecture](docs/architecture.md) says what exists and what is
@@ -44,9 +45,10 @@ planned.
 
 ## Where it runs
 
-On an ARM64 computer QEMU runs the console with the processor's own
-virtualization; elsewhere it emulates the processor: the same console,
-slower.
+QEMU runs the console with the processor's own virtualization on an ARM64
+computer whose system offers it to QEMU (macOS on Apple Silicon, Linux with
+KVM); otherwise, on x86_64 and on ARM64 alike, it emulates the processor:
+the same console, slower.
 
 | Your computer | The console's processor | Checked |
 | --- | --- | --- |
@@ -112,7 +114,8 @@ Iván Moreno Mendoza, licensed under the [Apache License 2.0](LICENSE)
 ([NOTICE](NOTICE)); contributions stay their authors' and are licensed under
 the same terms. Third-party components (typefaces, Debian packages) keep
 their own terms, and the Apache License grants no rights to the MUN name or
-logo: [licensing](docs/licensing.md).
+logo, which have [their own terms](NAME-AND-LOGO.txt):
+[licensing](docs/licensing.md).
 
 The project had another name before. Game Cards made then carry
 `neptune.toml`, save as `neptune-save/1` and hand their games `NEPTUNE_*`

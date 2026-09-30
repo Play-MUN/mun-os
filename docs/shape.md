@@ -7,11 +7,12 @@ and the menu sounds. The card describes it with data; MUN™ draws every
 package with the same code, and nothing on the card runs.
 
 **Status.** This document is the package contract, format `mun-shape/1`, and
-its checker, `mun-card shape`. **The console does not render Shape yet**: no
-image reads a package, and a card that carries one behaves exactly as the
-same card without it. What the console is to do with a package is described
-under [How the console is to use a package](#how-the-console-is-to-use-a-package);
-the resource figures there are objectives to be measured, not guarantees.
+its checker, `mun-card shape`. The card service copies a valid card's
+package, checked, to RAM for the shell; **the shell does not render Shape
+yet**, so a card that carries a package looks and plays exactly as the same
+card without it. What each part does, and what is still to come, is under
+[How the console uses a package](#how-the-console-uses-a-package); the
+resource figures there are objectives to be measured, not guarantees.
 
 ## Where the package lives
 
@@ -304,27 +305,47 @@ The algorithm, exact so that the console and the checker agree:
   only what the manifest names inside the content, so to them a card with
   `mun-shape/` is the same card, played with its lent colours.
 
-## How the console is to use a package
+## How the console uses a package
 
-This is the intended behaviour, for the implementation to follow and be
-measured against; none of it exists yet.
+**The card service** (implemented; wire and hooks in its
+[README](../services/mun-cardd/README.md#mun-shape-export)):
 
-- **The card service** checks the package with the same module as
-  `mun-card` (`mun_card/shape.py`), only after the card is valid and never
-  before its state is published. One worker per insertion copies the named
-  files, bounded and in chunks, to a directory in RAM under `/run/mun/shape/`,
-  checks the copy, adds the normalised `shape.json`, makes it read-only and
-  publishes it with one rename; a copy that is stale or incomplete is
-  deleted, never published. The service never decodes an image or a sound.
-- ***Eject safely* stays exact.** A release first cancels the copy, which
-  checks for cancellation between chunks. The service waits for the copy's
-  files to close for a bounded time, without blocking its own event loop,
-  and keeps the release pending meanwhile: it does not report the card as
-  ejected until every reader is closed and the card is strictly unmounted. If
-  a failing card blocks a read, the answer is the existing "still in use",
-  and the player is told not to remove the card; a new insertion does not
-  start another copy while one is stuck. A physical removal does not
-  necessarily end a blocked read at once.
+- It starts only after the card is valid, and only after that state has
+  been published: nothing about Shape delays `valid`, *Play* or *Eject
+  safely*. One worker per insertion does all the reading; the service's
+  event loop never reads the card for it.
+- The worker reads the package through the same checker as `mun-card`
+  (`mun_card/shape.py`), which checks every file's entry, size and the
+  budget before reading it; each file it reads is read once from the card,
+  in chunks of 256 KiB, into `/run/mun/shape/.<insertion>.part/`, and the
+  checker validates exactly those bytes. Links are never followed and a FIFO
+  under a package name is never waited on. Cancellation and the card's
+  identity are checked between chunks. The service never decodes an image
+  or a sound.
+- The export holds only the files the checker accepted and the normalised
+  `shape.json`, bound to the insertion and content version; files are 0440
+  and folders 0550 (group: the shell's), published with one rename as
+  `/run/mun/shape/<insertion>/`. Complete and immutable, or nothing: a copy
+  that fails, is cancelled or arrives for an insertion that is no longer
+  current is deleted, never published or kept.
+- The card record gains `shape` (`preparing`, then `ready`, `partial`,
+  `unused` or `none`, with its notes and, when there is an export, its
+  path); a change of it travels as its own `shape` message.
+- An export is deleted on safe release, removal and replacement, and every
+  export, `.part` copies included, when the service starts and stops.
+- One copy reads a card at a time: a card that becomes valid while an
+  earlier copy has not closed its files (a read stuck on a card already
+  removed) waits in `preparing`, valid and playable, until that copy ends.
+- ***Eject safely* stays exact.** A release cancels the copy and waits for
+  it to close its files, asynchronously and for at most 3 s. Past that (a
+  read blocked on a failing card cannot be interrupted) the answer is
+  `card_busy`, "La tarjeta sigue en uso; no la retires", and the release
+  stays pending: no new saves, games or copies, and the card is unmounted
+  strictly and published as released only once the copy has closed its
+  files. A physical removal does not necessarily end a blocked read at once.
+
+**Still to come** (the shell, its settings and the renderer):
+
 - **The shell** reads only the service's copy, decodes it off the interface
   thread with the dimensions checked first, paints the world into its own
   frames off the interface thread and hands finished frames to the interface

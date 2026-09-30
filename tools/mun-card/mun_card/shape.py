@@ -828,11 +828,11 @@ def _limit(role: str) -> int:
     return SOUND_MAX_BYTES if _ROLE_KIND[role] == "wav" else IMAGE_MAX_BYTES
 
 
-def _inspect_file(package: _Scoped, reference: _Reference, cache: Dict[str, Any]) -> Dict[str, Any]:
-    """Stat, read (bounded) and check one named file. Raises _Invalid."""
-    kind = _ROLE_KIND[reference.role]
-    key = (reference.path, kind)
-    if key not in cache:
+def _stat_file(package: _Scoped, reference: _Reference, stats: Dict[str, Any]) -> int:
+    """The size of one named file, from its entry alone: it must be a
+    regular file, not behind a link, within its kind's limit. Nothing is
+    read. Raises _Invalid."""
+    if reference.path not in stats:
         try:
             info = package.stat(reference.path)
             if info is None:
@@ -841,14 +841,32 @@ def _inspect_file(package: _Scoped, reference: _Reference, cache: Dict[str, Any]
                 raise _Invalid("shape_path_symlink", reference.path, reference.where)
             if info.kind != "file":
                 raise _Invalid("shape_path_type", reference.path, reference.where)
-            limit = _limit(reference.role)
-            if info.size > limit:
-                raise _Invalid("shape_file_too_large", f"{reference.path}: {info.size} bytes > {limit}", reference.where)
-            data = package.read(reference.path, limit)
-            if len(data) != info.size:
+            stats[reference.path] = info.size
+        except _Invalid as exc:
+            stats[reference.path] = exc
+        except CardError as exc:
+            stats[reference.path] = _Invalid("shape_path_type", f"{reference.path}: {exc.message}", reference.where)
+    found = stats[reference.path]
+    if isinstance(found, _Invalid):
+        raise _Invalid(found.code, found.detail, reference.where)
+    limit = _limit(reference.role)
+    if found > limit:
+        raise _Invalid("shape_file_too_large", f"{reference.path}: {found} bytes > {limit}", reference.where)
+    return found
+
+
+def _read_file(package: _Scoped, reference: _Reference, size: int, cache: Dict[str, Any]) -> Dict[str, Any]:
+    """Read one named file (bounded by its limit) and check its header and
+    its role's dimensions, duration and peak. Raises _Invalid."""
+    kind = _ROLE_KIND[reference.role]
+    key = (reference.path, kind)
+    if key not in cache:
+        try:
+            data = package.read(reference.path, _limit(reference.role))
+            if len(data) != size:
                 raise _Invalid("shape_path_type", f"{reference.path}: cambió al leerlo", reference.where)
             details = png_header(data) if kind == "png" else wav_header(data)
-            cache[key] = {"type": kind, "bytes": info.size, **details}
+            cache[key] = {"type": kind, "bytes": size, **details}
         except _Invalid as exc:
             cache[key] = exc
         except CardError as exc:
@@ -915,21 +933,31 @@ def check_package(source, base: str = "") -> ShapeResult:
         except _Invalid as exc:
             notes.append(Note(exc.code, "dropped", exc.detail, block=name, where=exc.where))
 
+    # Each block's files are first checked from their entries (type, size
+    # and the package budget), and only then read: a block that is dropped
+    # for its sizes costs no read, which matters when the source is a card.
     files: Dict[str, Dict[str, Any]] = {}
+    stats: Dict[str, Any] = {}
     cache: Dict[str, Any] = {}
     total = 0
     for name in FILE_BLOCKS:
         if name not in blocks:
             continue
         try:
-            found = {ref.path: _inspect_file(package, ref, cache) for ref in references[name]}
+            sizes = {ref.path: _stat_file(package, ref, stats) for ref in references[name]}
         except _Invalid as exc:
             notes.append(Note(exc.code, "dropped", exc.detail, block=name, where=exc.where))
             del blocks[name]
             continue
-        added = sum(details["bytes"] for path, details in found.items() if path not in files)
+        added = sum(size for path, size in sizes.items() if path not in files)
         if total + added > PACKAGE_MAX_BYTES:
             notes.append(Note("shape_budget", "dropped", f"{total + added} bytes > {PACKAGE_MAX_BYTES}", block=name))
+            del blocks[name]
+            continue
+        try:
+            found = {ref.path: _read_file(package, ref, sizes[ref.path], cache) for ref in references[name]}
+        except _Invalid as exc:
+            notes.append(Note(exc.code, "dropped", exc.detail, block=name, where=exc.where))
             del blocks[name]
             continue
         total += added

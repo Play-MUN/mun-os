@@ -24,6 +24,8 @@ stages a game's entry and writes saves. Card format:
   `another_card_active`; when the active card is removed the waiting one is
   evaluated automatically. Nothing is launched, ever.
 - Removal: unmount (lazy if busy), `removed` event, promotion of a waiting card.
+- For a valid card, its MUN Shape package is copied to RAM for the shell
+  ([MUN Shape export](#mun-shape-export)).
 
 ## Contract (protocol 1)
 
@@ -36,7 +38,7 @@ line, server to client only.
 {"type":"removed","slot":"c1","insertion":"3f9a…","device":"vdc","serial":"NPT-card01"}
 ```
 
-`<card>` = `{slot, insertion, device, serial, state, active, info, error}`
+`<card>` = `{slot, insertion, device, serial, state, active, info, error, shape}`
 with `state` ∈ `reading | valid | invalid | waiting`, `info` the validated
 manifest (`id, title, version, kind, arch, profile, root, entry, cover, saves,
 runnable, schema`) plus `cover_data` (base64 PNG, at most 1 MiB, only
@@ -45,6 +47,10 @@ stay inside the service's private mount namespace (systemd sandbox); no path
 crosses the socket and the shell needs no access to `/run/mun/cards`. A client
 that connects receives the snapshot first; a client that loses the socket
 shows "reader unavailable" and reconnects.
+
+`shape` is null, or the card's MUN Shape record (below); a change of it
+alone is published as `{"type":"shape","slot","insertion","shape"}`, so it
+never resends the cover. Consumers that do not know Shape ignore both.
 
 `insertion` is a random token minted for that one insertion. Slots restart at
 `c1` with the service and the serial is the card's own claim, so a consumer
@@ -60,6 +66,45 @@ picture. Writes are queued per client: a peer that has not drained its socket
 yet keeps its bytes queued until the socket is writable again, and only a
 peer that leaves more than 8 MiB unread is dropped. A partial write therefore
 never disconnects a slow shell or launcher.
+
+## MUN Shape export
+
+The package contract is [docs/shape.md](../../docs/shape.md); this is what
+the service does with it.
+
+- When a card becomes `valid` (after that state is published), a worker
+  thread checks its `<content.root>/mun-shape/` with `mun_card.shape`,
+  copying each file the checker reads once from the card, in 256 KiB
+  chunks, into `/run/mun/shape/.<insertion>.part/` (0700), and validating
+  those bytes. It keeps only the accepted files, writes the normalised
+  `shape.json` (with `insertion` and `version`), seals files 0440 and
+  folders 0550 with the group `mun-shell`, and renames the folder to
+  `/run/mun/shape/<insertion>/`. Card files are opened one component at a
+  time with `O_NOFOLLOW` and non-blocking; the event loop never reads the
+  card for this.
+- Record: `shape = {state, insertion, version, notes, path?, files?, bytes?}`
+  with `state` ∈ `preparing | ready | partial | unused | none`, `notes`
+  the checker's (`code, level, block, where, detail`, at most 32, with
+  `notes_omitted`), `path`, `files` and `bytes` when an export exists.
+  A failure of the export itself is `unused` with `shape_export_failed`.
+- Cancellation (release, removal, replacement, service stop) is checked
+  before every entry and between chunks, together with the card's
+  generation. A result for an insertion that is no longer current, or that
+  was cancelled, is deleted, never published. One copy runs at a time; a card
+  that becomes valid meanwhile waits in `preparing`.
+- `release` cancels the copy and, if it is still reading, waits for it
+  without blocking the loop, for `MUN_CARDD_SHAPE_RELEASE_WAIT` seconds (3).
+  Past that it answers `released {ok: false, error: card_busy}` and the
+  release stays pending (no saves, stages or copies); when the copy closes
+  its files, the card is unmounted strictly and published as `released`, or,
+  if the unmount fails, is usable again as after any failed release. A card
+  pulled while its release waits for the copy is answered `card_removed`.
+- The export is deleted on release, removal and replacement; everything under
+  `/run/mun/shape/` is deleted at start and at stop.
+- Hooks: `MUN_CARDD_SHAPE_ROOT` (default `/run/mun/shape`), and
+  `MUN_CARDD_SHAPE_DELAY` (seconds, unset in the unit), a pause before each
+  chunk that ends at once on cancellation, for removal and release
+  experiments.
 
 ## Content grant for mount-access cards
 

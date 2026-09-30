@@ -184,11 +184,13 @@ picture of the same layout, and in the laboratory a larger window. Other
 aspect ratios centre the canvas; adaptive layout is a later concern.
 
 Settings › Picture and sound › Resolution offers *Automatic*, the
-display's own mode (the default; the laboratory's is 1920×1080,
-`MUN_VM_DISPLAY_WIDTH`/`_HEIGHT` in `vm/munvm.py`), and 720p, 1080p and
-1440p where the display takes them: listed by the connector (from the
-display's EDID on real hardware), or on a virtual connector, which takes
-any mode and gets it as a CVT reduced-blanking modeline. Qt opens the
+display's own mode (the default; the laboratory's is 1920×1080), and 720p,
+1080p and 1440p where the display takes them: listed by the connector (from the
+display's EDID on real hardware, and in the laboratory from the EDID the
+development image gives its virtual display, `os/builder/lab_edid.py`), or
+on a virtual connector without them, which takes any mode and gets it as a
+CVT reduced-blanking modeline (but a game looking for the current mode in
+the connector's list would not find it there). Qt opens the
 display once, so the mode is chosen before `QGuiApplication` exists
 (`src/displaymode.cpp`): the shell writes Qt's KMS configuration for it to
 `/run/mun-shell/kms.json` and points `QT_QPA_KMS_CONFIG` there. A change
@@ -203,12 +205,14 @@ the previous choice in place. A stored mode the display no longer offers
 reads as Automatic until it does again. Reset settings returns to
 Automatic.
 
-The choice is the shell's alone: a game sets its own mode once the shell has
-released the display. One display is handled, the first connected connector
-of `/dev/dri/card0`. An explicit `QT_SCALE_FACTOR` in the environment wins
-over the scale, and a KMS configuration given in the environment
-(`QT_QPA_KMS_CONFIG`, `QT_QPA_EGLFS_KMS_CONFIG`) over the choice, which is
-then not offered. *Safe area* scales the interface to 97, 94 or 91 % for
+The choice is the console's: a game on the GL profile starts in it, the
+launcher keeping the display in that mode between the shell and the game
+([docs/runtime.md](../../docs/runtime.md#display)); a framebuffer game gets
+the size the kernel set at boot. One display is handled, the first connected
+connector of `/dev/dri/card0`. An explicit `QT_SCALE_FACTOR` in the
+environment wins over the scale, and a KMS configuration given in the
+environment (`QT_QPA_KMS_CONFIG`, `QT_QPA_EGLFS_KMS_CONFIG`) over the choice,
+which is then not offered. *Safe area* scales the interface to 97, 94 or 91 % for
 displays that crop their edges.
 
 ## Settings

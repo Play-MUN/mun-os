@@ -197,6 +197,43 @@ class ShellTests(unittest.TestCase):
         unit = (self.SHELL / "deploy" / "mun-shell.service").read_text()
         self.assertRegex(unit, r"(?m)^SupplementaryGroups=.*\baudio\b", "the shell may open the sound device")
 
+    def test_the_lab_display_describes_the_shells_three_modes(self):
+        # The virtual display's EDID (os/builder/lab_edid.py): what the
+        # initrd carries is the generator's output, a valid EDID 1.3 block
+        # whose detailed timings are exactly the shell's modes, 1080p first
+        # (preferred), each at 60 Hz.
+        spec = importlib.util.spec_from_file_location("lab_edid", ROOT / "os" / "builder" / "lab_edid.py")
+        lab_edid = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(lab_edid)
+        shipped = ROOT / "os/mkosi/mkosi.images/initrd/mkosi.profiles/qemu-dev/extra/usr/lib/firmware/edid/mun-lab.bin"
+        block = shipped.read_bytes()
+        self.assertEqual(block, lab_edid.edid(), "regenerate it with os/builder/lab_edid.py")
+        self.assertEqual((len(block), block[:8], sum(block) % 256), (128, bytes.fromhex("00ffffffffffff00"), 0))
+        self.assertTrue(block[24] & 0x02, "the first detailed timing is the preferred mode")
+        modes = []
+        for at in (54, 72, 90):
+            d = block[at:at + 18]
+            clock = int.from_bytes(d[0:2], "little") * 10_000
+            ha, hb = d[2] | (d[4] >> 4) << 8, d[3] | (d[4] & 0x0F) << 8
+            va, vb = d[5] | (d[7] >> 4) << 8, d[6] | (d[7] & 0x0F) << 8
+            self.assertAlmostEqual(clock / ((ha + hb) * (va + vb)), 60, delta=0.1)
+            modes.append(f"{ha}x{va}")
+        self.assertEqual(modes, ["1920x1080", "2560x1440", "1280x720"])
+        source = (self.SHELL / "src" / "displaymode.cpp").read_text()
+        offered = re.findall(r'QStringLiteral\("(\d+x\d+)"\)', source.split("kModes{", 1)[1].split("};", 1)[0])
+        self.assertEqual(sorted(modes), sorted(offered), "the lab display takes every mode the shell offers")
+        profile = (ROOT / "os/mkosi/mkosi.profiles/qemu-dev/mkosi.conf").read_text()
+        self.assertIn("drm.edid_firmware=Virtual-1:edid/mun-lab.bin", profile)
+
+    def test_the_launcher_may_open_the_display_card_and_nothing_else(self):
+        # DisplayHold (launchd.py) keeps the console's mode for a game: one
+        # device, and no capability to master a display someone else holds.
+        unit = (ROOT / "services/mun-launchd/deploy/mun-launchd.service").read_text()
+        self.assertRegex(unit, r"(?m)^DevicePolicy=closed$")
+        self.assertEqual(re.findall(r"(?m)^DeviceAllow=(.+)$", unit), ["/dev/dri/card0 rw"])
+        capabilities = re.search(r"(?m)^CapabilityBoundingSet=(.+)$", unit).group(1).split()
+        self.assertNotIn("CAP_SYS_ADMIN", capabilities)
+
     def test_every_compiled_in_font_carries_its_licence(self):
         cmake = (self.SHELL / "CMakeLists.txt").read_text()
         fonts = sorted((self.SHELL / "fonts").glob("*.ttf"))

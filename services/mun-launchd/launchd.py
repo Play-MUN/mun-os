@@ -14,6 +14,7 @@ host tests can drive it; `main()` wires systemd, sockets and files.
 """
 
 import argparse
+import array
 import base64
 import calendar
 import ctypes
@@ -135,6 +136,8 @@ class SessionManager:
         self.gate_close: Optional[Callable[[], None]] = None
         self.runner = runner
         self.shell = shell
+        # Set by main(): keeps the console's display mode for a GL game.
+        self.display: Optional["DisplayHold"] = None
         self.publish = publish
         self.schedule = schedule
         self.clock = clock
@@ -449,7 +452,12 @@ class SessionManager:
         try:
             if self.gate_open:
                 self.gate_open(sid)          # before the game exists: it may save at any time
+            # The console's mode, read while the shell still shows it, and put
+            # back for a game that asks the display for its mode (DisplayHold).
+            shown = self.display.current() if self.display and self.session.get("profile") == GL_PROFILE else None
             self.shell.stop()
+            if shown:
+                self.session["display"] = self.display.hold(shown)
             self.runner.start_unit(sid, self.session)
             self.session["unit_started"] = True    # a cleanup unit will follow its end
         except Exception as exc:  # noqa: BLE001 - must become a visible result
@@ -568,6 +576,8 @@ class SessionManager:
         self.session = None
         self.deadline = None
         self.reader_lost_at = None
+        if self.display:
+            self.display.release()
         self._set_state("idle")
         self.shell.start()
 
@@ -1496,6 +1506,8 @@ def unit_environment(profile: Optional[str], sid: str, session: dict, dest: Path
         "SESSION": sid,
         "RUNTIME_PROFILE": profile,
     })
+    if session.get("display"):
+        facts["DISPLAY_MODE"] = str(session["display"])     # the display's mode as the game starts
     if not session.get("saves"):
         # Saves (docs/saves.md): the current save as a file, and the socket to ask for a
         # write. A game with directory saves (docs/saves.md) is saved by the console instead.
@@ -1658,6 +1670,146 @@ class Runner:
         out = subprocess.run(["systemctl", "list-units", "--plain", "--no-legend", "--all", f"{UNIT_PREFIX}*"],
                              capture_output=True, text=True, check=False).stdout
         return [line.split()[0] for line in out.splitlines() if line.strip()]
+
+
+# DRM ioctls (include/uapi/drm/drm.h, drm_mode.h) and their structs.
+def _drm_iowr(nr: int, size: int) -> int:
+    return (3 << 30) | (size << 16) | (ord("d") << 8) | nr
+
+
+DRM_SET_MASTER, DRM_DROP_MASTER = 0x641E, 0x641F
+DRM_MODEINFO = "68s"                                   # struct drm_mode_modeinfo, kept as the kernel gave it
+DRM_RES, DRM_CONNECTOR, DRM_ENCODER = "<QQQQIIIIIIII", "<QQQQIIIIIIIIIIII", "<IIIII"
+DRM_CRTC, DRM_DUMB, DRM_FB = "<QIIIIIII" + DRM_MODEINFO, "<IIIIIIQ", "<IIIIIII"
+DRM_GETRESOURCES, DRM_GETCRTC, DRM_SETCRTC = _drm_iowr(0xA0, 64), _drm_iowr(0xA1, 104), _drm_iowr(0xA2, 104)
+DRM_GETENCODER, DRM_GETCONNECTOR = _drm_iowr(0xA6, 20), _drm_iowr(0xA7, 80)
+DRM_ADDFB, DRM_RMFB = _drm_iowr(0xAE, 28), _drm_iowr(0xAF, 4)
+DRM_CREATE_DUMB, DRM_DESTROY_DUMB = _drm_iowr(0xB2, 32), _drm_iowr(0xB4, 4)
+DRM_CONNECTED = 1
+
+
+class DisplayHold:
+    """The console's display mode, kept from the shell to a game.
+
+    The player's resolution is the console's, not only the shell's
+    (docs/runtime.md, "Display"). When the shell stops, the kernel's console
+    takes the display back in its own mode, fixed at boot, and a game that
+    asks for the current mode (SDL's desktop mode is the CRTC's, looked up in
+    the connector's list) would find that one. So the launcher reads the
+    exact mode the display shows while the shell still shows it, and, once
+    the shell has stopped, puts that same mode back with a black buffer.
+
+    No privilege is needed for that: the first process to open a card that
+    nobody is master of becomes its master. The launcher opens the card a
+    second time right after the shell has stopped, sets the mode as master
+    and gives mastership up, so that the game, opening the card next,
+    becomes master in turn and finds the mode current. The first descriptor,
+    kept open, only reads.
+
+    A framebuffer game (`linux-arm64-v0`) draws on the kernel console's own
+    buffer, whose size is set at boot: it is left to it. Nothing here may
+    keep a game from starting; a failure is a line in the journal and the
+    display as the kernel leaves it."""
+
+    DEVICE = "/dev/dri/card0"
+
+    def __init__(self, device: str = DEVICE, ioctl: Callable = fcntl.ioctl, opener: Callable = os.open,
+                 closer: Callable = os.close):
+        self.device, self.ioctl, self.opener, self.closer = device, ioctl, opener, closer
+        self.reader: Optional[int] = None     # opened when first needed (the launcher starts before the display)
+        self.holder: Optional[int] = None     # master for a moment, owns the black buffer until release()
+        self.fb: Optional[int] = None
+        self.handle: Optional[int] = None
+
+    def _open(self) -> Optional[int]:
+        try:
+            return self.opener(self.device, os.O_RDWR | os.O_CLOEXEC)
+        except OSError as exc:
+            log(f"display: {self.device} unavailable ({exc}); the game finds the display as the kernel leaves it")
+            return None
+
+    def _call(self, fd: int, request: int, fmt: str, values: list) -> list:
+        buffer = bytearray(struct.pack(fmt, *values))
+        self.ioctl(fd, request, buffer, True)
+        return list(struct.unpack(fmt, bytes(buffer)))
+
+    def current(self) -> Optional[tuple]:
+        """(connector, CRTC, mode) of what the display shows now, or None."""
+        if self.reader is None:
+            self.reader = self._open()
+            if self.reader is None:
+                return None
+            try:
+                self.ioctl(self.reader, DRM_DROP_MASTER)    # if nobody was master, this open made it one
+            except OSError:
+                pass
+        fd = self.reader
+        try:
+            counts = self._call(fd, DRM_GETRESOURCES, DRM_RES, [0] * 12)
+            connectors = array.array("I", [0] * counts[6])
+            self._call(fd, DRM_GETRESOURCES, DRM_RES, [0, 0, connectors.buffer_info()[0], 0, 0, 0, counts[6], 0,
+                                                        0, 0, 0, 0])
+            for connector in connectors:
+                info = self._call(fd, DRM_GETCONNECTOR, DRM_CONNECTOR, [0] * 8 + [connector] + [0] * 7)
+                if info[11] != DRM_CONNECTED or not info[7]:
+                    continue
+                crtc = self._call(fd, DRM_GETENCODER, DRM_ENCODER, [info[7], 0, 0, 0, 0])[2]
+                state = self._call(fd, DRM_GETCRTC, DRM_CRTC, [0, 0, crtc, 0, 0, 0, 0, 0, bytes(68)])
+                if crtc and state[7]:
+                    return connector, crtc, state[8]
+        except OSError as exc:
+            log(f"display: cannot read the display's mode: {exc}")
+        return None
+
+    @staticmethod
+    def size(mode: bytes) -> str:
+        width, height = struct.unpack_from("<H", mode, 4)[0], struct.unpack_from("<H", mode, 14)[0]
+        return f"{width}x{height}"
+
+    def hold(self, shown: tuple) -> Optional[str]:
+        """Put `shown` (from current()) back on the display, with nobody its
+        master; its size, or None."""
+        connector, crtc, mode = shown
+        width, height = (int(n) for n in self.size(mode).split("x"))
+        self.release()
+        self.holder = self._open()          # nobody is master now: this open makes the launcher master
+        if self.holder is None:
+            return None
+        try:
+            dumb = self._call(self.holder, DRM_CREATE_DUMB, DRM_DUMB, [height, width, 32, 0, 0, 0, 0])   # zeroed: black
+            self.handle = dumb[4]
+            self.fb = self._call(self.holder, DRM_ADDFB, DRM_FB, [0, width, height, dumb[5], 32, 24, dumb[4]])[0]
+            targets = array.array("I", [connector])
+            try:
+                self._call(self.holder, DRM_SETCRTC, DRM_CRTC, [targets.buffer_info()[0], 1, crtc, self.fb, 0, 0, 0, 1, mode])
+            finally:
+                try:
+                    self.ioctl(self.holder, DRM_DROP_MASTER)
+                except OSError:
+                    pass
+        except OSError as exc:
+            log(f"display: cannot keep {self.size(mode)} for the game: {exc}")
+            self.release()
+            return None
+        return self.size(mode)
+
+    def release(self) -> None:
+        """Free the black buffer and its descriptor, once a session is over
+        (the game or the shell shows its own by then)."""
+        if self.holder is None:
+            return
+        for request, value in ((DRM_RMFB, self.fb), (DRM_DESTROY_DUMB, self.handle)):
+            if value is not None:
+                try:
+                    self._call(self.holder, request, "<I", [value])
+                except OSError as exc:
+                    log(f"display: cannot free the black buffer: {exc}")
+        self.fb = self.handle = None
+        try:
+            self.closer(self.holder)
+        except OSError:
+            pass
+        self.holder = None
 
 
 class ShellControl:
@@ -1998,6 +2150,7 @@ def main(argv=None) -> int:
     runner = Runner(LAUNCH_ROOT)
     manager = SessionManager(cards, stage_via_cardd, runner, ShellControl(), lambda m: server.broadcast(m),
                              schedule, results=ResultStore(RESULT_FILE), saver=stage_via_cardd)
+    manager.display = DisplayHold()
     server = Server(Path(args.socket), manager)
     listener = server.start()
     log(f"mun-launchd ready: socket {args.socket}, launch root {LAUNCH_ROOT}, game user {GAME_USER}")

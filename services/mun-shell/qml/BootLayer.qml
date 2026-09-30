@@ -8,13 +8,15 @@ import "PlayMun.js" as PlayMun
 //
 // The house: an ivory dawn, and on it PLAY, then MUN, then the copper stroke
 // under them, each arriving with one of the sound's three notes (2.30, 3.24
-// and 3.86 s into it), then a sheen across the letters. The console: the
-// night, the MUN letters written and filled, the moon's arc drawing itself
-// from its tip with the sound's last breath (6.74 s), stars drifting. The
-// console stays while its services come up: Home follows once the sound has
-// played out (9.3 s) and both the card service and the launcher have
-// answered, or kReady after the start whatever they do. Any key skips to
-// the console. powerOff() brings the black back while the system shuts down.
+// and 3.86 s into it), then a sheen across the letters, which stay a while.
+// The console: the night, the MUN letters written and filled, the moon's arc
+// drawing itself from its tip and its light rising, each on one of the
+// sound's later cues (6.15, 6.70 and 7.25 s), stars drifting. The console's
+// logo stays a while too, and while its services come up: Home follows once
+// the sound has played out (10.3 s) and both the card service and the
+// launcher have answered, or kReady after the start whatever they do. Any
+// key skips to the console. powerOff() brings the black back while the
+// system shuts down.
 //
 // Everything is drawn from one clock, t, in seconds of the sound. It starts
 // when the sound's first samples reach the device, less what the device
@@ -34,8 +36,8 @@ Rectangle {
     property bool late: false
     signal finished()
 
-    readonly property real handOver: 9.3
-    readonly property real skipTo: 8.5
+    readonly property real handOver: 10.3
+    readonly property real skipTo: 9.0
     readonly property int kReady: 20000
     readonly property bool servicesReady: CardClient.readerAvailable && LaunchClient.available
 
@@ -129,7 +131,7 @@ Rectangle {
     Item {
         id: house
         anchors.fill: parent
-        opacity: root.ease(root.span(0.5, 2.2)) * (1 - root.ease(root.span(5.0, 5.9)))
+        opacity: root.ease(root.span(0.5, 2.2)) * (1 - root.ease(root.span(5.5, 6.4)))
 
         Canvas {
             id: dawn
@@ -253,7 +255,7 @@ Rectangle {
     Item {
         id: night
         anchors.fill: parent
-        opacity: root.ease(root.span(5.4, 6.0))
+        opacity: root.ease(root.span(5.9, 6.5))
 
         Canvas {
             anchors.fill: parent
@@ -277,7 +279,7 @@ Rectangle {
         Item {
             id: stars
             anchors.fill: parent
-            opacity: root.span(5.6, 7.0)
+            opacity: root.span(6.1, 7.5)
             property real drift: 0
             NumberAnimation on drift {
                 from: 0
@@ -324,7 +326,7 @@ Rectangle {
                 y: (607.0 - 215) * console_.k - r
                 width: 2 * r
                 height: 2 * r
-                opacity: root.ease(root.span(6.74, 7.5)) * (0.9 + 0.1 * Math.sin(stars.drift * 2))
+                opacity: root.ease(root.span(7.25, 8.0)) * (0.9 + 0.1 * Math.sin(stars.drift * 2))
                 onPaint: {
                     const ctx = getContext("2d")
                     ctx.reset()
@@ -341,8 +343,8 @@ Rectangle {
             Canvas {
                 id: writing
                 anchors.fill: parent
-                readonly property real written: root.ease(root.span(5.57, 6.87))
-                opacity: 1 - 0.75 * root.span(7.0, 7.8)
+                readonly property real written: root.ease(root.span(6.15, 7.45))
+                opacity: 1 - 0.75 * root.span(7.5, 8.3)
                 onWrittenChanged: requestPaint()
                 // Logo.letters flattened once: each outline a list of points
                 // with the length along it.
@@ -413,7 +415,7 @@ Rectangle {
             }
             Canvas {
                 anchors.fill: parent
-                opacity: root.ease(root.span(6.5, 7.3))
+                opacity: root.ease(root.span(7.0, 7.8))
                 onPaint: {
                     const ctx = getContext("2d")
                     ctx.reset()
@@ -430,7 +432,7 @@ Rectangle {
                 anchors.fill: parent
                 // How much of the arc shows, as the design's dash: 0 to 800 px
                 // along the mask's stroke, whose arc is 771 px long.
-                readonly property real reveal: 800 * root.ease(root.span(6.15, 7.2))
+                readonly property real reveal: 800 * root.ease(root.span(6.70, 7.75))
                 onRevealChanged: requestPaint()
                 onPaint: {
                     const ctx = getContext("2d")

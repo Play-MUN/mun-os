@@ -83,8 +83,10 @@ Motion: the start-up plays once per boot, over the start-up sound, in two
 acts. The house: an ivory dawn, and on it PLAY, then MUN, then the copper
 stroke under them, each with one of the sound's three notes (2.30, 3.24 and
 3.86 s into it), and a sheen across the letters. The console: the night,
-the MUN letters written and filled, the arc drawing itself from its tip with
-the sound's last breath (6.74 s), moon dust rising. From 9.3 s, once the
+the MUN letters written and filled, the arc drawing itself from its tip and
+its light rising, each on one of the sound's later cues (6.15, 6.70 and
+7.25 s), moon dust rising. Each logo stays a while before the next. From
+10.3 s, once the
 card service and the launcher have answered (20 s after the start at the
 latest), the screen fades into Home; any key skips to the console's logo.
 The picture keeps time with the sound: its clock starts when the sound's

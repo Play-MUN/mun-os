@@ -60,5 +60,5 @@ VM from pinned inputs, and needs Git, Make, OpenSSH, QEMU, e2fsprogs, about
 
 ## Hardware
 
-None. MUN -1 will have one officially supported hardware configuration, not
+None. MUN™ -1 will have one officially supported hardware configuration, not
 selected yet; nothing here is a hardware qualification.

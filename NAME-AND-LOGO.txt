@@ -1,11 +1,12 @@
 The MUN and Play MUN names and logos
 
 The MUN name, the Play MUN name, the MUN logo and the Play MUN logo belong
-to Iván Moreno Mendoza, who develops MUN as Play MUN. The Apache License
-2.0 that covers MUN OS's own work grants no rights to them (its section 6),
-and the logos' drawings (the paths in services/mun-shell/qml/Logo.js and
-services/mun-shell/qml/PlayMun.js of MUN OS's source, which MUN Shell
-draws) are not licensed under it. These are their terms:
+to Iván Moreno Mendoza, who develops MUN as Play MUN; MUN™ is his
+trademark. The Apache License 2.0 that covers MUN OS's own work grants no
+rights to them (its section 6), and the logos' drawings (the paths in
+services/mun-shell/qml/Logo.js and services/mun-shell/qml/PlayMun.js of MUN
+OS's source, which MUN Shell draws) are not licensed under it. These are
+their terms:
 
 - An official MUN OS image or release may be redistributed unchanged, under
   its own name.

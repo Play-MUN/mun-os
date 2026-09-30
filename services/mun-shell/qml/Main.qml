@@ -553,7 +553,8 @@ Window {
                 anchors.bottomMargin: 66
                 size: 15
                 tracking: 0.24
-                readonly property string home: I18n.t("HOME", "INICIO")
+                // The console's name, as its mark, where the trail starts.
+                readonly property string home: "MUN™"
                 readonly property string separator: "  ›  "
                 text: window.level === 0 ? home
                     : window.inSettings ? home + separator + I18n.t("SETTINGS", "CONFIGURACIÓN")

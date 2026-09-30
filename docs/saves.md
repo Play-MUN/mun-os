@@ -5,7 +5,7 @@ another console with nothing but the card. The console writes them; a game
 never writes to the card itself. A game on a `mount`-access card reads its
 content through a read-only mount ([runtime.md](runtime.md#content-during-play));
 saves never go through it. This document is the save
-contract as MUN OS implements it. The card format is in
+contract as MUN™ OS implements it. The card format is in
 [game-cards.md](game-cards.md), the game's side of a session in
 [runtime.md](runtime.md).
 

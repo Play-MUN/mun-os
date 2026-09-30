@@ -69,7 +69,7 @@ optional; without a cover the tool draws one.
 
 `--variant game` is a game for the framebuffer profile, as MUN Collect is;
 `game-gl` is for games built on SDL2, OpenGL and OpenAL, with `--content` for
-their data ([bring a game to MUN](port-a-game.md)). The card is written to
+their data ([bring a game to MUN™](port-a-game.md)). The card is written to
 `.local/gamecards/mycollect.img` (64 MiB; `--size` changes it), with a few
 small sample files of the tool's beside the game in `content/`. An identifier
 or version the console would refuse is refused here, and an existing card is

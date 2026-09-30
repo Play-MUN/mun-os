@@ -1,6 +1,6 @@
 # MUN OS
 
-**BOP — Buy. Own. Play.** MUN is a game console in development, for games
+**BOP — Buy. Own. Play.** MUN™ is a game console in development, for games
 you own on Game Cards: insert a card, play offline, and your progress
 travels with the card. MUN OS is its open-source operating system.
 
@@ -123,7 +123,7 @@ Iván Moreno Mendoza, licensed under the [Apache License 2.0](LICENSE)
 the same terms. Third-party components (typefaces, Debian packages) keep
 their own terms, and the Apache License grants no rights to the MUN and
 Play MUN names and logos, which have [their own terms](NAME-AND-LOGO.txt):
-[licensing](docs/licensing.md).
+[licensing](docs/licensing.md). MUN™ is a trademark of Iván Moreno Mendoza.
 
 The project had another name before. Game Cards made then carry
 `neptune.toml`, save as `neptune-save/1` and hand their games `NEPTUNE_*`

@@ -1,6 +1,6 @@
 # Console services
 
-The console processes of MUN OS, each a systemd service in the image:
+The console processes of MUN™ OS, each a systemd service in the image:
 
 - [`mun-shell`](mun-shell/README.md): the Qt/QML interface with a C++ host.
 - [`mun-cardd`](mun-cardd/README.md): card detection, validation, mounts,

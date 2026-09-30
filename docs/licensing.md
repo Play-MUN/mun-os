@@ -2,7 +2,7 @@
 
 ## MUN OS's own work
 
-MUN OS's own work is Copyright 2026 Iván Moreno Mendoza, who develops MUN as
+MUN™ OS's own work is Copyright 2026 Iván Moreno Mendoza, who develops MUN as
 Play MUN, and is licensed under the [Apache License 2.0](../LICENSE): the
 services, the card tools, the image build configuration, the laboratory, the
 example games, the interface sounds (the start-up sound among them), the
@@ -60,10 +60,10 @@ guidance on distributing derived images:
 ## The MUN and Play MUN names and logos
 
 The Apache License grants no rights to the MUN and Play MUN names or to the
-MUN and Play MUN logos (section 6); they are Iván Moreno Mendoza's. The
-logos' drawings, the paths in `services/mun-shell/qml/Logo.js` and
-`services/mun-shell/qml/PlayMun.js`, are not covered by the licence. Their
-terms are in [NAME-AND-LOGO.txt](../NAME-AND-LOGO.txt), which goes with
+MUN and Play MUN logos (section 6); they are Iván Moreno Mendoza's, and MUN™
+is his trademark. The logos' drawings, the paths in
+`services/mun-shell/qml/Logo.js` and `services/mun-shell/qml/PlayMun.js`,
+are not covered by the licence. Their terms are in [NAME-AND-LOGO.txt](../NAME-AND-LOGO.txt), which goes with
 every image and every download: official images may be redistributed
 unchanged, the logos go with MUN OS and its modified versions where their
 interface shows them, and a fork distributed to others takes its own name

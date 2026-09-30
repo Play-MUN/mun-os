@@ -74,9 +74,9 @@ scene; the chosen one turns moon-white with a copper edge. A on Turn off
 asks to confirm and turns the console off. On the right a panel leans
 back from its right edge: what the entry is, and its options. At the top
 right, the slot, the network, tonight's moon and the time; at the bottom,
-the path (HOME › SETTINGS › SYSTEM) and the keys (A Select, B Back). The
-card's crescent on the Game Card object (the logo's moon) fills while a
-card is in the slot. The ambient light at the orb follows the local hour:
+the path, starting at the console's mark (MUN™ › SETTINGS › SYSTEM), and
+the keys (A Select, B Back). The card's crescent on the Game Card object
+(the logo's moon) fills while a card is in the slot. The ambient light at the orb follows the local hour:
 cold at night, pale at dawn, grey-white by day, copper at dusk.
 
 Motion: the start-up plays once per boot, over the start-up sound, in two

@@ -1,6 +1,6 @@
 # MUN OS image composition
 
-This directory builds MUN OS images. Only the development image exists:
+This directory builds MUN™ OS images. Only the development image exists:
 `qemu-dev`, a Debian 13 (trixie) ARM64 disk for the QEMU laboratory,
 identified as `environment = "qemu-arm64"`, `release = false`. QEMU is a
 development environment, not a MUN hardware target. There is no release

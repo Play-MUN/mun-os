@@ -1,6 +1,6 @@
 # Running a game
 
-What MUN OS does when the player chooses Play, and what a game on a Game
+What MUN™ OS does when the player chooses Play, and what a game on a Game
 Card may expect and must do. The card format is in
 [game-cards.md](game-cards.md), saves in [saves.md](saves.md). The launcher's
 internals (states, recovery, adoption after a restart) are in

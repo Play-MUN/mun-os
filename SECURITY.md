@@ -1,6 +1,6 @@
 # Security
 
-MUN OS is experimental: a development image for QEMU, not a supported
+MUN™ OS is experimental: a development image for QEMU, not a supported
 release, with no hardware. It still has security boundaries meant to hold,
 and reports about them are welcome.
 

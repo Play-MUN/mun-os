@@ -1,6 +1,6 @@
 # Releasing
 
-How a preview release of MUN OS is made. Every release ties together one
+How a preview release of MUN™ OS is made. Every release ties together one
 commit of `main`, the tools of that commit, one image built from it, its
 Game Cards, its licences and the source of everything in the image. A
 release is never changed after it is published: a mistake is fixed in the

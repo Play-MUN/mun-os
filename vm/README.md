@@ -1,6 +1,6 @@
 # Virtual console laboratory
 
-Host-side tools that build MUN OS development images and run them as QEMU
+Host-side tools that build MUN™ OS development images and run them as QEMU
 guests on macOS, Linux and Windows ([where it runs](../README.md#where-it-runs)).
 They are not console components: the console runtime lives in the image.
 

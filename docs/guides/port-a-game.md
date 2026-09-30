@@ -1,6 +1,6 @@
 # Bring a game to MUN
 
-What it takes for a game to run on MUN, beyond putting it on a card
+What it takes for a game to run on MUN™, beyond putting it on a card
 ([create a Game Card](create-game-card.md) covers that part). This is for
 someone who has, or may compile, the game's source: MUN runs programs built
 for it, and nothing else.

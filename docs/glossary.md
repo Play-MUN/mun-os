@@ -1,6 +1,6 @@
 # Glossary
 
-Terms used across the MUN documentation and code.
+Terms used across the MUN™ documentation and code.
 
 | Term | Meaning |
 | --- | --- |

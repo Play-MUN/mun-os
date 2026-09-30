@@ -1,6 +1,6 @@
 # Architecture
 
-MUN OS as it is built today: the image, the console services, the host
+MUN™ OS as it is built today: the image, the console services, the host
 tools and the boundaries between them. Contracts for card authors and games
 are in [game-cards.md](game-cards.md), [saves.md](saves.md) and
 [runtime.md](runtime.md).

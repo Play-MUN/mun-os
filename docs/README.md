@@ -2,7 +2,7 @@
 
 ## Start here
 
-- [README](../README.md): what MUN OS is, what works today.
+- [README](../README.md): what MUN™ OS is, what works today.
 - [Getting started](getting-started.md): download the tools and an image,
   start the console, play, save and continue.
 - [Compatibility](compatibility.md): where playing, making cards and

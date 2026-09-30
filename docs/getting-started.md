@@ -1,6 +1,6 @@
 # Getting started
 
-Run MUN OS on your computer as a virtual console, play the Game Card that
+Run MUN™ OS on your computer as a virtual console, play the Game Card that
 comes with it, save, and continue later. No compiler is needed: you download
 the tools and a ready-made image. Where each step has been checked is in
 [compatibility](compatibility.md).

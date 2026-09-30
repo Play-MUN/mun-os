@@ -419,13 +419,16 @@ def _windows_process_alive(pid: int) -> bool:
 
 def start_detached(command: List[str], log: Path) -> "subprocess.Popen[bytes]":
     """Start QEMU in the background where it cannot daemonize itself
-    (Windows): detached from this console, its output into `log`. Returns
-    the process, whose exit status says why QEMU ended at once; QEMU writes
-    its own pid file too."""
-    flags = 0x00000008 | 0x00000200                     # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+    (Windows; CoreAudio on macOS): detached from this console (on POSIX a
+    session of its own), its output into `log`. Returns the process, whose
+    exit status says why QEMU ended at once; QEMU writes its own pid file too."""
     with log.open("ab") as sink:
+        if os.name == "nt":
+            flags = 0x00000008 | 0x00000200             # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+            return subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=sink, stderr=sink,
+                                    creationflags=flags, close_fds=True)
         return subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=sink, stderr=sink,
-                                creationflags=flags, close_fds=True)
+                                start_new_session=True, close_fds=True)
 
 
 def exit_status(code: int) -> str:

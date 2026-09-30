@@ -684,7 +684,10 @@ def cmd_start(args: argparse.Namespace) -> None:
         print(f"{HOST.label}: the guest's ARM64 processor is emulated (TCG); it runs, more slowly than with "
               "hardware acceleration")
     if args.display == "none":
-        if HOST.daemonizes:
+        # -daemonize forks QEMU after its audio backend is set up; CoreAudio
+        # (Objective-C) refuses to run in the forked child and QEMU dies. With
+        # it, QEMU starts detached instead, as on Windows.
+        if HOST.daemonizes and audio != "coreaudio":
             cmd.append("-daemonize")
             run(cmd)
         else:
@@ -713,8 +716,9 @@ def card_backend(path: Path) -> Dict[str, Any]:
 
 
 def start_in_background(cmd: List[str]) -> None:
-    """Where QEMU cannot daemonize (Windows): start it detached, then give it
-    a moment to fail on its arguments, as -daemonize would have reported."""
+    """Where QEMU cannot daemonize (Windows, or CoreAudio on macOS): start it
+    detached, then give it a moment to fail on its arguments, as -daemonize
+    would have reported."""
     process = host.start_detached(cmd, PATHS["qemu_log"])
     deadline = time.monotonic() + 3
     while time.monotonic() < deadline:

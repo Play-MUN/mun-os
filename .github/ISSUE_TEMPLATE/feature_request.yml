@@ -1,0 +1,23 @@
+name: An idea or a proposal
+description: Something MUN OS should do, or do differently.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you want to do and cannot, or what gets in the way.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you propose
+      description: Larger changes are discussed here before anyone implements them (CONTRIBUTING.md).
+    validations:
+      required: true
+  - type: textarea
+    id: cards
+    attributes:
+      label: Game Cards, saves and games
+      description: Would existing cards, saves or games notice? How would they keep working?

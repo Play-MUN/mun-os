@@ -7,8 +7,11 @@ development environment, not a MUN hardware target. There is no release
 image until the official hardware configuration is selected (`./mun build`
 says so and stops); see the [architecture](../docs/architecture.md).
 
-From a checkout on the Mac, `./mun dev build` runs everything described here
-in a new builder (see the [root README](../README.md) for the full route).
+`./mun dev build` runs everything described here in a new builder
+([getting started](../docs/getting-started.md#build-the-image-yourself) for the
+route; [compatibility](../docs/compatibility.md#building-an-image) for where
+it builds). A published preview comes with the source of its Debian packages
+([releasing](../docs/releasing.md)).
 
 ## Layout
 

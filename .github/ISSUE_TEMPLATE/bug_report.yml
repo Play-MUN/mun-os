@@ -1,0 +1,57 @@
+name: Something does not work
+description: A bug in MUN OS, its tools or its documentation.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to make it happen
+      description: The commands you ran and the keys you pressed, in order.
+      placeholder: |
+        ./mun get https://github.com/Play-MUN/mun-os/releases/download/v0.1.0-dev.2/release.json
+        ./mun play --card collect
+        Enter, Enter, …
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: MUN OS version
+      description: The preview release or commit, and the image's build id (`build_id` in its BUILD-INFO.json; `./mun dev list` shows it).
+      placeholder: v0.1.0-dev.2, build 20260930T073212Z-649c25f1ff32
+    validations:
+      required: true
+  - type: input
+    id: computer
+    attributes:
+      label: Your computer
+      description: System and version, processor, QEMU version (`qemu-system-aarch64 --version`), Python version.
+      placeholder: macOS 27, Apple M4, QEMU 11.1.1, Python 3.9
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where
+      options:
+        - Downloading or starting the console (./mun get, ./mun play)
+        - MUN Shell (the console's interface)
+        - Game Cards, saves or playing a game
+        - Making Game Cards (./mun card)
+        - Building an image (./mun dev build)
+        - Documentation
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: What the tools printed, and if the console was involved `./mun dev vm GUEST shell-log`, `launchd-log` or `cardd-log`.
+      render: text

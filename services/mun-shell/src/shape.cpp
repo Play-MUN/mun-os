@@ -2,6 +2,7 @@
 
 #include "contrast.h"
 #include "readpalette.h"
+#include "shapefront.h"
 
 #include <QBuffer>
 #include <QDir>
@@ -79,7 +80,6 @@ QColor colourOf(const QVariant &value)
 QImage decode(QIODevice *device, const QString &what)
 {
     QImageReader reader(device, "png");
-    QImageReader::setAllocationLimit(kAllocationLimitMiB);
     const QSize size = reader.size();
     if (!size.isValid() || size.width() < 1 || size.height() < 1 || size.width() > kWindowMaxSide
         || size.height() > kWindowMaxSide) {
@@ -96,6 +96,37 @@ QImage decode(QIODevice *device, const QString &what)
 
 // The palette's lent or read accent becomes the focus on MUN's plate only if
 // that set holds at some opacity of MUN's plain plate.
+// A colour's hue at another's luminance (sRGB, WCAG's luminance): the
+// game's hand-over veil at the luminance of MUN's own, so MUN's hand-over
+// text keeps exactly the contrast it has there.
+QColor atLuminanceOf(const QColor &hue, const QColor &reference)
+{
+    const auto linear = [](int c) {
+        const double v = c / 255.0;
+        return v <= 0.04045 ? v / 12.92 : std::pow((v + 0.055) / 1.055, 2.4);
+    };
+    const auto encoded = [](double v) {
+        v = std::clamp(v, 0.0, 1.0);
+        return int(std::lround(255 * (v <= 0.0031308 ? v * 12.92 : 1.055 * std::pow(v, 1 / 2.4) - 0.055)));
+    };
+    const double target = 0.2126 * linear(reference.red()) + 0.7152 * linear(reference.green()) + 0.0722 * linear(reference.blue());
+    const double r = linear(hue.red()), g = linear(hue.green()), b = linear(hue.blue());
+    const double own = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    if (own <= 0)
+        return reference;
+    const double k = target / own;
+    return QColor(encoded(r * k), encoded(g * k), encoded(b * k));
+}
+
+const QColor kHandOver(0x05, 0x05, 0x06);   // Theme.layer
+
+QColor mixColour(const QColor &a, const QColor &b, qreal t)
+{
+    t = std::clamp<qreal>(t, 0, 1);
+    return QColor(int(std::lround(a.red() + (b.red() - a.red()) * t)), int(std::lround(a.green() + (b.green() - a.green()) * t)),
+                  int(std::lround(a.blue() + (b.blue() - a.blue()) * t)));
+}
+
 bool holdsOnMunPlate(const QColor &accent)
 {
     return accent.isValid()
@@ -194,6 +225,12 @@ Shape::Shape(QObject *parent) : QObject(parent)
                  qPrintable(m_skip));
     }
     m_cueSpent = readMarker(runtimeFile("shape-cue"));
+    // Every decode of the shell's (the card window, the cover, the world) has
+    // this limit; set once, before any loader runs.
+    QImageReader::setAllocationLimit(kAllocationLimitMiB);
+    m_neutralOpacity = contrast::minimumOpacity(contrast::fromColor(kNeutralPlate), contrast::fromColor(kNeutralText),
+                                                contrast::fromColor(kNeutralFocus), QStringLiteral("plain"))
+                           .value_or(1.0);
     m_loader = new ShapeLoader;
     m_loader->moveToThread(&m_thread);
     connect(&m_thread, &QThread::finished, m_loader, &QObject::deleteLater);
@@ -259,10 +296,25 @@ void Shape::resolve()
     const QString insertion = m_card.value("insertion").toString();
     const bool valid = m_card.value("state").toString() == QLatin1String("valid") && m_card.value("active").toBool();
     ++m_token;   // any load in flight is now stale
-    if (m_mode == QLatin1String("off") || !valid || insertion.isEmpty() || insertion == m_skip) {
-        if (m_source != QLatin1String("none"))
-            qInfo("mun-shell: shape: back to MUN (%s)", !valid ? "no valid active card" : qPrintable(QStringLiteral("mode ") + m_mode));
-        clear(true);
+    m_held = {};
+    const bool goes = m_mode == QLatin1String("off") || !valid || insertion.isEmpty() || insertion == m_skip;
+    // An identity on screen is not replaced at once: it leaves first, with
+    // the transition its reason calls for, and what comes next waits.
+    const bool shown = m_phase == QLatin1String("entering") || m_phase == QLatin1String("present")
+                       || m_phase == QLatin1String("leaving");
+    if (shown) {
+        const QString why = m_card.value("state").toString() == QLatin1String("released") ? QStringLiteral("release")
+                            : !valid || insertion.isEmpty()                              ? QStringLiteral("removal")
+                            : insertion != m_insertion                                   ? QStringLiteral("change")
+                                                                                         : QStringLiteral("mode");
+        leave(why);
+    }
+    if (goes) {
+        if (!shown) {
+            if (m_source != QLatin1String("none"))
+                qInfo("mun-shell: shape: back to MUN (%s)", !valid ? "no valid active card" : qPrintable(QStringLiteral("mode ") + m_mode));
+            clear(true);
+        }
         return;
     }
     const QVariantMap info = m_card.value("info").toMap();
@@ -304,14 +356,35 @@ void Shape::clear(bool notify)
     m_morph = 0;
     m_sounds.clear();
     m_live = false;
-    if (notify)
+    m_world.clear();
+    m_root.clear();
+    m_plated = false;
+    m_veil = QColor();
+    m_transitionIn = m_transitionOut = QStringLiteral("fade");
+    m_seconds = 1.6;
+    m_entriesPlan = m_panelPlan = m_bandsPlan = m_barPlan = Plan();
+    const bool phaseWas = m_phase != QLatin1String("none") || m_progress != 0;
+    m_phase = QStringLiteral("none");
+    m_entry = QStringLiteral("return");
+    m_exit.clear();
+    m_progress = 0;
+    if (notify) {
         emit changed();
+        if (phaseWas) {
+            emit progressChanged();
+            emit phaseChanged();
+        }
+    }
 }
 
 void Shape::apply(quint64 token, const QVariantMap &result, const QImage &window)
 {
     if (token != m_token)
         return;   // a newer card or choice came since
+    if (m_phase == QLatin1String("leaving")) {
+        m_held = {token, result, window, true};   // shown once the identity on screen has left
+        return;
+    }
     const QString insertion = m_card.value("insertion").toString();
     const QVariantMap info = m_card.value("info").toMap();
     const QVariantMap document = result.value("package").toMap();
@@ -369,7 +442,31 @@ void Shape::apply(quint64 token, const QVariantMap &result, const QImage &window
         m_bandsOpacity = opacityOf("bands");
         m_entriesMaterial = materialOf("entries");
         m_panelMaterial = materialOf("panel");
+    } else {
+        // MUN's own set, drawn on plates only where a world is behind it.
+        m_entriesOpacity = m_panelOpacity = m_bandsOpacity = m_neutralOpacity;
     }
+    // Each surface's plan, as the checker proved it (MUN's set to MUN's: none needed).
+    const auto planOf = [&](const char *surface) {
+        const QVariantMap entry = surfaces.value(surface).toMap();
+        Plan plan;
+        const QString name = entry.value("plan").toString();
+        if (m_dressed && (name == QLatin1String("neutral-text") || name == QLatin1String("shape-text")
+                          || name == QLatin1String("bridge") || name == QLatin1String("cut")))
+            plan.plan = name;
+        else if (!m_dressed)
+            plan.plan = QStringLiteral("neutral-text");
+        plan.bridge = colourOf(entry.value("bridge"));
+        if (plan.plan == QLatin1String("bridge") && !plan.bridge.isValid())
+            plan.plan = QStringLiteral("cut");
+        return plan;
+    };
+    m_entriesPlan = planOf("entries");
+    m_panelPlan = planOf("panel");
+    m_bandsPlan = planOf("bands");
+    m_barPlan = planOf("bar");
+    if (m_barPlan.plan == QLatin1String("bridge"))
+        m_barPlan.plan = QStringLiteral("cut");
 
     // The card object, in the full mode: the game's whole (its image, outline
     // and light) only with its image; MUN's whole otherwise, so a card block
@@ -426,6 +523,27 @@ void Shape::apply(quint64 token, const QVariantMap &result, const QImage &window
         }
     }
 
+    // The world and the transition (full mode: colours only draws no world).
+    const QVariantMap world = document.value("world").toMap();
+    if (full && !world.isEmpty() && world.contains("backdrop")) {
+        m_world = world;
+        m_world.insert("bytes", m_card.value("shape").toMap().value("bytes"));
+        m_root = m_card.value("shape").toMap().value("path").toString();
+    }
+    const QVariantMap transition = document.value("transition").toMap();
+    const auto kindOf = [](const QVariant &value) {
+        const QString kind = value.toString();
+        return kind == QLatin1String("tide") || kind == QLatin1String("sweep") ? kind : QStringLiteral("fade");
+    };
+    m_transitionIn = kindOf(transition.value("in"));
+    m_transitionOut = kindOf(transition.value("out"));
+    bool ok = false;
+    const double seconds = transition.value("seconds").toDouble(&ok);
+    m_seconds = ok && seconds >= 0.8 && seconds <= 4 ? seconds : 1.6;
+    m_plated = m_dressed || !m_world.isEmpty();
+    if (!palette.isEmpty())
+        m_veil = atLuminanceOf(colourOf(palette.value("deep")), kHandOver);
+
     const bool package = !document.isEmpty();
     m_source = package ? QStringLiteral("shape") : level;
     // The insertion's first identity from a package: greeted only if the
@@ -433,6 +551,12 @@ void Shape::apply(quint64 token, const QVariantMap &result, const QImage &window
     // found at start, as after a game, it is not. However long its copy took.
     const bool first = package && m_adoptedFor != insertion;
     m_live = first && m_arrival == insertion && m_cueSpent != insertion;
+    // A package's identity is shown by a transition (QML); the lent and read
+    // levels, which only tint MUN, apply at once.
+    if (package) {
+        m_phase = QStringLiteral("ready");
+        m_entry = first && m_arrival == insertion ? QStringLiteral("arrival") : QStringLiteral("return");
+    }
     // One line per identity applied: what the laboratory checks it by.
     QStringList said{m_source, m_dressed ? QStringLiteral("dressed: entries %1 %2, panel %3 %4, bands glass %5")
                                                .arg(m_entriesMaterial).arg(m_entriesOpacity, 0, 'f', 3)
@@ -452,11 +576,16 @@ void Shape::apply(quint64 token, const QVariantMap &result, const QImage &window
             tones << QStringLiteral("%1 %2").arg(QLatin1String(tone), read.value(tone).toString());
         said << QStringLiteral("read %1").arg(tones.join(QLatin1Char(' ')));
     }
+    if (!m_world.isEmpty())
+        said << QStringLiteral("world");
+    if (package)
+        said << QStringLiteral("%1 %2/%3 %4 s").arg(m_entry, m_transitionIn, m_transitionOut).arg(m_seconds, 0, 'f', 1);
     if (first)
         said << QString::fromLatin1(m_live ? "cue due" : "no cue");
     qInfo("mun-shell: shape for insertion %s (%s): %s", qPrintable(insertion), qPrintable(m_mode),
           qPrintable(said.join(QStringLiteral("; "))));
     emit changed();
+    emit phaseChanged();
     if (first) {
         // Live or not, the first adoption spends the insertion's cue.
         m_adoptedFor = insertion;
@@ -464,4 +593,162 @@ void Shape::apply(quint64 token, const QVariantMap &result, const QImage &window
         writeMarker(runtimeFile("shape-cue"), insertion);
         emit adopted(m_live);
     }
+}
+
+// ------------------------------------------------------------------ presence
+
+void Shape::setPhase(const QString &phase)
+{
+    if (phase == m_phase)
+        return;
+    m_phase = phase;
+    emit phaseChanged();
+}
+
+void Shape::setProgress(qreal progress)
+{
+    progress = std::clamp<qreal>(std::isfinite(progress) ? progress : 0, 0, 1);
+    if (qFuzzyCompare(progress + 1, m_progress + 1))
+        return;
+    m_progress = progress;
+    emit progressChanged();
+}
+
+void Shape::setOrb(const QPointF &orb)
+{
+    if (orb == m_orb)
+        return;
+    m_orb = orb;
+    emit progressChanged();
+}
+
+void Shape::begin(const QString &kind)
+{
+    if (m_phase != QLatin1String("ready"))
+        return;
+    m_kind = kind == QLatin1String("tide") || kind == QLatin1String("sweep") ? kind : QStringLiteral("fade");
+    m_progress = 0;
+    qInfo("mun-shell: shape: insertion %s comes in (%s, %s)", qPrintable(m_insertion), qPrintable(m_entry), qPrintable(m_kind));
+    setPhase(QStringLiteral("entering"));
+    emit progressChanged();
+}
+
+void Shape::arrived()
+{
+    if (m_phase != QLatin1String("entering"))
+        return;
+    m_progress = 1;
+    setPhase(QStringLiteral("present"));
+    emit progressChanged();
+}
+
+void Shape::leave(const QString &why)
+{
+    if (m_phase == QLatin1String("leaving"))
+        return;   // already on its way: the first reason stands
+    m_exit = why;
+    qInfo("mun-shell: shape: insertion %s leaves (%s)", qPrintable(m_insertion), qPrintable(why));
+    setPhase(QStringLiteral("leaving"));
+}
+
+void Shape::leaveWith(const QString &kind)
+{
+    if (m_phase != QLatin1String("leaving"))
+        return;
+    const QString valid = kind == QLatin1String("tide") || kind == QLatin1String("sweep") ? kind : QStringLiteral("fade");
+    if (valid != m_kind) {
+        m_kind = valid;
+        emit phaseChanged();
+        emit progressChanged();
+    }
+}
+
+void Shape::left()
+{
+    if (m_phase != QLatin1String("leaving"))
+        return;
+    const Held held = m_held;
+    m_held = {};
+    clear(true);
+    if (held.set && held.token == m_token)
+        apply(held.token, held.result, held.window);
+}
+
+qreal Shape::reach(const QString &phase, const QString &kind, qreal progress, const QRectF &box) const
+{
+    if (phase == QLatin1String("present"))
+        return 1;
+    if (phase != QLatin1String("entering") && phase != QLatin1String("leaving"))
+        return 0;
+    return shapefront::reach(kind, m_orb, progress, box);
+}
+
+qreal Shape::objectProgress() const
+{
+    if (m_phase == QLatin1String("present"))
+        return 1;
+    if (m_phase != QLatin1String("entering") && m_phase != QLatin1String("leaving"))
+        return 0;
+    return shapefront::objectReach(m_kind, m_orb, m_progress);
+}
+
+QVariantMap Shape::blend(const QString &surface, qreal u) const
+{
+    // docs/shape.md, "Contrast": only the plate blends. Its opacity rises to
+    // the higher of both ends' (to opaque for a bridge) in the first fifth,
+    // its colour blends in the next three (through the bridge at the middle),
+    // its opacity settles in the last; the text and focus change at one point:
+    // the colour blend's end (neutral-text), its start (shape-text), the
+    // bridge (bridge) or the middle (cut, where the whole surface changes).
+    u = std::clamp<qreal>(u, 0, 1);
+    if (surface == QLatin1String("neutral")) {
+        // One of MUN's own panels over a game's world: MUN's set on a plate of
+        // its proven opacity, from the moment the front reaches it.
+        return {{QStringLiteral("plate"), kNeutralPlate},
+                {QStringLiteral("opacity"), m_neutralOpacity},
+                {QStringLiteral("material"), QStringLiteral("solid")},
+                {QStringLiteral("amount"), 0.0},
+                {QStringLiteral("game"), false}};
+    }
+    const bool bar = surface == QLatin1String("bar");
+    const Plan &plan = bar ? m_barPlan : surface == QLatin1String("panel") ? m_panelPlan
+                                        : surface == QLatin1String("bands") ? m_bandsPlan : m_entriesPlan;
+    const QColor fromPlate = bar ? kNeutralText : kNeutralPlate;
+    const QColor toPlate = bar ? m_bar : m_plate;
+    const qreal fromOpacity = bar ? 1 : m_neutralOpacity;
+    const qreal toOpacity = bar ? 1
+                            : surface == QLatin1String("panel") ? m_panelOpacity
+                            : surface == QLatin1String("bands") ? m_bandsOpacity : m_entriesOpacity;
+    const QString material = bar ? QStringLiteral("solid")
+                             : surface == QLatin1String("panel") ? m_panelMaterial
+                             : surface == QLatin1String("bands") ? QStringLiteral("glass") : m_entriesMaterial;
+    const auto step = [](qreal u, qreal from, qreal to) { return std::clamp<qreal>((u - from) / (to - from), 0, 1); };
+
+    QColor plate;
+    qreal opacity, amount;
+    bool game;
+    if (plan.plan == QLatin1String("cut")) {
+        game = u >= 0.5;
+        plate = game ? toPlate : fromPlate;
+        opacity = game ? toOpacity : fromOpacity;
+        amount = game ? 1 : 0;
+    } else if (plan.plan == QLatin1String("bridge")) {
+        const qreal rise = step(u, 0, 0.2), settle = step(u, 0.8, 1);
+        opacity = u < 0.8 ? fromOpacity + (1 - fromOpacity) * rise : 1 + (toOpacity - 1) * settle;
+        plate = u < 0.5 ? mixColour(fromPlate, plan.bridge, step(u, 0.2, 0.5)) : mixColour(plan.bridge, toPlate, step(u, 0.5, 0.8));
+        amount = step(u, 0.5, 0.8);
+        game = u >= 0.5;
+    } else {
+        const qreal held = std::max(fromOpacity, toOpacity);
+        const qreal rise = step(u, 0, 0.2), settle = step(u, 0.8, 1);
+        opacity = u < 0.8 ? fromOpacity + (held - fromOpacity) * rise : held + (toOpacity - held) * settle;
+        plate = mixColour(fromPlate, toPlate, step(u, 0.2, 0.8));
+        amount = step(u, 0.2, 0.8);
+        game = plan.plan == QLatin1String("shape-text") ? u >= 0.2 : u >= 0.8;
+    }
+    return {{QStringLiteral("plate"), plate},
+            {QStringLiteral("opacity"), opacity},
+            {QStringLiteral("material"), material},
+            {QStringLiteral("amount"), amount},
+            {QStringLiteral("game"), game}};
 }

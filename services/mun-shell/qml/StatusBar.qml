@@ -5,7 +5,9 @@ import MUN.Shell
 // time. The slot's light is the console's LED colour while a Game Card is
 // ready; the network's is patina while an interface is connected. On a
 // Game Card's band (Shape, docs/shape.md) its words and clock take the
-// game's text colour; the lights keep their meaning and colours.
+// game's text colour; the lights keep their meaning and colours, each on a
+// socket of MUN's own (`socketed`: a dark disc with a fine rim), so they show
+// as MUN draws them on any band.
 Row {
     id: root
     property string slotText
@@ -15,6 +17,7 @@ Row {
     property string clockFormat: "24h"
     property color textColour: Theme.ash
     property color clockColour: Theme.moon
+    property bool socketed: false
     // The local time, to the minute.
     property date now: new Date()
 
@@ -31,6 +34,7 @@ Row {
         anchors.verticalCenter: parent.verticalCenter
         color: lit ? litColour : Theme.unlit
         Behavior on color { ColorAnimation { duration: 400; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.ease } }
+        Socket { size: 22 }
         Shadow {
             z: -1
             radii: [5]
@@ -38,6 +42,21 @@ Row {
             opacity: light.lit ? 1 : 0
             Behavior on opacity { NumberAnimation { duration: 400; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.ease } }
         }
+    }
+    // MUN's own ground under a light, over whatever band is beneath.
+    component Socket: Rectangle {
+        property int size
+        z: -2
+        anchors.centerIn: parent
+        width: size
+        height: size
+        radius: size / 2
+        color: Theme.dialog
+        border.width: 1
+        border.color: Theme.rgba(218, 215, 209, 0.22)
+        opacity: root.socketed ? 1 : 0
+        visible: opacity > 0
+        Behavior on opacity { NumberAnimation { duration: 400; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.ease } }
     }
     component Status: UiText {
         anchors.verticalCenter: parent.verticalCenter
@@ -72,6 +91,7 @@ Row {
         width: 24
         height: 24
         phase: phaseAt(root.now)
+        Socket { size: 34 }
     }
     MarkText {
         id: clock

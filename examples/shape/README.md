@@ -1,9 +1,10 @@
 # MUN Shape sample packages
 
 Two packages for the same contract, [MUN Shape](../../docs/shape.md), with
-identities as far apart as the format allows. The console does not render
-Shape yet; these packages are what its implementation is to be tested with,
-and what a publisher can start from.
+identities as far apart as the format allows. The console draws both with
+the same code, worlds and transitions included; the shell's behaviour
+regressions and the laboratory use them, and a publisher can start from
+them.
 
 | | `sea` | `paper` |
 | --- | --- | --- |

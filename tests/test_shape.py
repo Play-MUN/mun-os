@@ -950,12 +950,20 @@ class ShellAgreementTests(unittest.TestCase):
 
     def test_materials_stay_within_the_proofs_ranges(self):
         material = self.source("qml/Material.qml")
-        alphas = [float(a) for a in re.findall(r"Theme\.rgba\(\s*(?:255|0),\s*(?:255|0),\s*(?:255|0),\s*([0-9.]+)\)", material)]
+        for name, value in (("sheen", shape.GLASS_SHEEN), ("grain", shape.PAPER_GRAIN)):
+            match = re.search(rf"readonly property real {name}: ([0-9.]+)", material)
+            self.assertIsNotNone(match, name)
+            self.assertAlmostEqual(float(match.group(1)), value, msg=name)
         glass = material.split('"glass"', 1)[1].split("Box", 1)[0]
         paper = material.split('"paper"', 1)[1]
-        self.assertTrue(alphas)
-        self.assertLessEqual(max(float(a) for a in re.findall(r",\s*([0-9.]+)\)", glass)), shape.GLASS_SHEEN)
-        self.assertLessEqual(max(float(a) for a in re.findall(r",\s*([0-9.]+)\)", paper)), shape.PAPER_GRAIN)
+        # Every white or black the overlays draw is the sheen or the grain,
+        # scaled by `amount` (at most 1), or nothing.
+        for overlay, name in ((glass, "sheen"), (paper, "grain")):
+            alphas = re.findall(r"Theme\.rgba\(\s*(?:255|0),\s*(?:255|0),\s*(?:255|0),\s*([^)]+)\)", overlay)
+            self.assertTrue(alphas)
+            for alpha in alphas:
+                self.assertIn(alpha.strip(), (f"root.{name} * root.amount", "0"), alpha)
+        self.assertIn("property real amount: 1", material)
 
     def test_the_read_level_is_the_checkers(self):
         read = self.source("src/readpalette.cpp")
@@ -987,7 +995,9 @@ class ShellAgreementTests(unittest.TestCase):
         self.assertEqual(main.count("dressed: true"), 1, "one arc is dressed, the main one")
         self.assertIn('dressed: window.focusedEntry.key === "card" && !window.inSettings', main)
         self.assertIn("property color focusColour: Theme.accent", self.source("qml/OptionRow.qml"))
-        self.assertIn("readonly property color accent: dressed ? Shape.focus : Theme.accent", self.source("qml/ArcNode.qml"))
+        arc = self.source("qml/ArcNode.qml")
+        self.assertIn("readonly property bool gameFocus: shaped ? look.game : dressed && !Shape.plated", arc)
+        self.assertIn("readonly property color accent: gameFocus ? Shape.focus : Theme.accent", arc)
         self.assertIn("qml/Material.qml", self.source("CMakeLists.txt"))
         for name in ("shape.cpp", "readpalette.cpp"):
             self.assertIn(f"src/{name}", self.source("CMakeLists.txt"))
@@ -1025,7 +1035,7 @@ class ShellBehaviourTests(unittest.TestCase):
         line = next(text for text in build.splitlines() if run in text)
         self.assertNotIn("||", line, "a failed expectation fails the build")
         self.assertTrue(build.startswith("#!/bin/sh") and "set -eu" in build)
-        for scene in ("controller.qml", "arrival.qml", "surfaces.qml"):
+        for scene in ("controller.qml", "arrival.qml", "surfaces.qml", "world.qml", "home.qml"):
             self.assertIn(f'"{scene}"', (self.SHELL / "tests" / "behaviour.py").read_text(encoding="utf-8"))
             self.assertTrue((self.SHELL / "tests" / "scenes" / scene).is_file(), scene)
 
@@ -1093,6 +1103,34 @@ class ShellBehaviourTests(unittest.TestCase):
         self.assertEqual(label["label"], [29, 31, 45, 49])
         self.assertAlmostEqual(label["ratio"], round(shape.contrast_ratio("#858D79", "#1F1C19"), 2), places=2)
 
+    def test_the_world_is_bounded_as_the_contract_says(self):
+        world = (self.SHELL / "src" / "shapeworld.cpp").read_text(encoding="utf-8")
+        self.assertIn(f"kLayerMaxSide = {shape.SIDE_LIMITS['backdrop']};", world)
+        self.assertEqual(shape.SIDE_LIMITS["layer"], shape.SIDE_LIMITS["light"])
+        self.assertEqual(shape.SIDE_LIMITS["layer"], shape.SIDE_LIMITS["backdrop"])
+        self.assertIn(f"kSpriteMaxSide = {shape.SIDE_LIMITS['sprite']};", world)
+        self.assertIn("return 136 * kMiB;", world)
+        self.assertIn("return 200 * kMiB;", world)
+        doc = (ROOT / "docs" / "shape.md").read_text(encoding="utf-8")
+        self.assertIn("136 MiB at 1080p and 200 MiB at 1440p", doc)
+        # The same three transitions, and the rates the contract allows.
+        front = (self.SHELL / "src" / "shapefront.h").read_text(encoding="utf-8")
+        for kind in ("tide", "sweep"):
+            self.assertIn(f'QLatin1String("{kind}")', front)
+        self.assertIn('== 20 ? 20 : 10', world)
+        self.assertIn('std::clamp(spec.value(QStringLiteral("count")).toInt(), 1, 128)', world)
+        watch = (self.SHELL / "src" / "framewatch.h").read_text(encoding="utf-8")
+        self.assertIn("kFrameLimitMs = 25", watch)
+
+    def test_the_shell_knows_no_game(self):
+        # Every package is drawn by the same code: what Shape shows comes
+        # from the package and the card's lent colours and cover, never from
+        # which card or game it is (its id or its title).
+        for name in ("shape.cpp", "shape.h", "shapeworld.cpp", "shapeworld.h", "shapefront.h", "framewatch.cpp"):
+            text = (self.SHELL / "src" / name).read_text(encoding="utf-8")
+            for key in ('"id"', '"title"', "\"id\")", "\"title\")"):
+                self.assertNotIn(key, text, f"{name} reads the card's {key}")
+
     def test_the_wiring_the_scenes_repeat(self):
         # The scenes feed Shape as Main.qml does; Main.qml must do it so.
         main = (self.SHELL / "qml" / "Main.qml").read_text(encoding="utf-8")
@@ -1104,6 +1142,16 @@ class ShellBehaviourTests(unittest.TestCase):
         cpp = (self.SHELL / "src" / "shape.cpp").read_text(encoding="utf-8")
         self.assertNotIn("elapsed()", cpp, "the cue depends on no clock")
         self.assertIn('runtimeFile("shape-cue")', cpp)
+        # The presence runs from Main: the world, the animation and its ends.
+        self.assertIn("world: Shape.world", main)
+        self.assertIn("onFinished: to === 1 ? Shape.arrived() : Shape.left()", main)
+        self.assertIn("Binding { target: FrameWatch; property: \"judging\"; value: world.drawn && window.powered }", main)
+        self.assertIn("function onStrained(why) { world.stepDown(why) }", main)
+        for name in ("ArcNode.qml", "DetailPanel.qml"):
+            self.assertIn("Shape.reach(Shape.phase, Shape.kind, Shape.progress, box)", self.source_of(name))
+
+    def source_of(self, name):
+        return (self.SHELL / "qml" / name).read_text(encoding="utf-8")
 
 
 class DocumentationTests(unittest.TestCase):

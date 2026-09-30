@@ -75,7 +75,8 @@ public:
     // "enter", "back", optionally "insert"). An empty map, or a set with any
     // file out of the format or its duration, leaves MUN's.
     Q_INVOKABLE void useGameSounds(const QVariantMap &files);
-    // One of the game's sounds only ("insert"); nothing if it has none.
+    // One of the game's sounds only ("insert"), whenever the caller asks
+    // (the caller checks the player's choices); nothing if it has none.
     Q_INVOKABLE void playGame(const QString &name);
     int latency() const { return int(kLatencyMicroseconds / 1000); }
     bool gameSounds() const { return m_gameSounds; }
@@ -87,6 +88,8 @@ signals:
     void started(const QString &name);
     void gameSoundsChanged();
     void gameSetChanged();
+    // One of the game's sounds was queued by playGame().
+    void gameSoundQueued(const QString &name);
 
 private:
     struct Sound {

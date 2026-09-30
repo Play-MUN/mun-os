@@ -160,9 +160,13 @@ void SystemSounds::queue(const SoundPtr &sound)
 
 void SystemSounds::playGame(const QString &name)
 {
+    // Whenever the caller says (the insertion cue, as the identity begins to
+    // come in): not bound to where the menus' sounds are the game's.
     const auto it = m_game.find(name);
-    if (m_gameSounds && it != m_game.end())
+    if (it != m_game.end()) {
         queue(it->second);
+        emit gameSoundQueued(name);
+    }
 }
 
 void SystemSounds::play(const QString &name)

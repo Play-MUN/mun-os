@@ -54,6 +54,11 @@ qt_add_executable(mun-shell
     src/readpalette.h
     src/shape.cpp
     src/shape.h
+    src/shapefront.h
+    src/shapeworld.cpp
+    src/shapeworld.h
+    src/framewatch.cpp
+    src/framewatch.h
 )
 
 # The generated QML type registration includes headers by basename.

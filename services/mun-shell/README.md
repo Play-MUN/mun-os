@@ -24,7 +24,9 @@ display, and a game drawing on `/dev/fb0` has it (see *Display path*).
 | `src/systemsounds.*` | The menus' sounds (move, enter, back), mixed on a worker thread and played through ALSA |
 | `src/powercontrol.*` | The only privileged request: runs `mun-power` through `sudo -n`; reports failure to the UI |
 | `src/cardclient.*` | Mirror of the card service over its UNIX socket: snapshot, events, reconnection; exposes state, manifest, error, cover (data URL) and whether the active card arrived while the shell was watching to QML |
-| `src/shape.*`, `src/contrast.h`, `src/readpalette.*` | A Game Card's MUN Shape on the eligible surfaces: the export read and decoded off the GUI thread, its colours verified again with the contrast rule, the palette read from a cover (*A Game Card's identity*) |
+| `src/shape.*`, `src/contrast.h`, `src/readpalette.*` | A Game Card's MUN Shape on the eligible surfaces: the export read and decoded off the GUI thread, its colours verified again with the contrast rule, the palette read from a cover, the phases of its coming in and leaving (*A Game Card's identity*) |
+| `src/shapeworld.*`, `src/shapefront.h` | The package's world, prepared and painted on its own thread, and the fronts of its transitions |
+| `src/framewatch.*` | The interface's frame and key timings while a world is drawn; the step down when navigation suffers |
 | `src/launchclient.*` | Client of `mun-launchd`: `launch(slot, serial, version)`, `release(serial)`, `acknowledge()`, launcher state and the last session result (read from `/run/mun/launch/last-result.json` at start, then over the socket) |
 | `src/backdrop.*`, `src/heroicon.*` | Home's painted layers: the network of light behind everything, and the large object of the entry in focus |
 | `src/cssbox.*`, `src/blur.*` | Surfaces with CSS semantics (radii, gradients at any angle, outer and inset box shadows) and the blur they and the glows use |
@@ -178,85 +180,150 @@ first, and the shell takes the display again when it restarts.
 
 ### A Game Card's identity (MUN Shape)
 
-A valid Game Card dresses part of Home while it is the active card
+A valid Game Card dresses Home while it is the active card
 ([docs/shape.md](../../docs/shape.md)), from what the card service exported
-for this insertion and nothing else (`src/shape.*`):
+for this insertion and nothing else, and every package is drawn by the same
+code (`src/shape.*`, `src/shapeworld.*`, `src/shapefront.h`):
 
-- **What it dresses**: the main arc's entries (the game's plate under each
-  label, in its material and at the opacity its text needs over any world,
-  its text colour, a chosen bar of that colour with the plate's colour as
-  label, its focus on the knob, wire and edge; while the game's options
-  have the focus, the entries keep that plate and text as they are drawn,
-  only the knobs and wires fade, and the chosen bar turns back into a
-  plate, so the panel's option is the only focus); the game's panel (the
-  Game Card entry's: plate, text, focus on its options); bands of MUN's glass in
-  the plate's colour under the status line, the path and the hints, whose
-  words take the text colour (the lights keep theirs); the card object,
-  whose screen shows the package's window image or the card's cover in
-  place of the crescent, with an organic outline if the package asks
-  (still, shaped by its `morph`) and its light in the game's colour, all
-  of it or none: without that image (missing, or not decoded) the object
-  is MUN's crescent, with neither the game's outline nor its light; the
-  ambient light at the orb (the object's light while the object is the
-  game's, else the palette's light) and a tint of the world's two glows,
-  both in the card's hue at MUN's own luminance (the world is never lighter
-  or darker than MUN draws it, so MUN's texts over it keep their contrast);
-  and the menus' sounds on those surfaces, with the package's insertion cue.
+- **What it dresses**:
+  - The world behind Home (`ShapeWorld`): the package's backdrop, layers,
+    sprite emitters and light textures, in motion (docs/shape.md, "How the
+    console draws a world").
+  - The main arc's entries: the game's plate under each label, in its
+    material and at the opacity its text needs over any world; its text
+    colour; a chosen bar of that colour with the plate's colour as label;
+    its focus on the knob, wire and edge. While the game's options have the
+    focus, the entries keep that plate and text as they are drawn, only the
+    knobs and wires fade, and the chosen bar turns back into a plate, so the
+    panel's option is the only focus.
+  - The game's panel (the Game Card entry's): plate, text, focus on its
+    options.
+  - Bands of MUN's glass in the plate's colour under the status line, the
+    path and the hints, whose words take the text colour. The status
+    line's lights keep MUN's colours, each on a socket of MUN's own (a dark
+    disc with a fine rim), so they show as MUN draws them on any band.
+  - The card object: its screen shows the package's window image or the
+    card's cover in place of the crescent, with an organic outline if the
+    package asks (reached during the transition, then still) and its light
+    in the game's colour. It is all of that or none: without that image
+    (missing, or not decoded) the object is MUN's crescent, with neither the
+    game's outline nor its light.
+  - Outside the world (while it comes in, or when a package has none): the
+    ambient light at the orb (the object's light while the object is the
+    game's, else the palette's light) and a tint of MUN's world, both in the
+    card's hue at MUN's own luminance.
+  - The menus' sounds on those surfaces, with the package's insertion cue.
+  - Where the game's colours do not hold but its world is drawn, the
+    surfaces sit on MUN's own set on plates of their proven opacity. MUN's
+    other panels on Home (*My games*, *Settings*, *Turn off*) sit on MUN's
+    plate over a world.
+- **Coming in and leaving** (`Shape`'s phases: ready, entering, present,
+  leaving; Main.qml runs them): one progress drives the front, the card
+  object, which changes first, and each surface, which changes as the front
+  reaches it.
+  - A card inserted on Home comes in with the package's transition (`tide`,
+    `sweep` or `fade`) over its seconds. With Settings or a dialog open, it
+    waits for Home.
+  - Back from a game, or after a changed choice, it returns with a 0.6 s
+    fade, under any dialog, without the cue.
+  - *Eject safely*: the identity stays until the card service has released
+    the card, then leaves with the package's `out` over three quarters of
+    its seconds (0.8–2.4 s). A release that fails keeps it.
+  - Removed, replaced, or with Shape turned off: 0.5 s back to MUN, the way
+    it came if it had not finished. A second card's identity waits until
+    the first has left.
+  - *Play*: the game's deep colour, at the luminance of MUN's hand-over,
+    grows from the card object under MUN's words while the launcher takes
+    the screen. Nothing waits for it.
+- **Settings and dialogs** keep MUN's panels, focus and sounds over the
+  game's world, which dims under a fixed MUN scrim.
+- **Contrast**: only a plate blends, by the plan the checker proved for its
+  surface (`neutral-text`, `shape-text`, `bridge` or `cut`), and its text and
+  focus change at one point of it. No label eases through colours the rule
+  has not proven, during a transition or when the choice moves.
 - **The insertion cue** plays once, when the identity of a card that arrived
-  while the shell was watching first shows (CardClient: the card was not
-  the active one in the card service's snapshot), however long its copy
+  while the shell was watching begins to come in (CardClient: the card was
+  not the active one in the card service's snapshot), however long its copy
   took. A card found at start, as after a game or a reconnection, is not
   greeted. That first identity spends the insertion's cue, and a marker in
   the runtime directory (`shape-cue`) keeps it spent across the shell's
   restarts.
 - **What stays MUN's**: Settings (their arc, panels, focus and sounds),
-  every dialog (and its sounds), the start-up and power-off, the hand-over screen, the layout,
-  sizes, order and focus behaviour, every word and its language, the
-  path's MUN™, the lights. The focus there is always MUN's copper, lent
-  colours included.
+  every dialog and its sounds, the start-up and power-off, the hand-over's
+  words, the layout, sizes, order and focus behaviour, every word and its
+  language, the path's MUN™, the lights' colours. The focus there is always
+  MUN's copper, lent colours included.
 - **Where the colours come from**: the package's surfaces, as the card
   service's checker proved them, verified again here with the same rule
   (`src/contrast.h`) and replaced by MUN's, as a set, if they do not hold.
   Where the package has no palette, the card's `[presentation]` colours;
   with neither, the palette read from the cover (`src/readpalette.*`, the
   checker's algorithm). A lent or read accent becomes the focus only if it
-  keeps 3:1 on MUN's plate; over MUN's own world the entries keep MUN's
-  look.
-- **Contrast**: on a dressed entry the label's colour changes in one step,
-  never easing through colours the rule has not proven; a change of
-  identity is one step too (transitions come with the worlds).
+  keeps 3:1 on MUN's plate. These only tint MUN, at once.
+- **The world, navigation first**:
+  - It is decoded and scaled once to the display's device pixels, and
+    painted on a thread of its own into two frames that take turns. The
+    GUI thread only shows the finished one; a frame never waits for
+    another.
+  - It moves at the package's rate (10 or 20 frames per second), its
+    transitions' front at 30. A still world (*Reduce motion*) or one at rest
+    draws nothing more.
+  - Its detail level is chosen from the images' headers against the
+    display's budget (136 MiB at 1080p, 200 MiB at 1440p): full; without
+    light textures; the backdrop and the nearest layer at 10 frames per
+    second; still; none.
+  - `FrameWatch` (`src/framewatch.*`) steps it down one level when
+    navigation suffers for two 2-second windows in a row (95th percentile of
+    the interface's frames over 25 ms, or keys taking over 50 ms to show);
+    a transition's frames are timed, not judged.
+  - An image that does not decode drops the whole world: the palette over
+    MUN's world.
 - **Decoding**: the export's `shape.json` (bound to the insertion), the
-  window image and the cover are read and decoded on the loader's own
-  thread, with the dimensions checked first (at most 1024 × 1024) and an
-  allocation limit of 16 MiB; the shell reads only
+  window image, the cover and the world's images are read and decoded off
+  the GUI thread, with the dimensions checked first (1024 × 1024 for the
+  window and the cover, 2048 for the world's large images, 256 for a
+  sprite) and an allocation limit of 16 MiB. The shell reads only
   `/run/mun/shape/<insertion>.<attempt>/` for the insertion in the record.
   A marker in the runtime directory (`shape-decoding`) names the insertion
   being decoded: if the shell ends meanwhile, its next start skips that
   insertion's identity, so a decoder that crashes cannot do it in a loop.
   Sounds are read in the mixer's format and within the contract's
   durations, the set whole or not at all.
-- **Returning from a game**: the shell starts again with the same card, and
-  its identity is applied at once, without the cue.
 - **Settings** (Picture and sound): *MUN Shape* Full (default), Colours only
-  (colours and plates; no images or sounds, MUN's object, the palette's
-  light as the ambient) or Off (MUN alone); *Game sounds
-  on the menus*; *Reduce motion*, which holds Home's world and objects still.
-- The journal says what was applied, once per identity: `shape for
-  insertion …: shape; dressed: entries glass 0.722, …; focus #F2B85C;
-  window 512x512; sounds back/enter/insert/move; cue due`.
+  (colours and plates; no world, images or sounds, MUN's object, the
+  palette's light as the ambient) or Off (MUN alone); *Game sounds on the
+  menus*; *Reduce motion*, which makes every transition a fade and holds the
+  world and Home's objects still.
+- **The journal** says what was applied, once per identity (`shape for
+  insertion …: shape; dressed: entries glass 0.722, …; focus #F2B85C; window
+  512x512; sounds back/enter/insert/move; world; arrival tide/tide 3.2 s;
+  cue due`), when it comes in and leaves, and the world's detail level.
+  With `MUN_SHELL_TIMING=FILE` (laboratory only), the interface's frame and
+  key timings go to that file, and the world's and the card object's paint
+  times to the journal.
 - **Behaviour regressions**: `tests/behaviour.py BUILD_DIR/mun-shell` runs
   the compiled binary offscreen with a scene of `tests/scenes/` in place of
   `Main.qml` (`MUN_SHELL_QML_DIR`), against exports made with the card
-  tool's checker and a stand-in for the card service's socket. It covers
-  the card object when an image does not decode, a result that comes after
-  a newer card, the insertion cue's rule, and the dressed arc's and panel's
-  contrast measured on grabbed frames (the two samples and a palette at the
-  rule's limit, over a white and a black world, on Home, with the options
-  focused and back). The image build runs it after compiling the shell and
-  fails with it; its measurements are the build's `logs/shell-behaviour.json`.
+  tool's checker and stand-ins for the card service's and the launcher's
+  sockets. What it covers:
+  - the card object when an image does not decode, and a result that comes
+    after a newer card;
+  - the insertion cue's rule;
+  - the presence's phases and reasons: release, removal while coming in,
+    another card, a changed choice, a result that waits;
+  - the world alone: its detail, its frames in motion, still and at rest,
+    its steps down, a world that does not decode;
+  - the shell's own `Main.qml` against the stand-ins: an arrival's tide, a
+    dialog that makes it wait, a return under a dialog, a removal mid-tide,
+    *Eject safely* confirmed and refused, another card, Reduce motion,
+    Colours only, Off, a defective world, Settings over the world;
+  - the dressed arc's and panel's contrast measured on grabbed frames: the
+    two samples and a palette at the rule's limit, over a white and a black
+    world, on Home, with the options focused, and mid-transition; and on
+    the real world during a tide.
 
-Worlds, their motion and the transitions between identities are not
-drawn yet.
+  The image build runs it after compiling the shell and fails with it; its
+  measurements are the build's `logs/shell-behaviour.json`.
 
 ## Resolution
 

@@ -163,6 +163,7 @@ public:
     // (negative: MUN's card outline).
     const QImage *window = nullptr;
     qreal organic = -1;
+    qreal reveal = 1;   // the window's share over MUN's screen and crescent
 
 private:
     struct Deferred {
@@ -219,32 +220,39 @@ void drawCard(Ink &ink)
 {
     ink.fillOrStroke(ink.organic >= 0 ? organicCard(ink.organic) : roundedRect(-150, -105, 300, 210, 20));
     const QPainterPath screen = roundedRect(-128, -84, 236, 128, 12);
-    const bool window = ink.window && !ink.window->isNull();
+    const bool window = ink.window && !ink.window->isNull() && ink.reveal > 0;
+    const bool whole = window && ink.reveal >= 1;
+    if (ink.face && !whole) {
+        QLinearGradient glass(0, -84, 0, 44);
+        glass.setColorAt(0, rgba(34, 54, 82, 0.95));
+        glass.setColorAt(1, rgba(8, 12, 20, 0.95));
+        ink.fillWith(screen, glass);
+    } else if (!ink.face) {
+        ink.stroke(screen);
+    }
+    // The logo's crescent, until the card's image takes its place.
+    if (!whole) {
+        QPainter *p = ink.painter();
+        p->save();
+        p->setOpacity(p->opacity() * (window ? 1 - ink.reveal : 1));
+        const QPainterPath moon = crescent(-10, -20, 46, ink.lit);
+        if (ink.face)
+            ink.glowFill(moon, rgba(236, 233, 227, 0.92), rgba(221, 233, 255, 0.6), 8);
+        else
+            ink.stroke(moon);
+        p->restore();
+    }
     if (ink.face && window) {
         // The card's own image fills the screen, cropped to its shape.
         QPainter *p = ink.painter();
         p->save();
+        p->setOpacity(p->opacity() * ink.reveal);
         p->setClipPath(screen, Qt::IntersectClip);
         const QRectF box = screen.boundingRect();
         const QSizeF size = QSizeF(ink.window->size()).scaled(box.size(), Qt::KeepAspectRatioByExpanding);
         p->setRenderHint(QPainter::SmoothPixmapTransform);
         p->drawImage(QRectF(box.center() - QPointF(size.width() / 2, size.height() / 2), size), *ink.window);
         p->restore();
-    } else if (ink.face) {
-        QLinearGradient glass(0, -84, 0, 44);
-        glass.setColorAt(0, rgba(34, 54, 82, 0.95));
-        glass.setColorAt(1, rgba(8, 12, 20, 0.95));
-        ink.fillWith(screen, glass);
-    } else {
-        ink.stroke(screen);
-    }
-    // The logo's crescent, unless the card's image takes its place.
-    if (!window) {
-        const QPainterPath moon = crescent(-10, -20, 46, ink.lit);
-        if (ink.face)
-            ink.glowFill(moon, rgba(236, 233, 227, 0.92), rgba(221, 233, 255, 0.6), 8);
-        else
-            ink.stroke(moon);
     }
     for (int i = 0; i < 7; ++i) {
         QPainterPath contact;
@@ -486,6 +494,15 @@ void HeroIcon::setCardGlow(const QColor &glow)
     cardRestyled();
 }
 
+void HeroIcon::setCardReveal(qreal reveal)
+{
+    reveal = std::isfinite(reveal) ? std::round(std::clamp<qreal>(reveal, 0, 1) * 10) / 10 : 1;
+    if (qFuzzyCompare(reveal + 1, m_reveal + 1))
+        return;
+    m_reveal = reveal;
+    cardRestyled();
+}
+
 void HeroIcon::setRunning(bool running)
 {
     if (running == m_running)
@@ -627,10 +644,16 @@ const HeroIcon::Layers &HeroIcon::layersFor(const QString &key, qreal scale)
         p.end();
         return cropped(image, QPointF(0, 0), scale);
     };
+    QElapsedTimer took;
+    took.start();
     layers.shadow = render(Shadow);
     layers.wire = render(Wire);
     layers.face = render(Face);
     layers.loaded = render(Shadow | Wire | Face);
+    // The laboratory times this (MUN_SHELL_TIMING): it runs on the GUI thread.
+    static const bool timing = qEnvironmentVariableIsSet("MUN_SHELL_TIMING");
+    if (timing)
+        qInfo("mun-shell: object %s layers painted in %lld ms", qPrintable(key), qlonglong(took.elapsed()));
     return layers;
 }
 
@@ -748,8 +771,10 @@ void HeroIcon::drawLayers(QPainter *painter, const QTransform &item, qreal scale
     const auto dress = [&](Ink &ink) {
         if (!card)
             return;
-        ink.window = m_window.isNull() ? nullptr : &m_window;
-        ink.organic = m_cardShape == QLatin1String("organic") ? m_morph : -1;
+        ink.window = m_window.isNull() || m_reveal <= 0 ? nullptr : &m_window;
+        ink.reveal = m_reveal;
+        // The outline rounds into its Shape as the transition reaches it.
+        ink.organic = m_cardShape == QLatin1String("organic") && m_reveal > 0 ? m_morph * m_reveal : -1;
     };
     if (layers & Shadow) {
         painter->save();
@@ -771,8 +796,11 @@ void HeroIcon::drawLayers(QPainter *painter, const QTransform &item, qreal scale
         painter->setOpacity(alpha);
         Ink wire(painter, item, scale, false, sigmaScale);
         wire.strokeColour = rgba(226, 223, 217, 0.85);
-        wire.glow = card && m_cardGlow.isValid() ? rgba(m_cardGlow.red(), m_cardGlow.green(), m_cardGlow.blue(), 0.45)
-                                                 : rgba(221, 233, 255, 0.45);
+        // MUN's light, turning into the card's as its Shape arrives.
+        const qreal share = card && m_cardGlow.isValid() ? m_reveal : 0;
+        wire.glow = rgba(int(std::lround(221 + (m_cardGlow.red() - 221) * share)),
+                         int(std::lround(233 + (m_cardGlow.green() - 233) * share)),
+                         int(std::lround(255 + (m_cardGlow.blue() - 255) * share)), 0.45);
         wire.glowSigma = 7;
         wire.lit = m_lit;
         wire.time = time;

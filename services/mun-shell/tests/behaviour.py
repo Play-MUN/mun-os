@@ -137,7 +137,7 @@ class Shell:
         self.binary, self.work = binary, work
 
     def run(self, name: str, scene: str, config: dict, runtime: Path = None, socket_path: Path = None,
-            exports: Path = None, timeout: float = 90) -> str:
+            exports: Path = None, timeout: float = 90, launcher: Path = None, settings: str = "") -> str:
         case = self.work / name
         qml = case / "qml"
         qml.mkdir(parents=True, exist_ok=True)
@@ -145,12 +145,16 @@ class Shell:
         (qml / "Main.qml").write_text(text.replace("CONFIG", json.dumps(config)), encoding="utf-8")
         runtime = runtime or case / "runtime"
         runtime.mkdir(mode=0o700, parents=True, exist_ok=True)
+        state = case / "state"
+        state.mkdir(parents=True, exist_ok=True)
+        (state / "settings.ini").write_text(settings, encoding="utf-8")
         env = dict(os.environ, QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software", QT_SCALE_FACTOR="1",
                    QT_FORCE_STDERR_LOGGING="1", LANG="C.UTF-8", HOME=str(case / "home"),
                    XDG_CONFIG_HOME=str(case / "config"), XDG_RUNTIME_DIR=str(runtime),
                    MUN_SHELL_QML_DIR=str(qml), MUN_SHAPE_ROOT=str(exports or self.work / "exports"),
-                   MUN_CARDD_SOCKET=str(socket_path or case / "no-service.sock"))
-        for key in ("STATE_DIRECTORY", "QT_QPA_KMS_CONFIG", "QT_QPA_EGLFS_KMS_CONFIG", "WAYLAND_DISPLAY", "DISPLAY"):
+                   MUN_CARDD_SOCKET=str(socket_path or case / "no-service.sock"),
+                   MUN_LAUNCHD_SOCKET=str(launcher or case / "no-launcher.sock"), STATE_DIRECTORY=str(state))
+        for key in ("QT_QPA_KMS_CONFIG", "QT_QPA_EGLFS_KMS_CONFIG", "WAYLAND_DISPLAY", "DISPLAY", "MUN_SHELL_TIMING"):
             env.pop(key, None)
         try:
             done = subprocess.run([str(self.binary)], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -169,19 +173,52 @@ def lines(output: str, tag: str) -> list:
 
 
 class Service:
-    """A stand-in for the card service on its socket: one script per
-    connection, each a list of (seconds after the connection, message);
-    a message "close" ends that connection."""
+    """A stand-in for the card service (or the launcher) on its socket: one
+    script per connection, each a list of (seconds after the connection,
+    message); a message "close" ends that connection. `answer(service,
+    message)` sees every line the shell sends; push() sends a message on the
+    connection that is open."""
 
-    def __init__(self, path: Path, scripts: list):
-        self.path, self.scripts = path, scripts
+    def __init__(self, path: Path, scripts: list, answer=None):
+        self.path, self.scripts, self.answer = path, scripts, answer
         self.server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.server.bind(str(path))
         self.server.listen(4)
         self.stopping = False
         self.held = []
+        self.current = None
+        self.lock = threading.Lock()
+        self.received = []
         self.thread = threading.Thread(target=self._serve, daemon=True)
         self.thread.start()
+
+    def push(self, message):
+        with self.lock:
+            if self.current is not None:
+                try:
+                    self.current.sendall((json.dumps(message) + "\n").encode("utf-8"))
+                except OSError:
+                    pass
+
+    def _read(self, conn):
+        buffer = b""
+        while not self.stopping:
+            try:
+                data = conn.recv(65536)
+            except OSError:
+                return
+            if not data:
+                return
+            buffer += data
+            while b"\n" in buffer:
+                line, buffer = buffer.split(b"\n", 1)
+                try:
+                    message = json.loads(line)
+                except ValueError:
+                    continue
+                self.received.append(message)
+                if self.answer:
+                    self.answer(self, message)
 
     def _serve(self):
         for script in self.scripts:
@@ -189,15 +226,20 @@ class Service:
                 conn, _ = self.server.accept()
             except OSError:
                 return
+            with self.lock:
+                self.current = conn
+            threading.Thread(target=self._read, args=(conn,), daemon=True).start()
             start = time.monotonic()
             for at, message in script:
                 time.sleep(max(0.0, start + at - time.monotonic()))
                 if self.stopping:
                     return
                 if message == "close":
+                    with self.lock:
+                        self.current = None
                     conn.close()
                     break
-                conn.sendall((json.dumps(message) + "\n").encode("utf-8"))
+                self.push(message)
             else:
                 self.held.append(conn)
 
@@ -205,7 +247,10 @@ class Service:
         self.stopping = True
         self.server.close()
         for conn in self.held:
-            conn.close()
+            try:
+                conn.close()
+            except OSError:
+                pass
 
 
 def snapshot(*cards) -> dict:
@@ -509,6 +554,38 @@ def surface_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, r
                     option = measured["focused option"]
                     checks.expect(case, "the focused option's frame keeps 3:1 and its text 4.5:1",
                                   option["frame"] >= FOCUS_RATIO and option["ratio"] >= TEXT_RATIO, option)
+        # The same over the worst worlds, mid-transition (a tide): every
+        # surface the front has reached is on a blending plate, and its text
+        # holds at every point of its plan; the rest is MUN's, over MUN's world.
+        tide_shots = [{"name": f"{world}-tide-{int(p * 100)}", "world": hex_colour, "state": "home", "progress": p}
+                      for world, hex_colour in (("white", "#FFFFFF"), ("black", "#000000"))
+                      for p in (0.31, 0.33, 0.35, 0.37, 0.39, 0.41, 0.43, 0.5, 0.6, 0.7)]
+        output = shell.run(f"surfaces-{name}-tide", "surfaces.qml", {
+            "card": record(insertion(0x280 + number), export(exports, insertion(0x280 + number), package)), "entries": entries,
+            "panel": panel, "shots": tide_shots, "out": str(out), "settle": 700, "timeout": 60000, "kind": "tide"},
+            exports=exports)
+        taken = {s["name"]: s for s in lines(output, "SHOT")}
+        checks.expect(f"surfaces-{name} tide", "every mid-transition shot was grabbed", len(taken) == len(tide_shots), sorted(taken))
+        for shot in tide_shots:
+            if shot["name"] not in taken:
+                continue
+            where = taken[shot["name"]]["regions"]
+            image = read_ppm(Path(taken[shot["name"]]["path"]))
+            reached = {e["label"]: e["reached"] for e in where["entries"] if e["reached"] > 0}
+            if where.get("panelReached", 0) > 0:
+                reached["panel"] = where["panelReached"]
+            low = {}
+            for e in where["entries"]:
+                if e["reached"] > 0:
+                    m = text_contrast(image, e["box"])
+                    if m["ratio"] < TEXT_RATIO:
+                        low[e["label"]] = (m["ratio"], round(e["reached"], 2))
+            if where.get("panelReached", 0) > 0:
+                m = text_contrast(image, where["panelText"])
+                if m["ratio"] < TEXT_RATIO:
+                    low["panel"] = (m["ratio"], round(where["panelReached"], 2))
+            results[shot["name"]] = {"reached": reached, "low": low}
+            checks.expect(f"surfaces-{name} {shot['name']}", "each reached surface's text keeps 4.5:1 mid-blend", not low, low)
         for world in ("white", "black"):
             before, after = results.get(f"{world}-home"), results.get(f"{world}-home-again")
             if before and after:
@@ -518,11 +595,379 @@ def surface_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, r
                               (before["entries"], after["entries"]))
 
 
+def first_layer(sample: str) -> str:
+    """The first layer a sample's world names (read, not assumed)."""
+    document = json.loads((SAMPLES / sample / "shape.json").read_text(encoding="utf-8"))
+    return document["world"]["layers"][0]["image"]
+
+
+def sample_copy(packages: Path, name: str, sample: str, change=None, replace=None) -> Path:
+    """A copy of a sample package, its document changed by `change`, files
+    replaced by `replace` (relative path: bytes)."""
+    target = packages / name
+    shutil.copytree(SAMPLES / sample, target)
+    if change:
+        document = json.loads((target / "shape.json").read_text(encoding="utf-8"))
+        change(document)
+        (target / "shape.json").write_text(json.dumps(document), encoding="utf-8")
+    for relative, data in (replace or {}).items():
+        (target / relative).write_bytes(data)
+    return target
+
+
+def presence_cases(shell: Shell, checks: Checks, exports: Path, packages: Path):
+    ids = {n: insertion(0x300 + i) for i, n in enumerate(("a", "b", "c", "d", "e", "f", "g", "h", "i", "j"))}
+    sea = {k: export(exports, v, SAMPLES / "sea") for k, v in ids.items() if k in "abcdefg"}
+    paper = {k: export(exports, v, SAMPLES / "paper") for k, v in ids.items() if k in "hij"}
+    rec = lambda k, shape_record: record(ids[k], shape_record)
+    released = lambda r: dict(r, state="released", info=None)
+
+    def run(name, steps):
+        output = shell.run(name, "controller.qml", {"steps": steps}, exports=exports)
+        return output, {p["label"]: p for p in lines(output, "PROBE")}, [p for p in lines(output, "PROBE") if p["label"] == "phase"]
+
+    out, probes, phases = run("presence-arrival", [
+        {"at": 0, "arrival": ids["a"], "cards": [rec("a", sea["a"])]}, {"at": 800, "probe": "applied"},
+        {"at": 900, "begin": "tide"}, {"at": 950, "progress": 0.5}, {"at": 1000, "probe": "mid"},
+        {"at": 1100, "progress": 1, "arrived": True}, {"at": 1200, "probe": "present"}, {"at": 1300, "quit": True}])
+    a = probes.get("applied", {})
+    checks.expect("presence-arrival", "applied, not shown: ready, an arrival, with its world and plates",
+                  a.get("phase") == "ready" and a.get("entry") == "arrival" and a.get("world") and a.get("plated")
+                  and a.get("transition") == ["tide", "tide", 3.2], a)
+    checks.expect("presence-arrival", "begun: entering the tide; arrived: present",
+                  probes.get("mid", {}).get("phase") == "entering" and probes.get("mid", {}).get("kind") == "tide"
+                  and probes.get("present", {}).get("phase") == "present", (probes.get("mid"), probes.get("present")))
+
+    out, probes, _ = run("presence-release", [
+        {"at": 0, "cards": [rec("b", sea["b"])]}, {"at": 800, "begin": "fade", "progress": 1, "arrived": True},
+        {"at": 900, "cards": [released(rec("b", sea["b"]))]}, {"at": 1000, "probe": "leaving"},
+        {"at": 1100, "leaveWith": "tide"}, {"at": 1150, "progress": 0}, {"at": 1200, "left": True},
+        {"at": 1300, "probe": "after"}, {"at": 1400, "quit": True}])
+    l, after = probes.get("leaving", {}), probes.get("after", {})
+    checks.expect("presence-release", "released: it leaves (release), still showing its identity",
+                  l.get("phase") == "leaving" and l.get("exit") == "release" and l.get("insertion") == ids["b"]
+                  and l.get("source") == "shape" and l.get("dressed"), l)
+    checks.expect("presence-release", "left: MUN's", after.get("phase") == "none" and after.get("source") == "none", after)
+
+    out, probes, _ = run("presence-removal-entering", [
+        {"at": 0, "arrival": ids["c"], "cards": [rec("c", sea["c"])]}, {"at": 800, "begin": "tide"},
+        {"at": 850, "progress": 0.4}, {"at": 900, "cards": [{}]}, {"at": 1000, "probe": "leaving"},
+        {"at": 1100, "progress": 0, "left": True}, {"at": 1200, "probe": "after"}, {"at": 1300, "quit": True}])
+    l = probes.get("leaving", {})
+    checks.expect("presence-removal-entering", "removed while it came in: it leaves (removal) from where it was",
+                  l.get("phase") == "leaving" and l.get("exit") == "removal" and l.get("kind") == "tide"
+                  and abs(l.get("progress", 0) - 0.4) < 1e-6, l)
+    checks.expect("presence-removal-entering", "left: MUN's", probes.get("after", {}).get("source") == "none", probes.get("after"))
+
+    out, probes, _ = run("presence-change", [
+        {"at": 0, "cards": [rec("d", sea["d"])]}, {"at": 800, "begin": "fade", "progress": 1, "arrived": True},
+        {"at": 900, "cards": [rec("h", paper["h"])]}, {"at": 1000, "probe": "leaving"},
+        {"at": 1800, "probe": "held"}, {"at": 1900, "progress": 0, "left": True}, {"at": 2000, "probe": "after"},
+        {"at": 2100, "quit": True}])
+    l, held, after = probes.get("leaving", {}), probes.get("held", {}), probes.get("after", {})
+    checks.expect("presence-change", "another card: the first leaves (change) and keeps its identity meanwhile",
+                  l.get("exit") == "change" and held.get("phase") == "leaving" and held.get("insertion") == ids["d"], (l, held))
+    checks.expect("presence-change", "once it has left, the new card's identity is applied, ready",
+                  after.get("phase") == "ready" and after.get("insertion") == ids["h"]
+                  and after.get("transition") == ["sweep", "fade", 1.6], after)
+
+    out, probes, _ = run("presence-stale-held", [
+        {"at": 0, "cards": [rec("e", sea["e"])]}, {"at": 800, "begin": "fade", "progress": 1, "arrived": True},
+        {"at": 900, "cards": [rec("i", paper["i"])]}, {"at": 1500, "cards": [rec("f", sea["f"])]},
+        {"at": 2300, "progress": 0, "left": True}, {"at": 2400, "probe": "after"}, {"at": 2500, "quit": True}])
+    after = probes.get("after", {})
+    checks.expect("presence-stale-held", "two cards while one leaves: only the last is applied",
+                  after.get("phase") == "ready" and after.get("insertion") == ids["f"], after)
+
+    out, probes, _ = run("presence-mode", [
+        {"at": 0, "cards": [rec("g", sea["g"])]}, {"at": 800, "begin": "fade", "progress": 1, "arrived": True},
+        {"at": 900, "mode": "colours"}, {"at": 1000, "probe": "leaving"}, {"at": 1700, "progress": 0, "left": True},
+        {"at": 1800, "probe": "after"}, {"at": 1900, "quit": True}])
+    l, after = probes.get("leaving", {}), probes.get("after", {})
+    checks.expect("presence-mode", "colours only chosen: it leaves (mode), then comes back without its world",
+                  l.get("exit") == "mode" and after.get("phase") == "ready" and not after.get("world")
+                  and after.get("plated") and after.get("entry") == "return", (l, after))
+
+    lent = {"slot": "c1", "insertion": ids["j"], "state": "valid", "active": True,
+            "info": {"title": "Lent", "id": "mun.lent", "accent": "#2E7EC5", "background": "#BFD9F2"}, "shape": {"state": "none"}}
+    out, probes, _ = run("presence-lent", [{"at": 0, "cards": [lent]}, {"at": 800, "probe": "applied"}, {"at": 900, "quit": True}])
+    a = probes.get("applied", {})
+    checks.expect("presence-lent", "lent colours tint MUN at once: no transition, no plates",
+                  a.get("source") == "lent" and a.get("phase") == "none" and not a.get("plated"), a)
+
+
+def world_cases(shell: Shell, checks: Checks, exports: Path, packages: Path):
+    def world_of(shape_record):
+        document = json.loads((Path(shape_record["path"]) / shape.MANIFEST).read_text(encoding="utf-8"))
+        return dict(document["world"], bytes=0), shape_record["path"]
+
+    sea_world, sea_root = world_of(export(exports, insertion(0x400), SAMPLES / "sea"))
+    broken = sample_copy(packages, "world-broken", "sea", replace={first_layer("sea"): short_png()})
+    broken_world, broken_root = world_of(export(exports, insertion(0x401), broken))
+    out_dir = shell.work / "world-grabs"
+    out_dir.mkdir(exist_ok=True)
+
+    def run(name, steps, under="#000000"):
+        output = shell.run(name, "world.qml", {"steps": steps, "out": str(out_dir), "under": under}, exports=exports)
+        return output, {w["label"]: w for w in lines(output, "WORLD")}, {g["name"]: g for g in lines(output, "GRAB")}
+
+    base = [{"at": 0, "root": sea_root, "world": sea_world, "transition": "tide"}]
+    out, probes, grabs = run("world-sea", base + [
+        {"at": 1200, "probe": "ready"}, {"at": 1300, "progress": 0.45}, {"at": 1800, "grab": "world-tide"},
+        {"at": 2000, "progress": 1}, {"at": 2600, "probe": "whole"}, {"at": 2700, "grab": "world-whole"},
+        {"at": 3000, "probe": "moving-1"}, {"at": 4500, "probe": "moving-2"}, {"at": 4600, "still": True},
+        {"at": 5200, "probe": "still-1"}, {"at": 6700, "probe": "still-2"}, {"at": 6800, "still": False, "running": False},
+        {"at": 9600, "probe": "rest-1"}, {"at": 11100, "probe": "rest-2"}, {"at": 11200, "quit": True}])
+    r = probes.get("ready", {})
+    checks.expect("world-sea", "prepared at full detail within the 1080p budget",
+                  r.get("ready") and r.get("drawn") and r.get("detail") == 0 and 0 < r.get("estimate", 0) <= r.get("budget", 0), r)
+    checks.expect("world-sea", "at progress 1 it covers the canvas", probes.get("whole", {}).get("covering"), probes.get("whole"))
+    moving = probes.get("moving-2", {}).get("frames", 0) - probes.get("moving-1", {}).get("frames", 0)
+    checks.expect("world-sea", "a world in motion shows new frames (20 per second: 1.5 s)", moving >= 12, moving)
+    still = probes.get("still-2", {}).get("frames", 0) - probes.get("still-1", {}).get("frames", 0)
+    checks.expect("world-sea", "a still world shows nothing new (Reduce motion)", still <= 1, still)
+    rest = probes.get("rest-2", {}).get("frames", 0) - probes.get("rest-1", {}).get("frames", 0)
+    checks.expect("world-sea", "at rest the world eases to a stop and shows nothing new", rest <= 1, rest)
+    tide = grabs.get("world-tide", {})
+    if tide.get("path"):
+        image = read_ppm(Path(tide["path"]))
+        width = image[0]
+        def at(x, y):
+            i = (y * width + x) * 3
+            return image[2][i:i + 3]
+        inside, outside = at(470, 570 - 100), at(1900, 20)
+        checks.expect("world-sea", "mid-tide: the world inside the front, the canvas beneath outside it",
+                      sum(inside) > 60 and tuple(outside) == (0, 0, 0), (tuple(inside), tuple(outside)))
+    else:
+        checks.expect("world-sea", "mid-tide frame grabbed", False, tide)
+
+    out, probes, _ = run("world-steps", base + [
+        {"at": 1200, "probe": "d0"}, {"at": 1300, "stepDown": "test"}, {"at": 1600, "probe": "d1"},
+        {"at": 1700, "stepDown": "test"}, {"at": 2000, "probe": "d2"}, {"at": 2100, "stepDown": "test"},
+        {"at": 2600, "probe": "d3"}, {"at": 2700, "stepDown": "test"}, {"at": 3000, "probe": "d4"}, {"at": 3100, "quit": True}])
+    details = [probes.get(f"d{i}", {}).get("detail") for i in range(5)]
+    checks.expect("world-steps", "each step down lowers the detail by one, to none", details == [0, 1, 2, 3, 4], details)
+    checks.expect("world-steps", "at none the world is not drawn", probes.get("d4", {}).get("drawn") is False, probes.get("d4"))
+
+    out, probes, _ = run("world-broken", [{"at": 0, "root": broken_root, "world": broken_world},
+                                           {"at": 1500, "probe": "after"}, {"at": 1600, "quit": True}])
+    b = probes.get("after", {})
+    checks.expect("world-broken", "a layer that does not decode drops the whole world: failed, not drawn",
+                  b.get("ready") and b.get("failed") and not b.get("drawn"), b)
+    checks.expect("world-broken", "the journal says why", "layer 1 could not be decoded" in out)
+
+
+def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, report: dict):
+    """The shell's own Main.qml, against stand-ins for the card service and
+    the launcher: the moments of docs/shape.md, "How the console uses a
+    package"."""
+    slow = sample_copy(packages, "home-slow", "sea", change=lambda d: d["transition"].update(seconds=4.0))
+    broken = sample_copy(packages, "home-broken", "sea", replace={first_layer("sea"): short_png()})
+    counter = iter(range(0x500, 0x600))
+
+    def card(package):
+        number = insertion(next(counter))
+        return number, record(number, export(exports, number, package))
+
+    def serve(name, scripts, launcher=None, answer=None):
+        return Service(shell.work / f"{name}.sock", scripts), \
+               Service(shell.work / f"{name}-launch.sock", launcher or [[(0, {"type": "snapshot", "state": "idle"})]], answer)
+
+    def run(name, cardd, launchd, steps, grabs=(), settings="", end=9000):
+        out_dir = shell.work / name / "grabs"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        runtime = shell.work / name / "runtime"
+        runtime.mkdir(mode=0o700, parents=True, exist_ok=True)
+        (runtime / "started").write_text("")   # after a game: no start-up
+        try:
+            output = shell.run(name, "home.qml", {"steps": list(steps) + [{"at": end, "quit": True}], "grabs": list(grabs),
+                                                  "out": str(out_dir)},
+                               runtime=runtime, socket_path=cardd.path, launcher=launchd.path, exports=exports,
+                               settings=settings, timeout=end / 1000 + 60)
+        finally:
+            cardd.close()
+            launchd.close()
+        return output, [p for p in lines(output, "PHASE")], {g["name"]: g for g in lines(output, "GRAB")}
+
+    def first(phases, since=None, **match):
+        # The first line matching, after `since` (a line) if given.
+        for p in phases:
+            if since is not None and p["t"] <= since["t"]:
+                continue
+            if all(p.get(k) == v for k, v in match.items()):
+                return p
+        return None
+
+    def surfaces_hold(case, grab, name):
+        if not grab or not grab.get("path"):
+            checks.expect(case, f"{name}: grabbed", False, grab)
+            return
+        image = read_ppm(Path(grab["path"]))
+        where = grab["regions"]
+        low = {}
+        for e in where["entries"]:
+            measured = text_contrast(image, e["box"])
+            if measured["ratio"] < TEXT_RATIO:
+                low[e["label"]] = (measured["ratio"], round(e["reached"], 2))
+        if where.get("panel"):
+            measured = text_contrast(image, where["panel"]["text"])
+            if measured["ratio"] < TEXT_RATIO:
+                low["panel"] = (measured["ratio"], round(where["panel"]["reached"], 2))
+        report.setdefault("home", {})[f"{case} {name}"] = {"progress": round(grab["progress"], 3), "low": low}
+        checks.expect(case, f"{name} (progress {grab['progress']:.2f}): every entry's and the panel's text keeps 4.5:1",
+                      not low, low)
+
+    # An arrival: the tide, the cue, the surfaces as the front reaches them.
+    x, rx = card(SAMPLES / "sea")
+    cardd, launchd = serve("home-arrival", [[(0, snapshot()), (0.6, {"type": "card", "card": rx})]])
+    out, phases, grabs = run("home-arrival", cardd, launchd, [], grabs=[
+        {"name": "tide-20", "phase": "entering", "at": 0.2}, {"name": "tide-45", "phase": "entering", "at": 0.45},
+        {"name": "tide-70", "phase": "entering", "at": 0.7}, {"name": "present", "phase": "present"}], end=7500)
+    entering, present = first(phases, phase="entering"), first(phases, phase="present")
+    checks.expect("home-arrival", "an arrival comes in with the package's tide",
+                  entering is not None and entering["entry"] == "arrival" and entering["kind"] == "tide", entering)
+    took = present["t"] - entering["t"] if entering and present else None
+    checks.expect("home-arrival", "the tide takes the package's 3.2 s", took is not None and 2600 <= took <= 4400, took)
+    checks.expect("home-arrival", "adopted as an arrival, its cue due", [a["live"] for a in lines(out, "ADOPTED")] == [True],
+                  lines(out, "ADOPTED"))
+    cues = [s for s in lines(out, "SOUND") if s["name"] == "insert"]
+    checks.expect("home-arrival", "the cue plays once, as the tide begins",
+                  len(cues) == 1 and entering is not None and cues[0]["phase"] == "entering"
+                  and abs(cues[0]["t"] - entering["t"]) <= 300, (cues, entering and entering["t"]))
+    for name in ("tide-20", "tide-45", "tide-70", "present"):
+        surfaces_hold("home-arrival", grabs.get(name), name)
+
+    # A dialog open: the arrival waits for Home.
+    x, rx = card(SAMPLES / "sea")
+    result = {"type": "snapshot", "state": "idle", "last_result": {"session": "s1", "reason": "exited", "title": "Test"}}
+    cardd, launchd = serve("home-dialog", [[(0, snapshot()), (0.6, {"type": "card", "card": rx})]], [[(0, result)]])
+    out, phases, _ = run("home-dialog", cardd, launchd, [{"at": 4000, "call": "dismissResult"}], end=7000)
+    ready, entering = first(phases, phase="ready"), first(phases, phase="entering")
+    checks.expect("home-dialog", "with the session's dialog open the identity waits, ready",
+                  ready is not None and ready["modal"] and entering is not None and entering["t"] >= 4000, (ready, entering))
+
+    # Back from a game under the same dialog: a short fade, at once.
+    x, rx = card(SAMPLES / "sea")
+    cardd, launchd = serve("home-return", [[(0, snapshot(rx))]], [[(0, result)]])
+    out, phases, _ = run("home-return", cardd, launchd, [], end=4000)
+    entering, present = first(phases, phase="entering"), first(phases, phase="present")
+    checks.expect("home-return", "found at start (after a game): a short fade, even under a dialog",
+                  entering is not None and entering["entry"] == "return" and entering["kind"] == "fade" and entering["modal"]
+                  and present is not None and present["t"] - entering["t"] <= 1200, (entering, present))
+    checks.expect("home-return", "no cue", [a["live"] for a in lines(out, "ADOPTED")] == [False]
+                  and not [s for s in lines(out, "SOUND") if s["name"] == "insert"], lines(out, "ADOPTED"))
+
+    # Removed while the tide comes in: back to MUN at once, the way it came.
+    x, rx = card(slow)
+    cardd, launchd = serve("home-removal", [[(0, snapshot()), (0.6, {"type": "card", "card": rx}),
+                                             (2.8, {"type": "removed", "slot": "c1", "insertion": x})]])
+    out, phases, grabs = run("home-removal", cardd, launchd, [], grabs=[{"name": "leaving", "phase": "leaving", "at": 0.99}],
+                             end=6000)
+    leaving = first(phases, phase="leaving")
+    gone = first(phases, since=leaving, phase="none") if leaving else None
+    checks.expect("home-removal", "removed mid-tide: it leaves (removal) by the same tide, from where it was",
+                  leaving is not None and leaving["exit"] == "removal" and leaving["kind"] == "tide" and leaving["progress"] < 1,
+                  leaving)
+    checks.expect("home-removal", "MUN within half a second", gone is not None and leaving is not None
+                  and gone["t"] - leaving["t"] <= 800 and gone["source"] == "none", (leaving, gone))
+
+    # Eject safely: the identity stays until the release is confirmed, then leaves.
+    def eject(ok):
+        x, rx = card(SAMPLES / "sea")
+        cardd = Service(shell.work / f"home-eject-{ok}.sock", [[(0, snapshot()), (0.6, {"type": "card", "card": rx})]])
+
+        def answer(service, message):
+            if message.get("type") == "release":
+                time.sleep(0.3)
+                if ok:
+                    cardd.push({"type": "card", "card": dict(rx, state="released", info=None)})
+                    service.push({"type": "released", "ok": True, "slot": "c1", "serial": rx["serial"]})
+                else:
+                    service.push({"type": "released", "ok": False, "slot": "c1", "serial": rx["serial"],
+                                  "error": {"code": "card_busy", "message": "La tarjeta sigue en uso; no la retires"}})
+        launchd = Service(shell.work / f"home-eject-{ok}-launch.sock", [[(0, {"type": "snapshot", "state": "idle"})]], answer)
+        out, phases, _ = run(f"home-eject-{'ok' if ok else 'busy'}", cardd, launchd,
+                             [{"at": 5500, "probe": "before"}, {"at": 5600, "call": "eject"}, {"at": 5700, "probe": "asked"},
+                              {"at": 8800, "probe": "later"}], end=9200)
+        return out, phases, launchd
+
+    out, phases, launchd = eject(True)
+    asked, leaving = first(phases, label="asked"), first(phases, phase="leaving")
+    gone = first(phases, since=leaving, phase="none") if leaving else None
+    checks.expect("home-eject-ok", "asked to eject, the identity stays until the release is confirmed",
+                  asked is not None and asked["phase"] == "present" and any(m.get("type") == "release" for m in launchd.received),
+                  (asked, launchd.received))
+    checks.expect("home-eject-ok", "confirmed: it leaves (release) with the package's out tide, 2.4 s",
+                  leaving is not None and leaving["exit"] == "release" and leaving["kind"] == "tide" and gone is not None
+                  and 1800 <= gone["t"] - leaving["t"] <= 3400, (leaving, gone))
+    out, phases, launchd = eject(False)
+    later = first(phases, label="later")
+    checks.expect("home-eject-busy", "a release that fails keeps the identity",
+                  later is not None and later["phase"] == "present" and first(phases, phase="leaving") is None, later)
+
+    # Another card: the first leaves, the second comes in with its own transition.
+    x, rx = card(SAMPLES / "sea")
+    y, ry = card(SAMPLES / "paper")
+    cardd, launchd = serve("home-change", [[(0, snapshot()), (0.6, {"type": "card", "card": rx}),
+                                            (5.2, {"type": "removed", "slot": "c1", "insertion": x}),
+                                            (5.3, {"type": "card", "card": ry})]])
+    out, phases, _ = run("home-change", cardd, launchd, [], end=10000)
+    left = [p for p in phases if p["phase"] in ("leaving", "none", "ready", "entering", "present")]
+    second = [p for p in left if p["insertion"] == y and p["phase"] == "entering"]
+    checks.expect("home-change", "A leaves (removal); B then comes in (arrival, its sweep)",
+                  first(phases, phase="leaving", exit="removal") is not None and second and second[0]["entry"] == "arrival"
+                  and second[0]["kind"] == "sweep", [(p["phase"], p["insertion"][-3:], p["exit"], p["kind"]) for p in left])
+
+    # The player's choices.
+    x, rx = card(SAMPLES / "sea")
+    cardd, launchd = serve("home-reduce-motion", [[(0, snapshot()), (0.6, {"type": "card", "card": rx})]])
+    out, phases, _ = run("home-reduce-motion", cardd, launchd, [{"at": 4000, "probe": "still-1"}, {"at": 5500, "probe": "still-2"}],
+                         settings="[display]\nreduce-motion=on\n", end=6000)
+    entering = first(phases, phase="entering")
+    still = [first(phases, label=f"still-{i}") for i in (1, 2)]
+    checks.expect("home-reduce-motion", "Reduce motion: a fade instead of the tide, and a still world",
+                  entering is not None and entering["kind"] == "fade" and all(still)
+                  and still[0]["still"] and still[1]["frames"] - still[0]["frames"] <= 1, (entering, still))
+
+    x, rx = card(SAMPLES / "sea")
+    cardd, launchd = serve("home-colours", [[(0, snapshot()), (0.6, {"type": "card", "card": rx})]])
+    out, phases, _ = run("home-colours", cardd, launchd, [{"at": 5000, "probe": "after"}], settings="[shape]\nmode=colours\n",
+                         end=5500)
+    after = first(phases, label="after")
+    checks.expect("home-colours", "Colours only: the identity comes in without a world",
+                  after is not None and after["phase"] == "present" and not after["world"] and not after["worldDrawn"], after)
+
+    x, rx = card(SAMPLES / "sea")
+    cardd, launchd = serve("home-off", [[(0, snapshot()), (0.6, {"type": "card", "card": rx})]])
+    out, phases, _ = run("home-off", cardd, launchd, [{"at": 3000, "probe": "after"}], settings="[shape]\nmode=off\n", end=3500)
+    checks.expect("home-off", "Off: MUN alone", all(p["phase"] == "none" and p["source"] == "none" for p in phases), phases)
+
+    x, rx = card(broken)
+    cardd, launchd = serve("home-broken", [[(0, snapshot()), (0.6, {"type": "card", "card": rx})]])
+    out, phases, _ = run("home-broken", cardd, launchd, [{"at": 5000, "probe": "after"}], end=5500)
+    after = first(phases, label="after")
+    checks.expect("home-broken", "a world that does not decode: the identity comes in, the palette over MUN's world",
+                  after is not None and after["phase"] == "present" and after["worldFailed"] and not after["worldDrawn"], after)
+
+    # Settings over the world, and the options focused, measured.
+    x, rx = card(SAMPLES / "sea")
+    cardd, launchd = serve("home-settings", [[(0, snapshot()), (0.6, {"type": "card", "card": rx})]])
+    out, phases, grabs = run("home-settings", cardd, launchd, [
+        {"at": 5000, "call": "enter"}, {"at": 6200, "grab": "options"}, {"at": 6500, "call": "back"},
+        {"at": 6700, "set": {"mainIndex": 2}}, {"at": 6900, "call": "enter"}, {"at": 8200, "grab": "settings"},
+        {"at": 8400, "probe": "settings"}], end=8800)
+    surfaces_hold("home-settings", grabs.get("options"), "options focused")
+    surfaces_hold("home-settings", grabs.get("settings"), "Settings over the scrimmed world")
+    settings = first(phases, label="settings")
+    checks.expect("home-settings", "in Settings the world is under MUN's scrim",
+                  settings is not None and settings["level"] == 1 and settings["dim"] > 0.7, settings)
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("binary", type=Path)
     parser.add_argument("--work", type=Path, help="keep the scenes, logs, grabs and report here")
-    parser.add_argument("--only", choices=("card", "cue", "surfaces"), action="append")
+    parser.add_argument("--only", choices=("card", "cue", "surfaces", "presence", "world", "home"), action="append")
     args = parser.parse_args(argv)
     binary = args.binary.resolve()
     if not os.access(binary, os.X_OK):
@@ -537,7 +982,7 @@ def main(argv=None) -> int:
     exports.mkdir()
     packages.mkdir()
     shell, checks, report = Shell(binary, work), Checks(), {}
-    only = set(args.only or ("card", "cue", "surfaces"))
+    only = set(args.only or ("card", "cue", "surfaces", "presence", "world", "home"))
     try:
         if "card" in only:
             print("MUN Shell behaviour: the card object")
@@ -548,6 +993,15 @@ def main(argv=None) -> int:
         if "surfaces" in only:
             print("MUN Shell behaviour: the dressed surfaces' contrast")
             surface_cases(shell, checks, exports, packages, report)
+        if "presence" in only:
+            print("MUN Shell behaviour: presence (phases, reasons, what waits)")
+            presence_cases(shell, checks, exports, packages)
+        if "world" in only:
+            print("MUN Shell behaviour: the world")
+            world_cases(shell, checks, exports, packages)
+        if "home" in only:
+            print("MUN Shell behaviour: Home, as a player meets it")
+            home_cases(shell, checks, exports, packages, report)
         (work / "report.json").write_text(json.dumps(report, indent=1, sort_keys=True) + "\n", encoding="utf-8")
         for folder in checks.failing:
             log = work / folder / "output.log"

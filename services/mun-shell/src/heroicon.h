@@ -60,6 +60,10 @@ class HeroIcon : public QQuickPaintedItem {
     Q_PROPERTY(QString cardShape READ cardShape WRITE setCardShape NOTIFY cardChanged)
     Q_PROPERTY(qreal morph READ morph WRITE setMorph NOTIFY cardChanged)
     Q_PROPERTY(QColor cardGlow READ cardGlow WRITE setCardGlow NOTIFY cardChanged)
+    // How far the card object has become its Shape, 0 (MUN's crescent) to 1
+    // (its window, outline and light), as a transition reaches it; painted
+    // in tenths.
+    Q_PROPERTY(qreal cardReveal READ cardReveal WRITE setCardReveal NOTIFY cardChanged)
 
 public:
     explicit HeroIcon(QQuickItem *parent = nullptr);
@@ -82,6 +86,8 @@ public:
     void setMorph(qreal morph);
     QColor cardGlow() const { return m_cardGlow; }
     void setCardGlow(const QColor &glow);
+    qreal cardReveal() const { return m_reveal; }
+    void setCardReveal(qreal reveal);
 
 signals:
     void iconChanged();
@@ -137,4 +143,5 @@ private:
     QString m_cardShape = QStringLiteral("card");
     qreal m_morph = 0;
     QColor m_cardGlow;
+    qreal m_reveal = 1;
 };

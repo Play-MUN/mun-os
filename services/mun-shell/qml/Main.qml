@@ -67,18 +67,32 @@ Window {
 
     // The Game Card's bands: MUN's glass in the game's plate colour under
     // the status line, the path and the hints, at the opacity its text needs
-    // over any world. `under` is the item it lies under, a sibling.
+    // over any world (MUN's own set where only the game's world is drawn),
+    // each taken as the transition's front reaches it. `under` is the item it
+    // lies under, a sibling; `look` is what it shows (window.bandLook).
     component Band: Material {
         required property Item under
-        visible: Shape.dressed
+        required property var look
+        visible: look.shaped
         x: under.x - 26
         y: under.y - 12
         width: under.width + 52
         height: under.height + 24
         radii: [16]
-        plate: Shape.plate
+        plate: look.plate
         material: "glass"
-        opacity: Shape.bandsOpacity
+        opacity: look.opacity
+        amount: look.amount
+    }
+    // A band's look where the front has reached `box`: {shaped, plate,
+    // opacity, amount, text}.
+    function bandLook(plated, phase, kind, progress, box) {
+        const reached = plated ? Shape.reach(phase, kind, progress, box) : 0
+        if (reached <= 0)
+            return { shaped: false, plate: Shape.plate, opacity: 1, amount: 0, text: Theme.ash, strong: Theme.moon }
+        const look = Shape.blend("bands", reached)
+        const text = look.game ? Shape.text : Theme.moon
+        return { shaped: true, plate: look.plate, opacity: look.opacity, amount: look.amount, text: text, strong: text }
     }
 
     // ------------------------------------------------------------ MUN Shape
@@ -90,28 +104,97 @@ Window {
     Binding { target: Shape; property: "card"; value: CardClient.card }
     Binding { target: Shape; property: "mode"; value: ShellSettings.shapeMode }
     Binding { target: Shape; property: "arrival"; value: CardClient.arrival }
+    Binding { target: Shape; property: "orb"; value: Theme.orb }
     // The game's menu sounds, when it has them, the player wants them, MUN
-    // Shape is shown in full and the player is on the game's surfaces: in
-    // Settings and in any dialog the sounds are MUN's, as their looks are.
+    // Shape is shown in full, its identity has come in (they stop at once as
+    // it leaves) and the player is on the game's surfaces: in Settings and in
+    // any dialog the sounds are MUN's, as their looks are.
     Binding {
         target: SystemSounds
         property: "gameSounds"
         value: ShellSettings.gameSounds && ShellSettings.shapeMode === "full" && !window.inSettings && !window.modal
+               && (Shape.phase === "present" || (Shape.phase === "entering" && Shape.objectProgress >= 1))
     }
     readonly property string shapeSounds: JSON.stringify(Shape.sounds)
     onShapeSoundsChanged: SystemSounds.useGameSounds(Shape.sounds)
+
+    // ------------------------------------------------------------ MUN Shape: presence
+
+    // An identity from a package comes in with a transition and leaves with
+    // one (src/shape.h, "Presence"); this runs them. It comes in once Home
+    // is on screen without a dialog (a return from a game or a changed
+    // choice comes in at once, under any dialog), its world prepared: an
+    // arrival with the package's transition and its seconds, anything else
+    // with a short fade; Reduce motion makes every transition a fade. A card
+    // that arrived while the shell watched is greeted then by its cue, once.
+    // It leaves when Shape says (the card released, removed or replaced, or
+    // the choice changed): after Eject safely is confirmed with the package's
+    // out transition, a little shorter than its in, otherwise quickly, the
+    // way it came if it had not finished coming in.
+    property bool cueDue: false
     Connections {
         target: Shape
-        // A card that arrived while the shell watched is greeted once by its
-        // cue when its identity first shows; a card found at start (after a
-        // game) is not.
-        function onAdopted(live) {
-            if (live && window.powered && ShellSettings.systemSounds)
-                SystemSounds.playGame("insert")
+        function onAdopted(live) { window.cueDue = live }
+        function onPhaseChanged() {
+            if (Shape.phase === "leaving")
+                window.shapeLeave()
         }
     }
-    readonly property bool shaped: Shape.dressed
-    readonly property color bandText: shaped ? Shape.text : Theme.ash
+    readonly property bool homeOnScreen: powered && !inSettings && !modal && !starting && !boot.playing
+    readonly property bool shapeMayBegin: Shape.phase === "ready" && world.ready
+                                          && (Shape.entry === "arrival" ? homeOnScreen : powered)
+    onShapeMayBeginChanged: if (shapeMayBegin) Qt.callLater(shapeBegin)
+    function shapeBegin() {
+        if (!shapeMayBegin)
+            return
+        const arrival = Shape.entry === "arrival"
+        const kind = arrival && !ShellSettings.reduceMotion ? Shape.transitionIn : "fade"
+        const seconds = arrival ? (ShellSettings.reduceMotion ? 0.8 : Shape.seconds) : 0.6
+        Shape.begin(kind)
+        // The cue: the player's sounds on, the game's too, Shape in full.
+        if (cueDue && ShellSettings.systemSounds && ShellSettings.gameSounds && ShellSettings.shapeMode === "full")
+            SystemSounds.playGame("insert")
+        cueDue = false
+        shapeMotion.stop()
+        shapeMotion.from = 0
+        shapeMotion.to = 1
+        shapeMotion.duration = Math.round(seconds * 1000)
+        shapeMotion.start()
+    }
+    function shapeLeave() {
+        const unfinished = shapeMotion.running && shapeMotion.to === 1
+        shapeMotion.stop()
+        const release = Shape.exit === "release"
+        const kind = ShellSettings.reduceMotion ? "fade" : unfinished ? Shape.kind : Shape.transitionOut
+        const seconds = release && !unfinished ? Math.min(2.4, Math.max(0.8, Shape.seconds * 0.75)) : 0.5
+        Shape.leaveWith(kind)
+        shapeMotion.from = Shape.progress
+        shapeMotion.to = 0
+        shapeMotion.duration = Math.max(1, Math.round(seconds * 1000 * Shape.progress))
+        shapeMotion.start()
+    }
+    NumberAnimation {
+        id: shapeMotion
+        target: Shape
+        property: "progress"
+        onFinished: to === 1 ? Shape.arrived() : Shape.left()
+    }
+    // Navigation first (src/framewatch.h): while a world is drawn, strain in
+    // the interface's own frames or keys steps the world down one level.
+    Binding { target: FrameWatch; property: "window"; value: window }
+    Binding { target: FrameWatch; property: "judging"; value: world.drawn && window.powered }
+    Binding { target: FrameWatch; property: "animating"; value: shapeMotion.running }
+    Connections {
+        target: FrameWatch
+        function onStrained(why) { world.stepDown(why) }
+    }
+    // Each band's look where the front is (see Band).
+    readonly property var statusLook: bandLook(Shape.plated, Shape.phase, Shape.kind, Shape.progress,
+                                               Qt.rect(status.x - 26, status.y - 12, status.width + 52, status.height + 24))
+    readonly property var pathLook: bandLook(Shape.plated, Shape.phase, Shape.kind, Shape.progress,
+                                             Qt.rect(path.x - 26, path.y - 12, path.width + 52, path.height + 24))
+    readonly property var hintsLook: bandLook(Shape.plated, Shape.phase, Shape.kind, Shape.progress,
+                                              Qt.rect(hints.x - 26, hints.y - 12, hints.width + 52, hints.height + 24))
 
     // ------------------------------------------------------------ navigation
 
@@ -504,6 +587,7 @@ Window {
 
         Keys.onPressed: (event) => {
             event.accepted = true
+            FrameWatch.keyPressed()
             window.wake()
             // Any key skips the start-up to the console's logo; Home follows
             // once the services have answered.
@@ -528,11 +612,37 @@ Window {
         Backdrop {
             id: backdrop
             anchors.fill: parent
+            // Covered by a game's world, MUN's rests and is not drawn.
+            visible: !world.covering
             orb: Theme.orb
             hour: status.now.getHours() + status.now.getMinutes() / 60
-            glowColor: Shape.ambient
-            tint: Shape.tint
-            running: !window.resting && window.powered && !ShellSettings.reduceMotion
+            // A package's light and tint come with its transition; a lent or
+            // read one at once.
+            glowColor: Shape.phase === "ready" ? "transparent" : Shape.ambient
+            tint: Shape.phase === "ready" ? "transparent" : Shape.tint
+            running: !window.resting && window.powered && !ShellSettings.reduceMotion && !world.covering
+        }
+        // The game's world (src/shapeworld.h), inside the transition's front,
+        // under MUN's scrim while Settings or a dialog is shown.
+        ShapeWorld {
+            id: world
+            anchors.fill: parent
+            visible: Shape.phase === "entering" || Shape.phase === "present" || Shape.phase === "leaving"
+            world: Shape.world
+            root: Shape.root
+            transition: Shape.kind
+            progress: Shape.progress
+            orb: Theme.orb
+            dim: (window.inSettings || !!window.modal) ? 0.78 : 0
+            Behavior on dim { NumberAnimation { duration: 400; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.ease } }
+            scrimColour: Theme.screen
+            // The layers lean with the chosen entry, by their depth.
+            parallax: window.inSettings ? 0 : (window.mainIndex - 1.5) * -18
+            Behavior on parallax { NumberAnimation { duration: 1200; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.settle } }
+            running: !window.resting && window.powered
+            still: ShellSettings.reduceMotion
+            frontLight: Shape.glow.valid ? Shape.glow : Shape.ambient.valid ? Shape.ambient : Theme.led
+            frontAccent: Shape.focus
         }
         HeroIcon {
             id: hero
@@ -547,6 +657,7 @@ Window {
             cardShape: Shape.cardShape
             morph: Shape.morph
             cardGlow: Shape.glow
+            cardReveal: Shape.objectProgress
             onIconChanged: backdrop.ripple()
         }
 
@@ -557,9 +668,9 @@ Window {
             Behavior on scale { NumberAnimation { duration: 500; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.settle } }
 
             // The Game Card's bands (Band, above).
-            Band { under: status }
-            Band { under: path }
-            Band { under: hints }
+            Band { under: status; look: window.statusLook }
+            Band { under: path; look: window.pathLook }
+            Band { under: hints; look: window.hintsLook }
 
             StatusBar {
                 id: status
@@ -571,8 +682,9 @@ Window {
                 networkText: window.networkText
                 online: window.online
                 clockFormat: ShellSettings.clockFormat
-                textColour: window.bandText
-                clockColour: window.shaped ? Shape.text : Theme.moon
+                textColour: window.statusLook.text
+                clockColour: window.statusLook.strong
+                socketed: window.statusLook.shaped
             }
 
             Item {
@@ -605,6 +717,7 @@ Window {
                 content: window.panel
                 // The game's panel: the Game Card entry's, on the main arc.
                 dressed: window.focusedEntry.key === "card" && !window.inSettings
+                overWorld: world.drawn && !window.inSettings
                 selected: window.level === 2 ? window.optionIndex : -1
                 note: window.note
                 onOptionClicked: (index) => { window.wake(); window.clickOption(index) }
@@ -617,7 +730,7 @@ Window {
                 anchors.bottomMargin: 66
                 size: 15
                 tracking: 0.24
-                color: window.bandText
+                color: window.pathLook.text
                 // The console's name, as its mark, where the trail starts.
                 readonly property string home: "MUN™"
                 readonly property string separator: "  ›  "
@@ -645,20 +758,20 @@ Window {
                             radius: 18
                             color: "transparent"
                             border.width: 2
-                            border.color: window.bandText
+                            border.color: window.hintsLook.text
                             UiText {
                                 anchors.centerIn: parent
                                 text: modelData[0]
                                 size: 17
                                 weight: 700
-                                color: window.shaped ? Shape.text : Theme.moon
+                                color: window.hintsLook.strong
                             }
                         }
                         UiText {
                             anchors.verticalCenter: parent.verticalCenter
                             text: modelData[1]
                             size: 23
-                            color: window.bandText
+                            color: window.hintsLook.text
                         }
                     }
                 }
@@ -666,12 +779,31 @@ Window {
         }
 
         // The game takes the screen: the launcher stops the shell in a moment.
+        // With a game's identity on screen, the console dives into its depth
+        // first: its deep colour (at the luminance of MUN's hand-over, so the
+        // words keep their contrast) grows from the card object over the
+        // world while the launcher prepares, and nothing waits for it.
+        readonly property bool diving: Shape.phase === "present" && Shape.veil.valid
+        Rectangle {
+            id: dive
+            readonly property real reach: 2 * Math.hypot(Math.max(Theme.orb.x, Theme.canvasWidth - Theme.orb.x),
+                                                         Math.max(Theme.orb.y, Theme.canvasHeight - Theme.orb.y))
+            visible: canvas.diving && scale > 0.021
+            width: reach
+            height: reach
+            radius: reach / 2
+            x: Theme.orb.x - reach / 2
+            y: Theme.orb.y - reach / 2
+            color: Shape.veil
+            scale: window.starting ? 1 : 0.02
+            Behavior on scale { NumberAnimation { duration: 520; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.ease } }
+        }
         Rectangle {
             anchors.fill: parent
-            color: Theme.layer
+            color: canvas.diving ? Shape.veil : Theme.layer
             opacity: window.starting ? 1 : 0
             visible: opacity > 0
-            Behavior on opacity { NumberAnimation { duration: 500; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.ease } }
+            Behavior on opacity { NumberAnimation { duration: canvas.diving ? 700 : 500; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.ease } }
             UiText {
                 anchors.centerIn: parent
                 horizontalAlignment: Text.AlignHCenter

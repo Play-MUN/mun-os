@@ -76,12 +76,13 @@ Window {
             // The bar, clear of its rounded ends and edges.
             const left = node.knobSize + node.wireWidth + (node.on ? 4 : 0)
             const width = node.width - node.knobSize - node.wireWidth - 4
-            entries.push({ label: node.label, chosen: node.on,
+            entries.push({ label: node.label, chosen: node.on, reached: node.reached,
                            box: projected(node, left + 14, 9, left + width - 34, node.barHeight - 9, true) })
         }
         return { entries: entries,
                  // The kicker, the title and the text, above the options.
                  panelText: projected(panel, 52, 40, panel.width - 52, 200, true),
+                 panelReached: panel.reached,
                  panel: projected(panel, 0, 0, panel.width, panel.height, false) }
     }
 
@@ -105,17 +106,26 @@ Window {
         const s = root.config.shots[root.shot]
         root.world = s.world
         root.options = s.state === "options"
+        Shape.progress = s.progress === undefined ? 1 : s.progress
         settle.restart()
     }
 
     Timer { id: settle; interval: root.config.settle; onTriggered: root.take() }
 
     Component.onCompleted: Shape.card = root.config.card
+    // The identity shows once it has come in (src/shape.h, "Presence"):
+    // here at once, then the shots.
     Connections {
         target: Shape
-        function onChanged() {
-            if (root.shot < 0 && Shape.source === "shape")
-                root.advance()
+        function onPhaseChanged() {
+            // Entering and held there: each shot sets the transition's
+            // progress (1 unless it names one), reached per surface as Main's.
+            if (Shape.phase === "ready") {
+                Shape.begin(root.config.kind || "fade")
+                Shape.progress = 1
+                if (root.shot < 0 && Shape.source === "shape")
+                    root.advance()
+            }
         }
     }
     Timer { interval: root.config.timeout; running: true; onTriggered: { console.log("SCENE-TIMEOUT"); Qt.quit() } }

@@ -5,8 +5,10 @@ import MUN.Shell
 // A scene of tests/behaviour.py, loaded by the shell's own binary in place of
 // its Main.qml (MUN_SHELL_QML_DIR). It gives the Shape controller the inputs
 // of CONFIG's steps at their times (milliseconds from the start) and prints
-// what Shape applies: one PROBE line per change and per asked probe, one
-// ADOPTED line per adoption. Nothing is drawn.
+// what Shape applies: one PROBE line per change, per change of its phase and
+// per asked probe, one ADOPTED line per adoption. A step may also run the
+// presence as QML does (begin, progress, arrived, leaveWith, left). Nothing is
+// drawn.
 Window {
     id: root
     visible: false
@@ -31,7 +33,15 @@ Window {
             tint: Shape.tint.valid ? String(Shape.tint) : "",
             focus: String(Shape.focus),
             sounds: Object.keys(Shape.sounds).sort(),
-            live: Shape.live
+            live: Shape.live,
+            phase: Shape.phase,
+            entry: Shape.entry,
+            exit: Shape.exit,
+            kind: Shape.kind,
+            progress: Shape.progress,
+            plated: Shape.plated,
+            world: Object.keys(Shape.world).length > 0,
+            transition: [Shape.transitionIn, Shape.transitionOut, Shape.seconds]
         }))
     }
 
@@ -44,6 +54,16 @@ Window {
         // last may be applied.
         for (const card of (step.cards || []))
             Shape.card = card
+        if (step.begin !== undefined)
+            Shape.begin(step.begin)
+        if (step.progress !== undefined)
+            Shape.progress = step.progress
+        if (step.arrived)
+            Shape.arrived()
+        if (step.leaveWith !== undefined)
+            Shape.leaveWith(step.leaveWith)
+        if (step.left)
+            Shape.left()
         if (step.probe !== undefined)
             report(step.probe)
         if (step.quit)
@@ -65,6 +85,7 @@ Window {
     Connections {
         target: Shape
         function onChanged() { root.report("changed") }
+        function onPhaseChanged() { root.report("phase") }
         function onAdopted(live) { console.log("ADOPTED " + JSON.stringify({ insertion: Shape.insertion, live: live })) }
     }
 }

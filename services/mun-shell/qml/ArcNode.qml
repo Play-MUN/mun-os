@@ -12,8 +12,15 @@ import MUN.Shell
 // (Shape, docs/shape.md): its focus colour, and, while the card's colours
 // hold, the game's plate under its label (at the opacity the contrast rule
 // gives, in the package's material), its text colour, and a chosen bar of
-// the text's colour with the plate's colour as label. Every other entry, the
-// Settings arc's among them, stays MUN's.
+// the text's colour with the plate's colour as label; where the game's
+// colours do not hold but its world is drawn, MUN's own set on plates of
+// their proven opacity. Every other entry, the Settings arc's among them,
+// stays MUN's.
+//
+// The identity arrives and leaves with a transition: the entry takes it when
+// the transition's front reaches it (`reached`, 0 to 1, from Shape.reach),
+// its plate blending by the plan the checker proved (Shape.blend), its text
+// and focus changing at one point of it.
 //
 // `dimmed` (while the panel's options have the focus): MUN's entry fades as
 // a whole to 0.4. A dressed one never fades its plate or its text, whose
@@ -65,21 +72,31 @@ ProjectedLayer {
     onCompactChanged: refresh()
     onDimmedChanged: transition.restart()
 
-    // The entry's colours: the game's while dressed and its set holds, MUN's
-    // otherwise. The focus may be the game's even where the plates are MUN's
-    // (a lent or cover-read accent).
-    readonly property bool shaped: dressed && Shape.dressed
+    // How far the transition has reached the entry's bar (canvas coordinates),
+    // and what it shows there: MUN's look at 0, a plate from just past it.
+    readonly property rect box: Qt.rect(originX + knobSize + wireWidth, originY, bar.width, barHeight)
+    readonly property real reached: dressed && Shape.plated ? Shape.reach(Shape.phase, Shape.kind, Shape.progress, box) : 0
+    readonly property bool shaped: reached > 0
+    readonly property var look: shaped ? Shape.blend("entries", reached) : ({ plate: Shape.plate, opacity: 1, material: "solid", amount: 0, game: false })
+    readonly property var barLook: shaped ? Shape.blend("bar", reached) : ({ plate: Shape.bar, game: false })
+    onReachedChanged: transition.restart()
     // Dimmed and dressed: the entry keeps its proven pair and fades only its
     // ornaments; its chosen bar (`lit`) is shown only while not dimmed.
     readonly property bool faded: dimmed && shaped
     readonly property bool lit: on && !faded
     readonly property real ornaments: faded ? 0.4 : 1
-    readonly property color accent: dressed ? Shape.focus : Theme.accent
-    readonly property color accentDeep: dressed ? Shape.focusDeep : Theme.accentDeep
+    // The focus: the game's with its set, MUN's copper before it (or a lent
+    // or cover-read accent, which dresses no plate and shows at once).
+    readonly property bool gameFocus: shaped ? look.game : dressed && !Shape.plated
+    readonly property color accent: gameFocus ? Shape.focus : Theme.accent
+    readonly property color accentDeep: gameFocus ? Shape.focusDeep : Theme.accentDeep
     function accentAlpha(a) { return Theme.alpha(root.accent, a) }
     function accentDeepAlpha(a) { return Theme.alpha(root.accentDeep, a) }
-    readonly property color labelColour: shaped ? (lit ? Shape.barText : Shape.text) : (on ? Theme.inkOnMoon : Theme.moon)
-    readonly property color detailColour: shaped ? (lit ? Shape.barText : Shape.text) : (on ? Theme.ashOnMoon : Theme.ash)
+    // On a plate: the game's text once its plan says so, MUN's before (the
+    // neutral set: moon on its plate, ink on its bar).
+    readonly property color labelColour: shaped ? (lit ? (barLook.game ? Shape.barText : Theme.inkOnMoon) : (look.game ? Shape.text : Theme.moon))
+                                                : (on ? Theme.inkOnMoon : Theme.moon)
+    readonly property color detailColour: shaped ? labelColour : (on ? Theme.ashOnMoon : Theme.ash)
     onAccentChanged: transition.restart()
     onShapedChanged: transition.restart()
     Connections {
@@ -233,9 +250,10 @@ ProjectedLayer {
             anchors.fill: parent
             visible: root.shaped
             radii: root.barRadii
-            plate: root.lit ? Shape.bar : Shape.plate
-            opacity: root.lit ? 1 : Shape.entriesOpacity
-            material: root.lit ? "solid" : Shape.entriesMaterial
+            plate: root.lit ? root.barLook.plate : root.look.plate
+            opacity: root.lit ? 1 : root.look.opacity
+            material: root.lit ? "solid" : root.look.material
+            amount: root.lit ? 1 : root.look.amount
         }
         Box {
             anchors.fill: parent

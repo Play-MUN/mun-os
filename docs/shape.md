@@ -8,14 +8,14 @@ package with the same code, and nothing on the card runs.
 
 **Status.** This document is the package contract, format `mun-shape/1`, and
 its checker, `mun-card shape`. The card service copies a valid card's
-package, checked, to RAM for the shell, and the shell dresses Home with its
-**still** part: the palette and materials of the eligible surfaces, the card
-object, the ambient light and tint of MUN's world, the menu sounds and the
-insertion cue. **Worlds and transitions are not drawn yet**: a package's
-`world` and `transition` are checked and exported, not shown. What each part
-does, and what is still to come, is under
-[How the console uses a package](#how-the-console-uses-a-package); the
-resource figures there are objectives to be measured, not guarantees.
+package, checked, to RAM for the shell, and the shell draws all of it: the
+palette and materials of the eligible surfaces, the card object, the world
+behind Home with its motion, the transitions that bring the identity in and
+take it away, the menu sounds and the insertion cue. How the console draws
+each part is under [How the console draws a world](#how-the-console-draws-a-world)
+and [How the console uses a package](#how-the-console-uses-a-package); what
+it was measured to cost, in a virtual machine, is under
+[Measured](#measured).
 
 ## Where the package lives
 
@@ -137,6 +137,50 @@ All six colours, or the block is dropped (`shape_field`).
 Canvas pixels are those of MUN's 1920×1080 design canvas. A world in which
 nothing moves (every motion `still`, no emitters) is still.
 
+#### How the console draws a world
+
+The same code draws every package; the numbers below are part of the
+contract, so that a publisher sees on the console what it designed.
+
+- **Backdrop**: an image covers the canvas, scaled keeping its proportions
+  and centred; a gradient runs from its first colour at the top to its last
+  at the bottom, the others evenly between.
+- **Layers**, drawn in order over the backdrop: each is scaled to the
+  canvas's height, keeping its proportions, and repeated across the width
+  (make the right edge meet the left). `still` stays; `drift` moves left at
+  `speed`; `sway` comes and goes, `max(16, speed)` canvas pixels either way
+  every 14 s; `parallax` moves only with navigation. Every layer also leans
+  with the chosen entry by `depth` times 18 canvas pixels per entry.
+  `opacity` applies to the whole layer. Transparent rows cost nothing.
+- **Emitters**: sprites face right in their images and are mirrored when
+  they travel left. Each sprite takes one of three sizes (0.8, 1 and 1.2
+  times `scale`) and ±20 % of `speed`, the same for the same package every
+  time. `rise` and `fall` cross the `band` upwards or downwards with a
+  gentle sway, fading at its edges; `drift` crosses the screen rightwards
+  within the band; `school` is one group, the sprites in their places
+  within it (360 × up to 120 canvas pixels), crossing the screen, turning
+  back and coming again at another height of the band; `orbit` circles the
+  card object on a flattened orbit.
+- **Light textures** are stretched over the canvas and blended by `screen`
+  or `add` at `opacity`: `sway` moves them 28 canvas pixels either way every
+  16 s (they are drawn 6 % larger, so their edges never show), `ripple`
+  shifts bands of rows by two slow waves (light through water), `pulse`
+  breathes between 72 % and 100 % of `opacity` every 5 s.
+- **Rate**: the world moves at `rate` frames per second; a transition's
+  front at 30. A world at rest (three minutes without input) slows to a stop
+  and draws nothing more, as MUN's own does.
+- **Fits the display**: before anything decodes, the console estimates what
+  the world will take at the display's size from the images' headers and
+  draws it at the richest level that fits the budget (136 MiB at 1080p,
+  200 MiB at 1440p, with the frames, one decode and the export): full; without
+  light textures; the backdrop and the nearest layer at 10 frames per
+  second; still (composed once); none (the palette over MUN's world). While
+  navigating, if the interface's own frames fall behind (95th percentile over
+  25 ms) or keys take over 50 ms to show, for two 2-second windows in a row,
+  the world steps down one level for the rest of the insertion. A
+  transition's own frames are timed, not judged. An image that fails to
+  decode drops the whole world, as the checker would.
+
 ### `surfaces`
 
 `entries` (the menu's entries) and `panel` (the game's panel) each take
@@ -150,6 +194,24 @@ line, the path and the hints sit on a band of MUN's glass.
 | `in` | `fade` | `tide` (a front from the card object reaches each surface in turn), `fade` or `sweep` |
 | `out` | `fade` | likewise, when the package leaves |
 | `seconds` | `1.6` | 0.8–4 |
+
+- `tide`: a circle of light grows from the card object to the screen's
+  farthest corner, slow to leave, fast across, slow to arrive; the world is
+  inside it, MUN's outside. The card object changes first (its window, then
+  its outline and light, within the front's first 260 canvas pixels); each
+  menu entry, the panel and each band change as the front crosses them.
+- `sweep`: a vertical front from the left edge to the right one; each surface
+  changes as it passes over it.
+- `fade`: everything at once.
+- When: a card inserted while the console is on Home comes in with `in` over
+  `seconds`, once Home is on screen with no dialog open (a card inserted in
+  Settings waits for Home). Back from a game, or after a changed choice, the
+  identity comes back with a 0.6 s fade, under any dialog. *Eject safely*
+  confirmed: `out`, over three quarters of `seconds` (0.8–2.4 s); the card
+  stays dressed until the console has confirmed its release. Removed,
+  replaced or with Shape turned off: 0.5 s back to MUN, the way it came if it
+  had not finished coming in. With *Reduce motion* every transition is a
+  fade (0.8 s for an arrival).
 
 ### `sounds`
 
@@ -203,6 +265,28 @@ estimates a package's memory by arithmetic, which is not a measurement. A
 package that fits the enforced limits but not a display's budget is to be
 drawn at a lower level of detail (without light textures, then with fewer
 layers, then still, then colours only), never at the expense of navigation.
+
+### Measured
+
+In a virtual machine, not on a console's hardware: MUN OS's development
+image under QEMU with HVF on an ARM64 Mac, 4 vCPUs, 8 GiB, the software
+renderer. Each value covers one shell, the same sample world (the `sea`
+package; a second, private package with a world of the same size gave the
+same figures within 2 points), navigated with one key every 300 ms for 30 s.
+
+| | 1080p, no card | 1080p, world | 1440p, no card | 1440p, world |
+| --- | --- | --- | --- | --- |
+| CPU, one core's share, at rest on Home | 8.5 % | 37 % | 16.5 % | 54 % |
+| CPU while navigating | 48 % | 69 % | 80 % | 117 % |
+| Key to frame on screen, median / 95th percentile | 21 / 40 ms | 23 / 37 ms | 28 / 48 ms | 32 / 52 ms |
+| The interface's frames while navigating, 95th percentile | 14 ms | 14 ms | 17 ms | 20 ms |
+| The world's frames per second (rate 20) / paint time, median | – | 17.5–19.4 / 9–14 ms | – | 17.6–19.4 / 13–18 ms |
+| A transition's frames, 95th percentile | – | 20–25 ms | – | 21–34 ms |
+| Memory the world adds, peak (the shell's, over its own without a card) | – | 68–78 MB | – | 115–150 MB (the higher after a second card, whose predecessor's freed memory the process keeps) |
+
+The full level of detail holds at both sizes: navigation stays within 10 ms
+of the console without a card, and memory within the budget. The estimate
+before decoding was 82–84 MiB at 1080p and 133–135 MiB at 1440p.
 
 ## When something is wrong
 
@@ -351,48 +435,51 @@ The algorithm, exact so that the console and the checker agree:
   strictly and published as released only once the copy has closed its
   files. A physical removal does not necessarily end a blocked read at once.
 
-**The shell, still identity** (implemented; details in its
+**The shell** (implemented; details in its
 [README](../services/mun-shell/README.md#a-game-cards-identity-mun-shape)):
 
 - It reads only the service's copy for the insertion in the card's record,
-  decodes the window image and the cover on its own thread with their
-  dimensions checked first and an allocation limit, and verifies the
-  surfaces' colours again with the same rule, falling back to MUN's set.
-- Dressed: the main arc's entries, the game's panel and the bands of the
-  status line, the path and the hints (plates in their material at their
-  computed opacity, the text and focus colours; while the game's options
-  have the focus, the arc's entries keep their plate and text as proven
-  and only their ornaments fade); the card object (its window image or the
-  cover, its outline, its light: all of it, or MUN's object when that image
-  does not decode); the ambient light (the object's while the object is the
-  game's, else the palette's light) and a tint of MUN's world, in the
-  card's hue at MUN's own luminance, so MUN's texts over it keep their
-  contrast; the menus' sounds on those surfaces, and the insertion cue,
-  once, for a card that arrived while the shell was watching, however long
-  its copy took.
+  decodes the window image, the cover and the world's images off the
+  interface thread with their dimensions checked first and an allocation
+  limit, and verifies the surfaces' colours again with the same rule,
+  falling back to MUN's set.
+- Dressed:
+  - the world behind Home;
+  - the main arc's entries, the game's panel and the bands of the status
+    line, the path and the hints: plates in their material at their
+    computed opacity, with the text and focus colours. While the game's
+    options have the focus, the arc's entries keep their plate and text as
+    proven and only their ornaments fade;
+  - the card object: its window image or the cover, its outline, its
+    light, all of it or MUN's object when that image does not decode;
+  - outside the world, the ambient light and a tint of MUN's world in the
+    card's hue at MUN's own luminance;
+  - the menus' sounds on those surfaces;
+  - the insertion cue, once, for a card that arrived while the shell was
+    watching, however long its copy took.
 - MUN's: Settings, their panels and every dialog, with MUN's focus and
-  sounds even for a card that lends colours; the start-up, the hand-over,
-  the layout and every word.
+  sounds even for a card that lends colours, over the game's world under a
+  fixed MUN scrim. Also the start-up, the hand-over's words, the layout and
+  every word. MUN's own panels on Home sit on MUN's plate over a world, and
+  the status line's lights on sockets of MUN's.
 - Without a palette: the lent colours, else the palette read from the
   cover; its accent is the focus only if it keeps 3:1 on MUN's plate.
-- A change of identity is one step; a dressed label never eases through
-  unproven colours. Returning from a game with the same card keeps its
-  identity, without the cue.
+- The world is painted off the interface thread into frames the interface
+  shows without waiting for them, at the detail level the display's budget
+  allows. It steps down when navigation suffers, and it is still at rest
+  or with *Reduce motion*.
+- The transitions follow the card's state: in when Home is on screen, back
+  after a game with a short fade and without the cue, out only once
+  *Eject safely* is confirmed, quickly on removal or replacement.
+- *Play* never waits: the game's deep colour grows from the card object
+  while the launcher takes the screen.
 - Settings: *MUN Shape* Full, Colours only or Off; *Game sounds on the
-  menus*; *Reduce motion* (Home's world and objects hold still).
-
-**Still to come** (the worlds, their motion and the transitions):
-
-- **The shell** reads only the service's copy, decodes it off the interface
-  thread with the dimensions checked first, paints the world into its own
-  frames off the interface thread and hands finished frames to the interface
-  without waiting for them, and binds only the eligible surfaces to the
-  package; Settings and dialogs keep MUN's. Everything is tagged with the
-  card's insertion and dropped if stale.
-- **Experience.** Returning from a game with the same card keeps its Shape,
-  with a short fade; removal restores MUN. Settings: MUN Shape on, colours
-  only or off; reduced motion; the game's menu sounds on or off. The first
-  implementation carries no ambient loop, gallery or custom typeface.
+  menus*; *Reduce motion* (fades, and a still world and objects).
+- Not yet: an ambient sound loop, a gallery, a custom typeface; game-file
+  preloading is out of scope. The organic outline is reached during the
+  transition and then held still: moving it continuously would repaint the
+  card object's glows on the interface thread, which the software renderer
+  cannot afford without cost to navigation.
 
 ## Tools
 

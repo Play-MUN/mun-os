@@ -10,6 +10,7 @@ use temporary directories and fake process, protocol and device boundaries.
 | File | Covers |
 | --- | --- |
 | `test_card.py` | Manifest validation, both naming generations, image creation and variants, offline inspection, conversion |
+| `test_shape.py` | MUN Shape packages: the strict JSON profile, schema, file headers, budgets, contrast proofs and transition plans, the cover palette, the template, every defective package, the two samples, a card image read like its folder |
 | `test_cardd.py` | The card service: eligibility, states, framing, staging, single-object saves and their failures, safe release |
 | `test_directory_saves.py` | Directory saves: checks, capture rule, carried units, restore, adoption, failure cases |
 | `test_launchd.py` | The launcher: launch flow, identity, runtime profiles, environment, results, cleanup, recovery |

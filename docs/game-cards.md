@@ -77,6 +77,12 @@ background = "#BFD9F2"
 | `saves.location` | no | default `saves`; if present on the card it must be a directory |
 | `saves.directory`, `saves.units`, `saves.checks`, `saves.max_bytes` | no, all four or none | directory saves for a game that writes its own files ([saves.md](saves.md)) |
 
+The directory `mun-shape/` at the root of the content is reserved for MUN
+Shape, the package with which a card dresses the console in its game's
+identity ([shape.md](shape.md)). A game's own files do not use that name. The
+manifest names nothing of it, and a package never makes a card invalid; no
+release renders it yet.
+
 Every path in the manifest is relative, stays inside the card, has no empty,
 `.` or `..` segment, no backslash or NUL, uses only letters, digits, `.`, `_`
 and `-` in each segment (at most 255 characters in all) and must not be or

@@ -12,6 +12,10 @@ it ([os/README.md](../os/README.md)).
   against the image's libraries; a probe of the `linux-arm64-gl-v0` profile
   and of content access during play.
 
+- [`shape`](shape/README.md): two MUN Shape packages, `sea` and `paper`,
+  drawn and synthesised by a script here; the same contract, two different
+  identities ([docs/shape.md](../docs/shape.md)).
+
 A game this repository does not carry, such as a port of one you own, is
 compiled from a recipe you keep outside it (`./mun dev build --recipe DIR`,
 [game recipes](../os/README.md#game-recipes)) and goes on a card you make;

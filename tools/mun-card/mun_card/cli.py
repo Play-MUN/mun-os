@@ -7,14 +7,16 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
+from typing import Optional
 
-from . import convert, ext4, image
+from . import convert, ext4, image, shape, shapetools
 from .errors import CardError
-from .source import DebugfsSource
+from .source import DebugfsSource, DirectorySource
 from .validate import validate_card
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CARD_ROOT = REPO_ROOT / ".local" / "gamecards"
+SHAPE_EXAMPLES = REPO_ROOT / "examples" / "shape"
 
 
 def card_path(name_or_path: str) -> Path:
@@ -140,6 +142,179 @@ def cmd_tools(args: argparse.Namespace) -> int:
     return 0
 
 
+# ------------------------------------------------------------------ shape
+
+_STATE_WORDS = {
+    "ready": "LISTO: la consola usaría todo lo declarado",
+    "partial": "PARCIAL: la consola usaría una parte; el resto vuelve a MUN",
+    "unused": "SIN USO: la consola no usaría el paquete; la tarjeta sigue siendo válida",
+    "none": "sin paquete: la consola usaría el nivel de lectura de la portada o MUN",
+}
+_MEMORY_WORDS = {"export": "exportación", "layers": "capas", "sprites_window": "figuras y ventana",
+                 "frames": "fotogramas", "sounds": "sonidos", "decode": "decodificación", "previous": "anterior"}
+_BLOCK_WORDS = {"palette": "paleta", "card": "objeto", "world": "mundo", "surfaces": "superficies",
+                "transition": "transición", "sounds": "sonidos"}
+
+
+def _undeclared_files(folder: Path, result) -> list:
+    """Files in the folder that the package does not name: never exported."""
+    named = set(result.files) | {shape.MANIFEST, "README.md"}
+    extra = []
+    for path in sorted(folder.rglob("*")):
+        relative = path.relative_to(folder).as_posix()
+        if path.is_file() and not path.is_symlink() and relative not in named \
+                and not any(part.startswith(".") for part in path.relative_to(folder).parts):
+            extra.append(relative)
+    return extra
+
+
+def _describe_block(name: str, block: dict, files: dict) -> str:
+    if name == "palette":
+        return " ".join(f"{key} {block[key]}" for key in ("light", "mid", "deep", "plate", "text", "accent"))
+    if name == "card":
+        window = block.get("window")
+        size = f" ({files[window]['width']}×{files[window]['height']})" if window else ""
+        return (f"{block['shape']}, morph {block['morph']:g}, brillo {block.get('glow') or 'de la paleta'}, "
+                f"ventana {window + size if window else 'la portada'}")
+    if name == "world":
+        backdrop = block["backdrop"]
+        sprites = sum(emitter["count"] for emitter in block["emitters"])
+        return (f"fondo {'imagen ' + backdrop['image'] if 'image' in backdrop else 'degradado ' + ' '.join(backdrop['gradient'])}, "
+                f"capas {len(block['layers'])}, emisores {len(block['emitters'])} ({sprites} figuras), "
+                f"luces {len(block['light'])} · {shape.world_class({'world': block})}")
+    if name == "transition":
+        return f"entra {block['in']}, sale {block['out']}, {block['seconds']:g} s"
+    if name == "sounds":
+        parts = []
+        for key in ("move", "enter", "back", "insert"):
+            if key in block:
+                details = files[block[key]]
+                parts.append(f"{key} {details['seconds']:.2f} s {details['peak_dbfs']:.1f} dBFS")
+        return " · ".join(parts)
+    return ""
+
+
+def _print_shape(folder: Path, result, report: bool, read_level) -> None:
+    print(f"{folder / shape.MANIFEST}")
+    print(f"  {_STATE_WORDS[result.state]}")
+    notes_by_block = {}
+    for note in result.notes:
+        notes_by_block.setdefault(note.block, []).append(note)
+    if result.shape is not None:
+        for name in shape.BLOCKS:
+            if name == "surfaces":
+                continue
+            dropped = [n for n in notes_by_block.get(name, []) if n.level == "dropped"]
+            if name in result.shape:
+                print(f"  {_BLOCK_WORDS[name]:12s} declarado   {_describe_block(name, result.shape[name], result.files)}")
+            elif dropped:
+                print(f"  {_BLOCK_WORDS[name]:12s} DESCARTADO  [{dropped[0].code}] {dropped[0].message}"
+                      + (f" — {dropped[0].detail}" if dropped[0].detail else "")
+                      + (f" ({dropped[0].where})" if dropped[0].where else ""))
+            else:
+                print(f"  {_BLOCK_WORDS[name]:12s} no declarado → MUN")
+        surfaces = result.shape["surfaces"]
+        colours = surfaces["colours"]
+        origin = "del juego" if colours["source"] == "shape" else "de MUN"
+        print(f"  {'superficies':12s} colores {origin}: placa {colours['plate']}, texto {colours['text']}, "
+              f"foco {colours['focus']}")
+        for surface, label in (("entries", "entradas"), ("panel", "panel"), ("bands", "franjas")):
+            item = surfaces[surface]
+            plan = item["plan"] + (f" por {item['bridge']}" if "bridge" in item else "")
+            print(f"  {'':12s} {label:9s} {item['material']:6s} opacidad {item['opacity']:.3f} · transición {plan}")
+        print(f"  {'':12s} elegida   barra {colours['bar']} con texto {colours['bar_text']} · transición {surfaces['bar']['plan']}")
+    if report and result.shape is not None:
+        colours = result.shape["surfaces"]["colours"]
+        print("  contraste (placa opaca; con el mundo detrás se calcula la opacidad de arriba):")
+        print(f"    texto/placa {shape.contrast_ratio(colours['text'], colours['plate']):.2f}:1 (mínimo {shape.TEXT_RATIO:g}) · "
+              f"foco/placa {shape.contrast_ratio(colours['focus'], colours['plate']):.2f}:1 (mínimo {shape.FOCUS_RATIO:g}) · "
+              f"placa de MUN a {shape.neutral_opacity():.3f}")
+        print("  memoria estimada (aritmética, no medida; objetivos pendientes de medir en el shell):")
+        for display, values in shape.memory_estimate(result).items():
+            parts = ", ".join(f"{_MEMORY_WORDS[key]} {value:g}" for key, value in values.items()
+                              if key not in ("total", "objective"))
+            print(f"    {display}: {values['total']:g} MiB de {values['objective']} ({parts})")
+    if read_level is not None:
+        tokens = " ".join(f"{key} {value}" for key, value in read_level.items() if key not in ("focus", "plate_opacity"))
+        print(f"  nivel de lectura de la portada: {tokens}")
+        print(f"  {'':12s} sin paleta declarada: foco {read_level['focus']} sobre la placa de MUN "
+              f"con opacidad {read_level['plate_opacity']:.3f}")
+    for note in result.notes:
+        if note.level == "dropped" and note.block is not None:
+            continue
+        print(f"  nota [{note.code}] {note.message}" + (f" — {note.detail}" if note.detail else "")
+              + (f" ({note.where})" if note.where else ""))
+
+
+def _cover_bytes(cover: str) -> bytes:
+    try:
+        return Path(cover).read_bytes()
+    except OSError as exc:
+        raise CardError("cover_unreadable", "No se pudo leer la portada", f"{cover}: {exc.strerror}")
+
+
+def _read_level(cover: Optional[str]):
+    if not cover:
+        return None
+    palette = shapetools.read_palette(_cover_bytes(cover))
+    palette["focus"], palette["plate_opacity"] = shape.lent_focus(palette["accent"])
+    return palette
+
+
+def cmd_shape_check(args: argparse.Namespace) -> int:
+    folder = Path(args.folder)
+    if not folder.is_dir():
+        raise CardError("shape_folder_missing", f"No existe la carpeta {folder}")
+    result = shape.check_package(DirectorySource(folder))
+    read_level = _read_level(args.cover)
+    extra = _undeclared_files(folder, result)
+    if args.json:
+        report = result.to_dict()
+        report["undeclared_files"] = extra
+        report["world_class"] = shape.world_class(result.shape)
+        if result.shape is not None:
+            report["memory_estimate"] = shape.memory_estimate(result)
+        if read_level is not None:
+            report["read_level"] = read_level
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+    else:
+        _print_shape(folder, result, args.report, read_level)
+        if extra:
+            print(f"  no se copiarían (shape.json no los nombra o su bloque se descarta): {', '.join(extra)}")
+    return shape.exit_status(result)
+
+
+def cmd_shape_init(args: argparse.Namespace) -> int:
+    folder = Path(args.folder)
+    example = None
+    if args.example:
+        example = SHAPE_EXAMPLES / args.example
+        if not (example / shape.MANIFEST).is_file():
+            raise CardError("shape_example_missing", f"No se encontró el ejemplo {args.example}", str(example))
+    if args.cover:
+        _cover_bytes(args.cover)
+    written = shapetools.init_package(folder, Path(args.cover) if args.cover else None, example, args.force)
+    print(f"escrito en {folder}: {', '.join(written)}")
+    result = shape.check_package(DirectorySource(folder))
+    print(f"  {_STATE_WORDS[result.state]}")
+    print(f"  siguiente paso: ./mun card shape check {folder} --report")
+    return 0
+
+
+def cmd_shape_variants(args: argparse.Namespace) -> int:
+    if not args.out:
+        for name, (description, code, block, _) in shapetools.FIXTURES.items():
+            effect = "se usa todo, con una nota" if name in shapetools.FIXTURE_READY else \
+                (f"descarta {block}" if block else "paquete sin uso")
+            print(f"{name:18s} {description} → {code}, {effect}")
+        return 0
+    out = Path(args.out)
+    for name in shapetools.FIXTURES:
+        shapetools.write_fixture(out, name)
+    print(f"{len(shapetools.FIXTURES)} paquetes defectuosos en {out}; compruébalos con ./mun card shape check {out}/<nombre>")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="mun-card", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -184,6 +359,23 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_convert)
     sub.add_parser("variants", help="list the test card variants").set_defaults(func=cmd_variants)
     sub.add_parser("tools", help="show the e2fsprogs binaries and versions in use").set_defaults(func=cmd_tools)
+    p = sub.add_parser("shape", help="MUN Shape packages (docs/shape.md): template, check, defective fixtures")
+    shape_sub = p.add_subparsers(dest="shape_command", required=True)
+    s = shape_sub.add_parser("init", help="write a template package (or copy a sample) into a folder")
+    s.add_argument("folder")
+    s.add_argument("--cover", metavar="PNG", help="fill the palette with the one the console would read from this cover")
+    s.add_argument("--example", choices=("sea", "paper"), help="start from one of the sample packages instead")
+    s.add_argument("--force", action="store_true", help="replace an existing shape.json")
+    s.set_defaults(func=cmd_shape_init)
+    s = shape_sub.add_parser("check", help="check a package folder as a console would; exit 0 all used, 2 otherwise")
+    s.add_argument("folder")
+    s.add_argument("--cover", metavar="PNG", help="also show the palette the console would read from this cover")
+    s.add_argument("--report", action="store_true", help="add contrast ratios and the memory estimate")
+    s.add_argument("--json", action="store_true", help="the normalised package, files, notes and estimates as JSON")
+    s.set_defaults(func=cmd_shape_check)
+    s = shape_sub.add_parser("variants", help="list the defective packages, or write them all into OUT")
+    s.add_argument("out", nargs="?")
+    s.set_defaults(func=cmd_shape_variants)
     return parser
 
 

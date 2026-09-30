@@ -61,10 +61,24 @@ content yields the same bytes. Only regular image files are ever written.
 `inspect` reads the image through `debugfs`, never mounts it, and prints
 whether the SHA-256 changed during inspection (it must not).
 
+`shape` checks MUN Shape packages ([docs/shape.md](../../docs/shape.md)),
+the folder that goes on a card as `content/mun-shape/`:
+
+```sh
+./mun card shape init mypkg --cover cover.png   # template; palette read from the cover
+./mun card shape init mypkg --example sea       # or a copy of a sample package
+./mun card shape check mypkg --report           # exit 0 all used, 2 something dropped or unused
+./mun card shape variants .local/shape-fixtures # one defective package per rule
+```
+
 Package layout: `minitoml` (strict TOML subset used on both sides),
 `validate` (manifest v0 rules, naming generations and `CardInfo`), `source`
 (mounted directory or `debugfs` image), `ext4` (superblock checks), `image`
 (creation, variants, generated cover), `saves` (save bounds, payload
 integrity and the envelope rule the console restores by, shared with the
 card service and kept equal to the launcher's by a test), `convert` (the
-conversion to MUN names), `errors` (stable codes and messages).
+conversion to MUN names), `errors` (stable codes and messages), `shape`
+(Shape packages: strict JSON, schema, file headers, budgets, contrast; no
+decoding, so the card service can share it) and `shapetools` (host only: the
+cover's palette, which needs a PNG decoder, the template and the defective
+packages).

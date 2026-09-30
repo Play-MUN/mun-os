@@ -308,3 +308,7 @@ def _check_cover(source, relative: str) -> None:
     if width == 0 or height == 0 or width > COVER_MAX_SIDE or height > COVER_MAX_SIDE:
         raise CardError("cover_too_large", "La portada supera las dimensiones permitidas",
                         f"{width}×{height} > {COVER_MAX_SIDE}")
+
+
+# The same path rules for the files a Shape package names (shape.py).
+safe_path = _safe_path

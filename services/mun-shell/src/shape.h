@@ -26,11 +26,24 @@
 // in a loop: a marker in the runtime directory names the insertion being
 // decoded, and the next start skips that insertion's identity.
 //
+// The card object is the package's whole or MUN's whole: its image (the
+// package's window, else the cover), outline and light together, or MUN's
+// crescent with none of them when that image is missing or does not decode.
+// The ambient light follows the object's light while the object is the
+// game's, and the palette's light otherwise.
+//
+// The insertion cue: the first identity from a package applied for an
+// insertion is `live` only if that insertion arrived while the shell was
+// watching (`arrival`, from CardClient: not already active in the card
+// service's snapshot), whatever time its copy took. That first adoption
+// spends the insertion's cue, live or not, and a marker in the runtime
+// directory (`shape-cue`) keeps it spent across the shell's restarts, so an
+// insertion is greeted at most once however a later connection observes it.
+//
 // GUI thread only; the loader's thread is joined by the destructor.
 #pragma once
 
 #include <QColor>
-#include <QElapsedTimer>
 #include <QImage>
 #include <QObject>
 #include <QString>
@@ -46,10 +59,12 @@ class Shape : public QObject {
     QML_ELEMENT
     QML_SINGLETON
 
-    // Inputs, bound from QML: the active card's record (CardClient.card) and
-    // the player's choice ("full", "colours" or "off").
+    // Inputs, bound from QML: the active card's record (CardClient.card),
+    // the player's choice ("full", "colours" or "off") and the insertion
+    // that arrived while the shell was watching (CardClient.arrival).
     Q_PROPERTY(QVariantMap card READ card WRITE setCard NOTIFY inputsChanged)
     Q_PROPERTY(QString mode READ mode WRITE setMode NOTIFY inputsChanged)
+    Q_PROPERTY(QString arrival READ arrival WRITE setArrival NOTIFY inputsChanged)
 
     // What is applied. `source`: "none" (MUN), "lent", "read" or "shape".
     Q_PROPERTY(QString source READ source NOTIFY changed)
@@ -74,15 +89,17 @@ class Shape : public QObject {
     Q_PROPERTY(QColor ambient READ ambient NOTIFY changed)
     Q_PROPERTY(QColor tint READ tint NOTIFY changed)
     // The card object: its window (a QImage, null for MUN's crescent), its
-    // outline ("card" or "organic"), how far that is shaped, its light.
+    // outline ("card" or "organic"), how far that is shaped, its light
+    // (invalid: none). MUN's crescent never takes a game's outline or light.
     Q_PROPERTY(QVariant window READ window NOTIFY changed)
     Q_PROPERTY(QString cardShape READ cardShape NOTIFY changed)
     Q_PROPERTY(qreal morph READ morph NOTIFY changed)
     Q_PROPERTY(QColor glow READ glow NOTIFY changed)
     // The game's menu sounds: name -> absolute path of a file of the export.
     Q_PROPERTY(QVariantMap sounds READ sounds NOTIFY changed)
-    // The identity arrived while the shell was running (not found at its
-    // start, as after a game): it may be greeted with the insertion cue.
+    // The identity is its insertion's first, and the insertion arrived while
+    // the shell was watching (not found active, as at start or after a
+    // game), its cue not spent: it may be greeted with the insertion cue.
     Q_PROPERTY(bool live READ live NOTIFY changed)
 
 public:
@@ -93,6 +110,8 @@ public:
     void setCard(const QVariantMap &card);
     QString mode() const { return m_mode; }
     void setMode(const QString &mode);
+    QString arrival() const { return m_arrival; }
+    void setArrival(const QString &arrival);
 
     QString source() const { return m_source; }
     QString insertion() const { return m_insertion; }
@@ -120,7 +139,7 @@ public:
 signals:
     void inputsChanged();
     void changed();
-    // A new identity from a package was applied for this insertion.
+    // The first identity from a package was applied for this insertion.
     void adopted(bool live);
     // To the loader's thread.
     void loadRequested(quint64 token, const QVariantMap &request);
@@ -136,8 +155,9 @@ private:
     QString m_key;             // what the current resolution was made for
     quint64 m_token = 0;       // of the newest load
     QString m_skip;            // an insertion whose decoding crashed the last start
+    QString m_arrival;         // the insertion that arrived while the shell watched
     QString m_adoptedFor;      // the insertion the last `adopted` was for
-    QElapsedTimer m_age;       // since the shell started, for `live`
+    QString m_cueSpent;        // the insertion whose cue is spent (the `shape-cue` marker)
     QThread m_thread;
     ShapeLoader *m_loader = nullptr;
 

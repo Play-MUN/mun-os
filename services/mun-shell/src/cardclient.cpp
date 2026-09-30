@@ -90,8 +90,13 @@ void CardClient::handleMessage(const QJsonObject &message)
     const QString type = message.value("type").toString();
     if (type == QLatin1String("snapshot")) {
         m_cards.clear();
-        for (const QJsonValue &value : message.value("cards").toArray())
-            m_cards.append(value.toObject().toVariantMap());
+        m_found.clear();
+        for (const QJsonValue &value : message.value("cards").toArray()) {
+            const QVariantMap card = value.toObject().toVariantMap();
+            if (card.value("active").toBool())
+                m_found.insert(card.value("insertion").toString());
+            m_cards.append(card);
+        }
         m_snapshotSeen = true;
     } else if (type == QLatin1String("card")) {
         const QVariantMap card = message.value("card").toObject().toVariantMap();
@@ -162,6 +167,12 @@ QString CardClient::coverUrl() const
     // Qt Quick's Image loads data URLs directly, so no file ever touches disk.
     const QString data = m_active.value("info").toMap().value("cover_data").toString();
     return data.isEmpty() ? QString() : QStringLiteral("data:image/png;base64,") + data;
+}
+
+QString CardClient::arrival() const
+{
+    const QString insertion = m_active.value("insertion").toString();
+    return m_snapshotSeen && !insertion.isEmpty() && !m_found.contains(insertion) ? insertion : QString();
 }
 
 int CardClient::waitingCount() const

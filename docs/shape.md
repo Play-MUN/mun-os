@@ -218,7 +218,7 @@ checker.
 | A named file missing, a link, not a regular file, over its size, not a well-formed PNG or WAV, over its dimensions, duration or peak; the package over its budget | The block that names it is dropped |
 | The palette's colours do not keep contrast (below) | The dressed surfaces use MUN's colours, text, plate and focus together; the palette still tones the world |
 | An unknown field, or a later minor version | Ignored, with a note; what is known is used |
-| An image that fails to decode in the console, or exceeds the display's budget | That block, at run time, falls back to MUN or to a lower level |
+| An image that fails to decode in the console, or exceeds the display's budget | That block, at run time, falls back to MUN (the card object whole, its outline and light too) or to a lower level |
 
 A block is taken or dropped whole, so what a player sees is either the
 block as designed or MUN's: one defective layer, emitter or light texture
@@ -360,11 +360,16 @@ The algorithm, exact so that the console and the checker agree:
   surfaces' colours again with the same rule, falling back to MUN's set.
 - Dressed: the main arc's entries, the game's panel and the bands of the
   status line, the path and the hints (plates in their material at their
-  computed opacity, the text and focus colours); the card object (its
-  window image or the cover, its outline, its light); the ambient light and
-  a tint of MUN's world, in the card's hue at MUN's own luminance, so MUN's
-  texts over it keep their contrast; the menus' sounds on those surfaces,
-  and the insertion cue.
+  computed opacity, the text and focus colours; while the game's options
+  have the focus, the arc's entries keep their plate and text as proven
+  and only their ornaments fade); the card object (its window image or the
+  cover, its outline, its light: all of it, or MUN's object when that image
+  does not decode); the ambient light (the object's while the object is the
+  game's, else the palette's light) and a tint of MUN's world, in the
+  card's hue at MUN's own luminance, so MUN's texts over it keep their
+  contrast; the menus' sounds on those surfaces, and the insertion cue,
+  once, for a card that arrived while the shell was watching, however long
+  its copy took.
 - MUN's: Settings, their panels and every dialog, with MUN's focus and
   sounds even for a card that lends colours; the start-up, the hand-over,
   the layout and every word.

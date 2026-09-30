@@ -41,10 +41,27 @@ const QColor kNeutralFocus(0xE3, 0x9A, 0x63);   // Theme.copperLight
 const QColor kNeutralFocusDeep(0xC2, 0x7B, 0x48);   // Theme.copper
 const QColor kNeutralInk(0x13, 0x14, 0x17);     // a chosen entry's label
 
-QString markerPath()
+// A marker in the runtime directory, which outlives the shell's restarts
+// (RuntimeDirectoryPreserve=yes in the unit) and not a reboot: `shape-decoding`
+// names the insertion being decoded, `shape-cue` the one whose cue is spent.
+// Without a runtime directory there are none.
+QString runtimeFile(const char *name)
 {
     const QString dir = qEnvironmentVariable("XDG_RUNTIME_DIR");
-    return dir.isEmpty() ? QString() : dir + QStringLiteral("/shape-decoding");
+    return dir.isEmpty() ? QString() : dir + QLatin1Char('/') + QLatin1String(name);
+}
+
+QString readMarker(const QString &path)
+{
+    QFile file(path);
+    return !path.isEmpty() && file.open(QIODevice::ReadOnly) ? QString::fromLatin1(file.read(64)).trimmed() : QString();
+}
+
+void writeMarker(const QString &path, const QString &insertion)
+{
+    QFile file(path);
+    if (!path.isEmpty() && file.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        file.write(insertion.toLatin1());
 }
 
 bool isColour(const QVariant &value)
@@ -101,12 +118,8 @@ void ShapeLoader::load(quint64 token, const QVariantMap &request)
 
     // The crash guard: if decoding below takes the shell down, the next start
     // finds this and skips the insertion (Shape::Shape).
-    const QString marker = markerPath();
-    if (!marker.isEmpty()) {
-        QFile file(marker);
-        if (file.open(QIODevice::WriteOnly | QIODevice::Truncate))
-            file.write(insertion.toLatin1());
-    }
+    const QString marker = runtimeFile("shape-decoding");
+    writeMarker(marker, insertion);
 
     QVariantMap document;
     if (!path.isEmpty()) {
@@ -129,16 +142,22 @@ void ShapeLoader::load(quint64 token, const QVariantMap &request)
     result.insert("package", document);
 
     // The card window: the package's, else the cover; only for the full mode.
+    // A named image that cannot be read or decoded fails the card block: the
+    // object is then MUN's whole (Shape::apply), never the cover and never
+    // the block's outline or light around MUN's crescent.
     const QVariantMap card = document.value("card").toMap();
     const QString windowPath = card.value("window").toString();
-    if (full && !windowPath.isEmpty() && kPackagePath.match(windowPath).hasMatch()) {
+    bool windowFailed = false;
+    if (full && !windowPath.isEmpty()) {
         QFile file(path + QLatin1Char('/') + windowPath);
-        if (file.open(QIODevice::ReadOnly))
+        if (kPackagePath.match(windowPath).hasMatch() && file.open(QIODevice::ReadOnly))
             window = decode(&file, windowPath);
+        else
+            qWarning("mun-shell: shape: %s could not be read; not shown", qPrintable(windowPath));
+        windowFailed = window.isNull();
     }
-    // The cover fills the window when the package names none (a window that
-    // fails to decode leaves MUN's object, not the cover), and gives the read
-    // level its palette when the package has none.
+    // The cover fills the window when the package names none, and gives the
+    // read level its palette when the package has none.
     const bool coverAsWindow = full && windowPath.isEmpty();
     const bool readLevel = !document.contains("palette");
     QImage cover;
@@ -149,8 +168,11 @@ void ShapeLoader::load(quint64 token, const QVariantMap &request)
         buffer.open(QIODevice::ReadOnly);
         cover = decode(&buffer, QStringLiteral("the cover"));
     }
-    if (coverAsWindow)
+    if (coverAsWindow) {
         window = cover;
+        windowFailed = !coverBytes.isEmpty() && cover.isNull();
+    }
+    result.insert("windowFailed", windowFailed);
     // The read level, where the package brings no palette.
     if (readLevel && !cover.isNull())
         result.insert("read", readPalette(cover));
@@ -164,18 +186,14 @@ void ShapeLoader::load(quint64 token, const QVariantMap &request)
 
 Shape::Shape(QObject *parent) : QObject(parent)
 {
-    m_age.start();
-    const QString marker = markerPath();
-    if (!marker.isEmpty()) {
-        QFile file(marker);
-        if (file.open(QIODevice::ReadOnly)) {
-            m_skip = QString::fromLatin1(file.read(64)).trimmed();
-            file.close();
-            file.remove();
-            qWarning("mun-shell: shape: the last start ended while decoding insertion %s; its identity is skipped",
-                     qPrintable(m_skip));
-        }
+    const QString marker = runtimeFile("shape-decoding");
+    if (QFile::exists(marker)) {
+        m_skip = readMarker(marker);
+        QFile::remove(marker);
+        qWarning("mun-shell: shape: the last start ended while decoding insertion %s; its identity is skipped",
+                 qPrintable(m_skip));
     }
+    m_cueSpent = readMarker(runtimeFile("shape-cue"));
     m_loader = new ShapeLoader;
     m_loader->moveToThread(&m_thread);
     connect(&m_thread, &QThread::finished, m_loader, &QObject::deleteLater);
@@ -199,6 +217,15 @@ void Shape::setCard(const QVariantMap &card)
     m_card = card;
     emit inputsChanged();
     resolve();
+}
+
+void Shape::setArrival(const QString &arrival)
+{
+    // Only read when an identity is applied: no new resolution.
+    if (arrival == m_arrival)
+        return;
+    m_arrival = arrival;
+    emit inputsChanged();
 }
 
 void Shape::setMode(const QString &mode)
@@ -344,17 +371,43 @@ void Shape::apply(quint64 token, const QVariantMap &result, const QImage &window
         m_panelMaterial = materialOf("panel");
     }
 
+    // The card object, in the full mode: the game's whole (its image, outline
+    // and light) only with its image; MUN's whole otherwise, so a card block
+    // whose image did not decode is dropped entire, as docs/shape.md drops a
+    // block. The sounds are a block of their own.
+    const QVariantMap card = document.value("card").toMap();
+    if (full && !window.isNull()) {
+        m_window = window;
+        if (card.value("shape").toString() == QLatin1String("organic")) {
+            m_cardShape = QStringLiteral("organic");
+            m_morph = std::clamp(card.value("morph").toDouble(), 0.0, 1.0);
+        }
+        m_glow = colourOf(card.value("glow"));
+        if (!m_glow.isValid() && !palette.isEmpty())
+            m_glow = colourOf(palette.value("light"));
+    }
+    if (full) {
+        const QVariantMap sounds = document.value("sounds").toMap();
+        const QString path = m_card.value("shape").toMap().value("path").toString();
+        for (const char *name : {"move", "enter", "back", "insert"}) {
+            const QString file = sounds.value(name).toString();
+            if (!file.isEmpty() && kPackagePath.match(file).hasMatch())
+                m_sounds.insert(QString::fromLatin1(name), path + QLatin1Char('/') + file);
+        }
+    }
+
     // Colours where the package has none: the card's lent ones, else the
     // cover's; an accent only where it keeps its contrast on MUN's plate.
+    // With a palette, the ambient light is the object's while the object is
+    // the game's, else the palette's light: a dropped card block's light
+    // reaches nothing.
     const QVariantMap read = result.value("read").toMap();
     const QColor lentAccent = colourOf(info.value("accent"));
     const QColor lentLight = colourOf(info.value("background"));
     const QColor readAccent = colourOf(read.value("accent"));
     QString level = QStringLiteral("none");
     if (!palette.isEmpty()) {
-        m_ambient = colourOf(document.value("card").toMap().value("glow"));
-        if (!m_ambient.isValid())
-            m_ambient = colourOf(palette.value("light"));
+        m_ambient = m_glow.isValid() ? m_glow : colourOf(palette.value("light"));
         m_tint = colourOf(palette.value("mid"));
     } else if (lentAccent.isValid() || lentLight.isValid()) {
         level = QStringLiteral("lent");
@@ -373,31 +426,13 @@ void Shape::apply(quint64 token, const QVariantMap &result, const QImage &window
         }
     }
 
-    // The card object and the sounds: the package's, in the full mode.
-    const QVariantMap card = document.value("card").toMap();
-    if (full) {
-        m_window = window;
-        if (card.value("shape").toString() == QLatin1String("organic")) {
-            m_cardShape = QStringLiteral("organic");
-            m_morph = std::clamp(card.value("morph").toDouble(), 0.0, 1.0);
-        }
-        m_glow = colourOf(card.value("glow"));
-        if (!m_glow.isValid() && !palette.isEmpty())
-            m_glow = colourOf(palette.value("light"));
-        const QVariantMap sounds = document.value("sounds").toMap();
-        const QString path = m_card.value("shape").toMap().value("path").toString();
-        for (const char *name : {"move", "enter", "back", "insert"}) {
-            const QString file = sounds.value(name).toString();
-            if (!file.isEmpty() && kPackagePath.match(file).hasMatch())
-                m_sounds.insert(QString::fromLatin1(name), path + QLatin1Char('/') + file);
-        }
-    }
-
     const bool package = !document.isEmpty();
     m_source = package ? QStringLiteral("shape") : level;
+    // The insertion's first identity from a package: greeted only if the
+    // insertion arrived while the shell watched and its cue is not spent;
+    // found at start, as after a game, it is not. However long its copy took.
     const bool first = package && m_adoptedFor != insertion;
-    // Found at start (as after a game) or arrived while running.
-    m_live = first ? m_age.elapsed() > 5000 : false;
+    m_live = first && m_arrival == insertion && m_cueSpent != insertion;
     // One line per identity applied: what the laboratory checks it by.
     QStringList said{m_source, m_dressed ? QStringLiteral("dressed: entries %1 %2, panel %3 %4, bands glass %5")
                                                .arg(m_entriesMaterial).arg(m_entriesOpacity, 0, 'f', 3)
@@ -407,6 +442,8 @@ void Shape::apply(quint64 token, const QVariantMap &result, const QImage &window
                      QStringLiteral("focus %1").arg(m_focus.name(QColor::HexRgb).toUpper())};
     if (!m_window.isNull())
         said << QStringLiteral("window %1x%2").arg(m_window.width()).arg(m_window.height());
+    else if (result.value("windowFailed").toBool())
+        said << QStringLiteral("card object MUN's (its image did not decode)");
     if (!m_sounds.isEmpty())
         said << QStringLiteral("sounds %1").arg(QStringList(m_sounds.keys()).join(QLatin1Char('/')));
     if (level == QLatin1String("read")) {
@@ -415,11 +452,16 @@ void Shape::apply(quint64 token, const QVariantMap &result, const QImage &window
             tones << QStringLiteral("%1 %2").arg(QLatin1String(tone), read.value(tone).toString());
         said << QStringLiteral("read %1").arg(tones.join(QLatin1Char(' ')));
     }
+    if (first)
+        said << QString::fromLatin1(m_live ? "cue due" : "no cue");
     qInfo("mun-shell: shape for insertion %s (%s): %s", qPrintable(insertion), qPrintable(m_mode),
           qPrintable(said.join(QStringLiteral("; "))));
     emit changed();
     if (first) {
+        // Live or not, the first adoption spends the insertion's cue.
         m_adoptedFor = insertion;
+        m_cueSpent = insertion;
+        writeMarker(runtimeFile("shape-cue"), insertion);
         emit adopted(m_live);
     }
 }

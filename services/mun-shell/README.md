@@ -23,7 +23,7 @@ display, and a game drawing on `/dev/fb0` has it (see *Display path*).
 | `src/shellsettings.*` | The player's settings, validated and kept in the service's state directory |
 | `src/systemsounds.*` | The menus' sounds (move, enter, back), mixed on a worker thread and played through ALSA |
 | `src/powercontrol.*` | The only privileged request: runs `mun-power` through `sudo -n`; reports failure to the UI |
-| `src/cardclient.*` | Mirror of the card service over its UNIX socket: snapshot, events, reconnection; exposes state, manifest, error and cover (data URL) to QML |
+| `src/cardclient.*` | Mirror of the card service over its UNIX socket: snapshot, events, reconnection; exposes state, manifest, error, cover (data URL) and whether the active card arrived while the shell was watching to QML |
 | `src/shape.*`, `src/contrast.h`, `src/readpalette.*` | A Game Card's MUN Shape on the eligible surfaces: the export read and decoded off the GUI thread, its colours verified again with the contrast rule, the palette read from a cover (*A Game Card's identity*) |
 | `src/launchclient.*` | Client of `mun-launchd`: `launch(slot, serial, version)`, `release(serial)`, `acknowledge()`, launcher state and the last session result (read from `/run/mun/launch/last-result.json` at start, then over the socket) |
 | `src/backdrop.*`, `src/heroicon.*` | Home's painted layers: the network of light behind everything, and the large object of the entry in focus |
@@ -34,6 +34,7 @@ display, and a game drawing on `/dev/fb0` has it (see *Display path*).
 | `qml/Panels.qml` | What each entry's panel and each dialog says, from the real state |
 | `qml/Theme.qml`, `qml/I18n.qml` | Design tokens and motion; the two languages |
 | `qml/ArcMenu.qml`, `ArcNode`, `DetailPanel`, `OptionRow`, `StatusBar`, `MoonPhase`, `ModalLayer`, `BootLayer`, `UiText`, `MarkText`, `Shadow`, `Material`, `Logo.js`, `PlayMun.js` | Components: the arcs and their entries, the panel and its options, the status line, dialogs, the start-up and power-off screen, text and shadows; the MUN and Play MUN logos |
+| `tests/behaviour.py`, `tests/scenes/` | Behaviour regressions run on the compiled binary, offscreen (*A Game Card's identity*) |
 | `fonts/` | Archivo and Michroma, compiled in, with their licences |
 | `sounds/` | The interface's sounds, compiled in: the menus' `move.wav`, `enter.wav`, `back.wav` and the start-up's `startup.wav` |
 | `deploy/mun-shell.service` | systemd unit on tty1 as user `mun-shell` with the display (DRM) and evdev environment and the state directory |
@@ -184,18 +185,30 @@ for this insertion and nothing else (`src/shape.*`):
 - **What it dresses**: the main arc's entries (the game's plate under each
   label, in its material and at the opacity its text needs over any world,
   its text colour, a chosen bar of that colour with the plate's colour as
-  label, its focus on the knob, wire and edge); the game's panel (the Game
-  Card entry's: plate, text, focus on its options); bands of MUN's glass in
+  label, its focus on the knob, wire and edge; while the game's options
+  have the focus, the entries keep that plate and text as they are drawn,
+  only the knobs and wires fade, and the chosen bar turns back into a
+  plate, so the panel's option is the only focus); the game's panel (the
+  Game Card entry's: plate, text, focus on its options); bands of MUN's glass in
   the plate's colour under the status line, the path and the hints, whose
   words take the text colour (the lights keep theirs); the card object,
   whose screen shows the package's window image or the card's cover in
   place of the crescent, with an organic outline if the package asks
-  (still, shaped by its `morph`) and its light in the game's colour; the
-  ambient light at the orb and a tint of the world's two glows, both in the
-  card's hue at MUN's own luminance (the world is never lighter or darker
-  than MUN draws it, so MUN's texts over it keep their contrast); and the
-  menus' sounds on those surfaces, with the package's insertion cue played
-  once when a card arrives.
+  (still, shaped by its `morph`) and its light in the game's colour, all
+  of it or none: without that image (missing, or not decoded) the object
+  is MUN's crescent, with neither the game's outline nor its light; the
+  ambient light at the orb (the object's light while the object is the
+  game's, else the palette's light) and a tint of the world's two glows,
+  both in the card's hue at MUN's own luminance (the world is never lighter
+  or darker than MUN draws it, so MUN's texts over it keep their contrast);
+  and the menus' sounds on those surfaces, with the package's insertion cue.
+- **The insertion cue** plays once, when the identity of a card that arrived
+  while the shell was watching first shows (CardClient: the card was not
+  the active one in the card service's snapshot), however long its copy
+  took. A card found at start, as after a game or a reconnection, is not
+  greeted. That first identity spends the insertion's cue, and a marker in
+  the runtime directory (`shape-cue`) keeps it spent across the shell's
+  restarts.
 - **What stays MUN's**: Settings (their arc, panels, focus and sounds),
   every dialog (and its sounds), the start-up and power-off, the hand-over screen, the layout,
   sizes, order and focus behaviour, every word and its language, the
@@ -225,11 +238,22 @@ for this insertion and nothing else (`src/shape.*`):
 - **Returning from a game**: the shell starts again with the same card, and
   its identity is applied at once, without the cue.
 - **Settings** (Picture and sound): *MUN Shape* Full (default), Colours only
-  (colours and plates, no images or sounds) or Off (MUN alone); *Game sounds
+  (colours and plates; no images or sounds, MUN's object, the palette's
+  light as the ambient) or Off (MUN alone); *Game sounds
   on the menus*; *Reduce motion*, which holds Home's world and objects still.
 - The journal says what was applied, once per identity: `shape for
   insertion …: shape; dressed: entries glass 0.722, …; focus #F2B85C;
-  window 512x512; sounds back/enter/insert/move`.
+  window 512x512; sounds back/enter/insert/move; cue due`.
+- **Behaviour regressions**: `tests/behaviour.py BUILD_DIR/mun-shell` runs
+  the compiled binary offscreen with a scene of `tests/scenes/` in place of
+  `Main.qml` (`MUN_SHELL_QML_DIR`), against exports made with the card
+  tool's checker and a stand-in for the card service's socket. It covers
+  the card object when an image does not decode, a result that comes after
+  a newer card, the insertion cue's rule, and the dressed arc's and panel's
+  contrast measured on grabbed frames (the two samples and a palette at the
+  rule's limit, over a white and a black world, on Home, with the options
+  focused and back). The image build runs it after compiling the shell and
+  fails with it; its measurements are the build's `logs/shell-behaviour.json`.
 
 Worlds, their motion and the transitions between identities are not
 drawn yet.

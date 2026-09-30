@@ -4,8 +4,9 @@ import MUN.Shell
 // A menu arc around the orb: `entries` ({label, detail}) spread `spread`
 // degrees apart on a circle of `radius`, leaning back into the scene with
 // the arcs' perspective (Theme.lean). Hidden, it fades and moves 60 px
-// left; dimmed (while its panel's options have the focus), its entries fade
-// to 0.4. The delegates stay while the entries' texts change, so their
+// left; dimmed (while its panel's options have the focus), its entries step
+// back (ArcNode: MUN's fade to 0.4, a dressed one keeps its proven plate and
+// text). The delegates stay while the entries' texts change, so their
 // transitions run.
 Item {
     id: root
@@ -42,7 +43,7 @@ Item {
             on: index === root.current
             compact: root.compact
             dressed: root.dressed
-            opacity: root.dimmed ? 0.4 : 1
+            dimmed: root.dimmed
             onClicked: root.activated(index)
         }
     }

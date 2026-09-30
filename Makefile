@@ -2,7 +2,7 @@
 
 # Documentation, Python syntax and host-side regressions. This does not boot the
 # guest or build the console runtime; see CONTRIBUTING.md.
-PY_TOOLS := mun $(wildcard scripts/*.py vm/*.py os/builder/*.py tests/test_*.py tools/mun-card/mun_card/*.py examples/shape/*.py services/mun-cardd/*.py services/mun-launchd/*.py)
+PY_TOOLS := mun $(wildcard scripts/*.py vm/*.py os/builder/*.py tests/test_*.py tools/mun-card/mun_card/*.py examples/shape/*.py services/mun-cardd/*.py services/mun-shell/tests/*.py services/mun-launchd/*.py)
 
 check:
 	python3 scripts/check_foundation.py

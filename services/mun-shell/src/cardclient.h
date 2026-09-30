@@ -5,10 +5,18 @@
 // socket is down, which the UI must show differently from "no card".
 // A card's `shape` (its MUN Shape record, docs/shape.md) arrives in its
 // record and, when only it changes, in a message of its own.
+//
+// `arrival` tells an insertion that arrived while the shell was watching
+// from one it found: the active card's insertion if that card was not the
+// active one in this connection's snapshot (it was inserted, or took over
+// from another card, since), empty otherwise. A card found active at start,
+// after a game or after a reconnection is not an arrival, however long its
+// check or its MUN Shape copy takes afterwards.
 #pragma once
 
 #include <QLocalSocket>
 #include <QObject>
+#include <QSet>
 #include <QTimer>
 #include <QVariantMap>
 #include <QtQml/qqmlregistration.h>
@@ -26,6 +34,7 @@ class CardClient : public QObject {
     Q_PROPERTY(QVariantMap error READ error NOTIFY changed)      // {code,message,detail}, empty unless invalid
     Q_PROPERTY(QString coverUrl READ coverUrl NOTIFY changed)
     Q_PROPERTY(int waitingCount READ waitingCount NOTIFY changed)
+    Q_PROPERTY(QString arrival READ arrival NOTIFY changed)
     Q_PROPERTY(QString socketPath READ socketPath CONSTANT)
 
 public:
@@ -39,6 +48,7 @@ public:
     QVariantMap error() const { return m_active.value("error").toMap(); }
     QString coverUrl() const;
     int waitingCount() const;
+    QString arrival() const;
     QString socketPath() const { return m_path; }
 
 signals:
@@ -58,5 +68,6 @@ private:
     QByteArray m_buffer;
     bool m_snapshotSeen = false;
     QList<QVariantMap> m_cards;   // in service order
+    QSet<QString> m_found;        // the insertions active in this connection's snapshot
     QVariantMap m_active;
 };

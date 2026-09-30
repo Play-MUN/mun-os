@@ -83,11 +83,13 @@ Window {
 
     // ------------------------------------------------------------ MUN Shape
 
-    // The active card's identity (src/shape.h): fed the card's record and the
-    // player's choice; its colours reach only the main arc, the game's panel
-    // and the bands of the status line, the path and the hints.
+    // The active card's identity (src/shape.h): fed the card's record, the
+    // player's choice and whether the card arrived while the shell watched;
+    // its colours reach only the main arc, the game's panel and the bands of
+    // the status line, the path and the hints.
     Binding { target: Shape; property: "card"; value: CardClient.card }
     Binding { target: Shape; property: "mode"; value: ShellSettings.shapeMode }
+    Binding { target: Shape; property: "arrival"; value: CardClient.arrival }
     // The game's menu sounds, when it has them, the player wants them, MUN
     // Shape is shown in full and the player is on the game's surfaces: in
     // Settings and in any dialog the sounds are MUN's, as their looks are.
@@ -100,8 +102,9 @@ Window {
     onShapeSoundsChanged: SystemSounds.useGameSounds(Shape.sounds)
     Connections {
         target: Shape
-        // A card arriving with its identity is greeted once by its cue; the
-        // same card found at start (after a game) is not.
+        // A card that arrived while the shell watched is greeted once by its
+        // cue when its identity first shows; a card found at start (after a
+        // game) is not.
         function onAdopted(live) {
             if (live && window.powered && ShellSettings.systemSounds)
                 SystemSounds.playGame("insert")

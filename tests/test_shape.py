@@ -24,6 +24,7 @@ sys.path.insert(0, str(ROOT / "tools" / "mun-card"))
 
 from mun_card import cli, image, shape, shapetools  # noqa: E402
 from mun_card.source import DebugfsSource, DirectorySource  # noqa: E402
+from mun_card.errors import CardError  # noqa: E402
 from mun_card.validate import validate_card  # noqa: E402
 
 SAMPLES = ROOT / "examples" / "shape"
@@ -997,6 +998,112 @@ class ShellAgreementTests(unittest.TestCase):
         self.assertIn("^([0-9a-f]{16})\\\\.([0-9]{1,9})$", cpp)
         self.assertIn("setAllocationLimit", cpp)
         self.assertIn("kWindowMaxSide = 1024", cpp)
+
+
+class ShellBehaviourTests(unittest.TestCase):
+    """The shell's behaviour regressions (services/mun-shell/tests/
+    behaviour.py) run on the compiled binary, which needs Qt: the image
+    build runs them. Here, what they rest on: that the build runs them and
+    fails with them, that their fixtures are what they claim, that their
+    measure reads contrast as the laboratory does, and the wiring they
+    cannot see."""
+
+    SHELL = ROOT / "services" / "mun-shell"
+
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location("shell_behaviour", cls.SHELL / "tests" / "behaviour.py")
+        cls.behaviour = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.behaviour)
+
+    def test_the_image_build_runs_them_on_the_binary_it_built(self):
+        build = (ROOT / "os" / "mkosi" / "mkosi.build.chroot").read_text(encoding="utf-8")
+        run = 'python3 "$MUN/services/mun-shell/tests/behaviour.py" "$BUILDDIR/mun-shell/mun-shell"'
+        self.assertIn(run, build)
+        self.assertLess(build.index("mun-shell/deploy/build.sh"), build.index(run))
+        self.assertLess(build.index(run), build.index("mun-shell/deploy/stage.sh"))
+        line = next(text for text in build.splitlines() if run in text)
+        self.assertNotIn("||", line, "a failed expectation fails the build")
+        self.assertTrue(build.startswith("#!/bin/sh") and "set -eu" in build)
+        for scene in ("controller.qml", "arrival.qml", "surfaces.qml"):
+            self.assertIn(f'"{scene}"', (self.SHELL / "tests" / "behaviour.py").read_text(encoding="utf-8"))
+            self.assertTrue((self.SHELL / "tests" / "scenes" / scene).is_file(), scene)
+
+    def test_the_short_window_passes_the_checker_and_does_not_decode(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            sea = json.loads((SAMPLES / "sea" / "shape.json").read_text(encoding="utf-8"))
+            document = {key: sea[key] for key in ("format", "palette", "card")}
+            package = self.behaviour.write_package(Path(tmp) / "bad", document,
+                                                   {"card/window.png": self.behaviour.short_png()})
+            result = shape.check_package(DirectorySource(package))
+        self.assertEqual(result.state, "ready", "the structural check cannot see it")
+        self.assertEqual(result.shape["card"]["window"], "card/window.png")
+        with self.assertRaises(CardError) as raised:
+            shapetools.decode_png(self.behaviour.short_png())
+        self.assertEqual(raised.exception.code, "png_invalid", "an image that ends early")
+
+    def test_the_edge_palette_is_at_the_rules_limit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            package = self.behaviour.write_package(Path(tmp) / "edge", self.behaviour.EDGE, {})
+            result = shape.check_package(DirectorySource(package))
+        self.assertEqual(result.state, "ready")
+        surfaces = result.shape["surfaces"]
+        colours = surfaces["colours"]
+        self.assertEqual(colours["source"], "shape")
+        text, focus = shape.luminance(colours["text"]), shape.luminance(colours["focus"])
+        for surface in ("entries", "bands"):
+            least, _ = shape.composite_bounds(surfaces[surface]["opacity"],
+                                              shape.plate_vertices(colours["plate"], surfaces[surface]["material"]))
+            self.assertTrue(4.5 <= (least + 0.05) / (text + 0.05) < 4.52, surface)
+            self.assertTrue(3.0 <= (least + 0.05) / (focus + 0.05) < 3.03, surface)
+
+    def test_the_measure_reads_text_and_the_focus_frame(self):
+        b = self.behaviour
+        width, height = 200, 80
+        plate, ink, focus = (0x85, 0x8D, 0x79), (0x1F, 0x1C, 0x19), (0x6F, 0x1C, 0x12)
+        data = bytearray()
+        for y in range(height):
+            for x in range(width):
+                frame = (10 <= x < 190 and 10 <= y < 70) and not (12 <= x < 188 and 12 <= y < 68)
+                glyph = 30 <= y < 50 and 40 <= x < 120 and x % 3 == 0
+                data += bytes(focus if frame else ink if glyph else plate)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "grab.ppm"
+            path.write_bytes(b"P6\n%d %d\n255\n" % (width, height) + bytes(data))
+            image = b.read_ppm(path)
+        inner = b.text_contrast(image, [20, 20, 180, 60])
+        self.assertAlmostEqual(inner["ratio"], round(shape.contrast_ratio("#858D79", "#1F1C19"), 2), places=2)
+        found = b.focus_frame(image, [0, 0, width, height], "#6F1C12")
+        self.assertEqual(found["box"], [10, 10, 190, 70])
+        self.assertAlmostEqual(b.ratio(found["luminance"], inner["plate"]), shape.contrast_ratio("#858D79", "#6F1C12"),
+                               places=2)
+        self.assertIsNone(b.focus_frame(image, [20, 20, 180, 60], "#6F1C12"))
+        # A short, thin label in a wide row: over the whole row the 1.5 % the
+        # measure takes as text is mostly antialiased edges; fitted to the
+        # label it reads the ink.
+        data = bytearray()
+        for y in range(height):
+            for x in range(width):
+                core = 34 <= y < 46 and 30 <= x < 42 and x % 4 == 0
+                edge = 34 <= y < 46 and 30 <= x < 42 and x % 4 == 1
+                data += bytes(ink if core else (0x52, 0x55, 0x49) if edge else plate)
+        image = (width, height, bytes(data))
+        self.assertLess(b.text_contrast(image, [0, 0, width, height])["ratio"], 4.5)
+        label = b.label_contrast(image, [0, 0, width, height])
+        self.assertEqual(label["label"], [29, 31, 45, 49])
+        self.assertAlmostEqual(label["ratio"], round(shape.contrast_ratio("#858D79", "#1F1C19"), 2), places=2)
+
+    def test_the_wiring_the_scenes_repeat(self):
+        # The scenes feed Shape as Main.qml does; Main.qml must do it so.
+        main = (self.SHELL / "qml" / "Main.qml").read_text(encoding="utf-8")
+        self.assertIn('Binding { target: Shape; property: "arrival"; value: CardClient.arrival }', main)
+        self.assertIn("dimmed: window.level === 2 && window.previousLevel === 0", main)
+        arc = (self.SHELL / "qml" / "ArcMenu.qml").read_text(encoding="utf-8")
+        self.assertIn("dimmed: root.dimmed", arc)
+        self.assertNotIn("opacity: root.dimmed", arc, "the arc never fades a dressed entry as a whole")
+        cpp = (self.SHELL / "src" / "shape.cpp").read_text(encoding="utf-8")
+        self.assertNotIn("elapsed()", cpp, "the cue depends on no clock")
+        self.assertIn('runtimeFile("shape-cue")', cpp)
 
 
 class DocumentationTests(unittest.TestCase):

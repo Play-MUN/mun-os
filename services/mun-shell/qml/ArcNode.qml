@@ -15,6 +15,13 @@ import MUN.Shell
 // the text's colour with the plate's colour as label. Every other entry, the
 // Settings arc's among them, stays MUN's.
 //
+// `dimmed` (while the panel's options have the focus): MUN's entry fades as
+// a whole to 0.4. A dressed one never fades its plate or its text, whose
+// contrast is proven only as they are drawn, not under a further opacity:
+// its knob and wire fade instead, and its chosen bar turns back into a
+// plate, marked only by its place 4 px out and a faded focus edge, so the
+// panel's option is the only focus on screen.
+//
 // The entry is laid out flat and shown through its part of the arcs'
 // perspective (ProjectedLayer), projected again only while it changes.
 ProjectedLayer {
@@ -24,6 +31,7 @@ ProjectedLayer {
     property bool on: false
     property bool compact: false
     property bool dressed: false
+    property bool dimmed: false
     // The entry's corner in the arcs' plane and the arc's shift along it.
     property real originX
     property real originY
@@ -55,17 +63,23 @@ ProjectedLayer {
     onLabelChanged: refresh()
     onDetailChanged: refresh()
     onCompactChanged: refresh()
+    onDimmedChanged: transition.restart()
 
     // The entry's colours: the game's while dressed and its set holds, MUN's
     // otherwise. The focus may be the game's even where the plates are MUN's
     // (a lent or cover-read accent).
     readonly property bool shaped: dressed && Shape.dressed
+    // Dimmed and dressed: the entry keeps its proven pair and fades only its
+    // ornaments; its chosen bar (`lit`) is shown only while not dimmed.
+    readonly property bool faded: dimmed && shaped
+    readonly property bool lit: on && !faded
+    readonly property real ornaments: faded ? 0.4 : 1
     readonly property color accent: dressed ? Shape.focus : Theme.accent
     readonly property color accentDeep: dressed ? Shape.focusDeep : Theme.accentDeep
     function accentAlpha(a) { return Theme.alpha(root.accent, a) }
     function accentDeepAlpha(a) { return Theme.alpha(root.accentDeep, a) }
-    readonly property color labelColour: shaped ? (on ? Shape.barText : Shape.text) : (on ? Theme.inkOnMoon : Theme.moon)
-    readonly property color detailColour: shaped ? (on ? Shape.barText : Shape.text) : (on ? Theme.ashOnMoon : Theme.ash)
+    readonly property color labelColour: shaped ? (lit ? Shape.barText : Shape.text) : (on ? Theme.inkOnMoon : Theme.moon)
+    readonly property color detailColour: shaped ? (lit ? Shape.barText : Shape.text) : (on ? Theme.ashOnMoon : Theme.ash)
     onAccentChanged: transition.restart()
     onShapedChanged: transition.restart()
     Connections {
@@ -89,6 +103,7 @@ ProjectedLayer {
 
     width: knobSize + wireWidth + bar.width + 4
     height: barHeight
+    opacity: dimmed && !shaped ? 0.4 : 1
     Behavior on opacity { NumberAnimation { duration: 400; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.ease } }
 
     component Fade: NumberAnimation { duration: 300; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.ease }
@@ -102,6 +117,8 @@ ProjectedLayer {
         anchors.verticalCenter: parent.verticalCenter
         radii: [root.knobSize / 2]
         gradient: ({ type: "radial", at: [0.4, 0.35], stops: [[0, Theme.rgba(62, 92, 130, 0.35)], [0.75, Theme.rgba(14, 17, 23, 0.9)]] })
+        opacity: root.ornaments
+        Behavior on opacity { Fade {} }
 
         Shadow {
             z: -1
@@ -155,6 +172,8 @@ ProjectedLayer {
         width: root.wireWidth
         height: 2
         radius: 1
+        opacity: root.ornaments
+        Behavior on opacity { Fade {} }
         gradient: Gradient {
             orientation: Gradient.Horizontal
             GradientStop { position: 0; color: root.on ? root.accentDeepAlpha(0.6) : Theme.rgba(143, 176, 214, 0.18) }
@@ -173,7 +192,7 @@ ProjectedLayer {
             z: -1
             radii: root.barRadii
             shadows: [{ y: 8, blur: 18, spread: -10, color: Theme.rgba(0, 0, 0, 0.7) }]
-            opacity: root.on ? 0 : 1
+            opacity: root.lit ? 0 : 1
             Behavior on opacity { Fade {} }
         }
         Shadow {
@@ -184,7 +203,7 @@ ProjectedLayer {
                 { y: 12, blur: 26, spread: -12, color: Theme.rgba(0, 0, 0, 0.75) },
                 { blur: 30, spread: -8, color: root.accentAlpha(0.25) }
             ]
-            opacity: root.on ? 1 : 0
+            opacity: root.lit ? 1 : 0
             Behavior on opacity { Fade {} }
         }
         // MUN's bars.
@@ -214,15 +233,15 @@ ProjectedLayer {
             anchors.fill: parent
             visible: root.shaped
             radii: root.barRadii
-            plate: root.on ? Shape.bar : Shape.plate
-            opacity: root.on ? 1 : Shape.entriesOpacity
-            material: root.on ? "solid" : Shape.entriesMaterial
+            plate: root.lit ? Shape.bar : Shape.plate
+            opacity: root.lit ? 1 : Shape.entriesOpacity
+            material: root.lit ? "solid" : Shape.entriesMaterial
         }
         Box {
             anchors.fill: parent
             radii: root.barRadii
             insets: [{ x: 4, color: root.shaped ? root.accent : root.accentDeep }, { y: 1, color: Theme.rgba(255, 255, 255, root.shaped ? 0.06 : 0.7) }]
-            opacity: root.on ? 1 : 0
+            opacity: root.on ? root.ornaments : 0
             Behavior on opacity { Fade {} }
         }
 

@@ -1,13 +1,13 @@
 # The host checks (`make check`: documentation links, Python syntax, host
 # regressions, the example game's C save tests) on every pull request and
-# on main. No secrets and read-only access; the QEMU console itself is the
+# on main and dev. No secrets and read-only access; the QEMU console itself is the
 # Hosts workflow's, run by hand on a release.
 name: Checks
 
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, dev]
 
 permissions:
   contents: read

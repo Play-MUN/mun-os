@@ -14,13 +14,19 @@ that is published beside the release, never in Git.
 For each binary package and version, snapshot.debian.org names its source
 package and version (/mr/binary/NAME/); for each source, its files and their
 SHA-1 (/mr/package/SOURCE/VERSION/srcfiles?fileinfo=1), each file fetched by
-digest (/file/SHA1) and checked. DIR/SOURCES.json lists what was fetched and
-which binaries each source built. Running it again fetches only what is
-missing; nothing that does not match its digest is kept.
+digest (/file/SHA1) and checked. A binary can also incorporate other
+packages' code, which Debian records in its Built-Using field: the signed
+kernel's own source holds only signatures, and the kernel's is `linux`. The
+package indexes of the snapshot the image was built from (every binary must
+be in them) give those sources, and they are fetched too. DIR/SOURCES.json
+lists what was fetched and which binaries each source built. Running it
+again fetches only what is missing; nothing that does not match its digest
+is kept.
 """
 
 import hashlib
 import json
+import lzma
 import os
 import re
 import tempfile
@@ -38,6 +44,7 @@ VERSION = re.compile(r"[0-9A-Za-z.+~:-]+")
 DIGEST = re.compile(r"[0-9a-f]{40}")
 FILE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+~-]*")
 CHUNK = 1 << 20
+BUILT_USING = re.compile(r"\s*([a-z0-9][a-z0-9.+-]*) \(= ([0-9A-Za-z.+~:-]+)\)\s*")
 
 
 class SourcesError(Exception):
@@ -70,6 +77,82 @@ def binaries(info: dict) -> List[Tuple[str, str]]:
         if not NAME.fullmatch(name) or not VERSION.fullmatch(version):
             raise SourcesError(f"BUILD-INFO names an odd package: {name} {version}")
     return sorted(found)
+
+
+def indexes(info: dict) -> List[str]:
+    """The package indexes (Packages.xz) of the snapshot archives, suites and
+    components the image was built from, for its architecture."""
+    debian = info.get("debian") or {}
+    architectures = {p.get("architecture") for p in info.get("packages", [])} - {"all"}
+    if len(architectures) != 1 or not NAME.fullmatch(str(next(iter(architectures)))):
+        raise SourcesError(f"BUILD-INFO names no single architecture: {sorted(map(str, architectures))}")
+    architecture = architectures.pop()
+    urls = []
+    for archive in debian.get("archives", []):
+        base = str(archive.get("url", ""))
+        if not re.fullmatch(re.escape(SNAPSHOT) + r"/archive/[a-z-]+/[0-9]{8}T[0-9]{6}Z", base):
+            raise SourcesError(f"BUILD-INFO names an archive outside snapshot.debian.org: {base}")
+        for suite in archive.get("suites", []):
+            for component in debian.get("components", []):
+                if not (NAME.fullmatch(suite) and NAME.fullmatch(component)):
+                    raise SourcesError(f"BUILD-INFO names an odd suite or component: {suite} {component}")
+                urls.append(f"{base}/dists/{suite}/{component}/binary-{architecture}/Packages.xz")
+    return urls
+
+
+def stanzas(url: str, opener: Callable = urllib.request.urlopen, tries: int = 4) -> List[Tuple[str, str, str]]:
+    """(Package, Version, Built-Using) of every stanza of one package index,
+    read as it downloads; retried whole."""
+    for attempt in range(tries):
+        try:
+            found, fields, last = [], {}, ""
+            with opener(url, timeout=600) as response, lzma.open(response, "rt", encoding="utf-8") as lines:
+                for line in lines:
+                    line = line.rstrip("\n")
+                    if not line:
+                        if "Package" in fields and "Version" in fields:
+                            found.append((fields["Package"], fields["Version"], fields.get("Built-Using", "")))
+                        fields, last = {}, ""
+                    elif line[0] in " \t":
+                        if last == "Built-Using":
+                            fields[last] += " " + line.strip()
+                    elif ":" in line:
+                        last, value = line.split(":", 1)
+                        fields[last] = value.strip()
+            if "Package" in fields and "Version" in fields:
+                found.append((fields["Package"], fields["Version"], fields.get("Built-Using", "")))
+            return found
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                raise SourcesError(f"not in the snapshot: {url}") from exc
+            error: Exception = exc
+        except (urllib.error.URLError, OSError, EOFError, lzma.LZMAError, UnicodeDecodeError) as exc:
+            error = exc
+        time.sleep(2 ** attempt)
+    raise SourcesError(f"{url}: {error}")
+
+
+def built_using(info: dict, opener: Callable = urllib.request.urlopen) -> Dict[Tuple[str, str], List[Tuple[str, str]]]:
+    """For each binary of the image built using other packages' sources,
+    those sources and versions, from the snapshot's package indexes."""
+    wanted = set(binaries(info))
+    found: Dict[Tuple[str, str], List[Tuple[str, str]]] = {}
+    for url in indexes(info):
+        for package, version, using in stanzas(url, opener):
+            if (package, version) not in wanted:
+                continue
+            used = []
+            for part in filter(None, (item.strip() for item in using.split(","))):
+                match = BUILT_USING.fullmatch(part)
+                if not match:
+                    raise SourcesError(f"{package} {version}: odd Built-Using {part!r}")
+                used.append((match.group(1), match.group(2)))
+            found[(package, version)] = used
+    missing = sorted(wanted - set(found))
+    if missing:
+        raise SourcesError("not in the package indexes the image was built from: "
+                           + ", ".join(f"{name} {version}" for name, version in missing[:5]))
+    return {binary: used for binary, used in found.items() if used}
 
 
 def source_of(name: str, version: str, get: Callable[[str], dict]) -> Tuple[str, str]:
@@ -113,6 +196,7 @@ def download(entry: Dict[str, object], directory: Path, opener: Callable = urlli
     """One source file into `directory`, checked; False if it was there already."""
     target = directory / str(entry["name"])
     if target.is_file() and target.stat().st_size == entry["size"] and sha1_of(target) == entry["sha1"]:
+        os.chmod(target, 0o644)
         return False
     directory.mkdir(parents=True, exist_ok=True)
     handle, temporary = tempfile.mkstemp(dir=str(directory), prefix=".", suffix=".part")
@@ -127,6 +211,8 @@ def download(entry: Dict[str, object], directory: Path, opener: Callable = urlli
                 sink.write(block)
         if size != entry["size"] or digest.hexdigest() != entry["sha1"]:
             raise SourcesError(f"{entry['name']}: does not match its SHA-1")
+        # Published as they are: readable by whoever unpacks them.
+        os.chmod(temporary, 0o644)
         os.replace(temporary, target)
         return True
     finally:
@@ -140,9 +226,14 @@ def collect(info: dict, out: Path, fetch_files: bool = True, get: Optional[Calla
     `fetch_files`, download them under `out`; writes out/SOURCES.json."""
     get = get or (lambda url: fetch_json(url, opener))
     sources: Dict[Tuple[str, str], List[str]] = {}
+    using = built_using(info, opener)
     for name, version in binaries(info):
         sources.setdefault(source_of(name, version, get), []).append(f"{name} {version}")
-    report(f"{len(sources)} source packages for {sum(len(b) for b in sources.values())} binary packages")
+    for (name, version), used in sorted(using.items()):
+        for source in used:
+            sources.setdefault(source, []).append(f"{name} {version} (Built-Using)")
+    report(f"{len(sources)} source packages for {len(binaries(info))} binary packages"
+           + (f", {len(using)} of them also built using other sources" if using else ""))
     records = []
     for (source, version), built in sorted(sources.items()):
         listed = files_of(source, version, get)

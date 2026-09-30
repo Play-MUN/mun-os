@@ -49,7 +49,8 @@ tar -cf .local/mun/mun-os-v0.1.0-dev.2-sources.tar -C .local/mun/sources mun-os-
 ```
 
 The first command fetches, verified, the Debian source of every package in
-the image, its initrd and its kernel (vm/sources.py; about 1 GB), and
+the image, its initrd and its kernel, and of what they were built using
+(vm/sources.py; about 1.1 GB), and
 `SOURCES.json` names the build and lists the sources with the binaries each
 built ([licensing](licensing.md#images-and-their-corresponding-source)).
 Running it again only fetches what is missing. On Linux, `sha256sum`

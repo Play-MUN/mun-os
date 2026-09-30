@@ -46,7 +46,9 @@ components is this repository at the commit each image names in its
 `BUILD-INFO.json`. For the Debian packages, every published image comes with
 their source: `./mun dev sources --build NAME` resolves each package of the
 image, its initrd and its kernel, at its exact version, to its Debian source
-package, and fetches those sources, checked against their digests, from
+package, adds the sources Debian records a package was built using (the
+signed kernel's source holds only signatures; the kernel's own is `linux`),
+and fetches those sources, checked against their digests, from
 [snapshot.debian.org](https://snapshot.debian.org) into one directory with a
 `SOURCES.json` index. That directory is published beside the release as one
 archive with its SHA-256, never in Git

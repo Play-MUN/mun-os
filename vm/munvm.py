@@ -58,9 +58,10 @@ INSTANCE = DEFAULT_INSTANCE
 # Guest sizing; development settings, not console specifications.
 VCPUS = int(os.environ.get("MUN_VM_VCPUS", "4"))
 MEMORY = os.environ.get("MUN_VM_MEMORY", "8G")
-# The display's preferred mode: fbcon and the shell's Automatic resolution use
-# it, and the shell's Resolution setting can ask virtio-gpu for another
-# (services/mun-shell/README.md, "Resolution").
+# virtio-gpu's own size, the window's before the guest sets a mode. The modes
+# the console sees come from the EDID the development image gives the virtual
+# display (os/builder/lab_edid.py), 1920x1080 preferred; an image without it
+# prefers this size.
 DISPLAY_WIDTH = int(os.environ.get("MUN_VM_DISPLAY_WIDTH", "1920"))
 DISPLAY_HEIGHT = int(os.environ.get("MUN_VM_DISPLAY_HEIGHT", "1080"))
 GUEST_HOSTNAME = f"mun-{INSTANCE}"

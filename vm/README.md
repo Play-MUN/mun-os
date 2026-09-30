@@ -175,7 +175,7 @@ short tap: `send-key esc --hold 150` holds the key longer.
 | Machine | `virt`, `gic-version=max`; `accel=hvf` or `kvm` with `-cpu host`, or `tcg` with `-cpu max,pauth-impdef=on`; the QEMU installation's ARM64 UEFI firmware (see the host table) |
 | Sizing | 4 vCPU, 8 GiB (`MUN_VM_VCPUS`, `MUN_VM_MEMORY`): development settings, not console specifications |
 | Storage | copy-on-write qcow2 over the build's image, virtio-blk serial `MUN-SYSTEM`; two reserved `pcie-root-port` slots for cards |
-| Display / input | `virtio-gpu-pci`, preferred mode 1920×1080 (`MUN_VM_DISPLAY_WIDTH`/`_HEIGHT`); the shell's Resolution setting switches the guest to 720p or 1440p and the window and screenshots follow; `qemu-xhci` with `usb-kbd` and `usb-tablet`; `-display none` in the background, captured with QMP `screendump` |
+| Display / input | `virtio-gpu-pci`; the development image gives it the EDID of a display that prefers 1920×1080 and takes 2560×1440 and 1280×720 (`drm.edid_firmware`, `os/builder/lab_edid.py`), so the shell's Resolution setting and the games see those modes as a television's; the window and screenshots follow the mode; `qemu-xhci` with `usb-kbd` and `usb-tablet`; `-display none` in the background, captured with QMP `screendump` |
 | Sound | `virtio-sound-pci`, playback only; backend `none`, `wav`, `off` or one of the host's audible ones |
 | Network | none |
 | Control | QMP and qemu-ga UNIX sockets in `.local/mun/guests/<name>/` (loopback ports on Windows); serial console to `console.log` there |

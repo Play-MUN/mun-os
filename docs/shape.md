@@ -168,7 +168,9 @@ actions on the menus only; alerts and system sounds stay MUN's.
   anything decodes the image.
 - **Sounds**: WAV with exactly two chunks, `fmt ` (PCM, 48 kHz, 16-bit,
   stereo) and `data`, at most 1 MiB each; `move`, `enter` and `back` at most
-  1 s, `insert` at most 3 s; peaks at or under −1 dBFS. To remove metadata:
+  1 s, `insert` at most 3 s; peaks at or under −1 dBFS. A silent sound
+  (every sample zero) is valid; reports give its peak as `null`. To remove
+  metadata:
   `ffmpeg -i in.wav -ar 48000 -ac 2 -c:a pcm_s16le -fflags +bitexact -map_metadata -1 out.wav`.
 - The package's named files add up to at most 32 MiB. Blocks enter that
   budget in the order `card`, `sounds`, `world`; a block that would exceed
@@ -213,6 +215,11 @@ checker.
 | The palette's colours do not keep contrast (below) | The dressed surfaces use MUN's colours, text, plate and focus together; the palette still tones the world |
 | An unknown field, or a later minor version | Ignored, with a note; what is known is used |
 | An image that fails to decode in the console, or exceeds the display's budget | That block, at run time, falls back to MUN or to a lower level |
+
+A block is taken or dropped whole, so what a player sees is either the
+block as designed or MUN's: one defective layer, emitter or light texture
+disables the whole `world`, and one defective sound all of `sounds`. The
+checker names the field and the file concerned.
 
 ## Contrast
 
@@ -341,10 +348,24 @@ measured against; none of it exists yet.
 `check` prints what a console would use, block by block, each surface's
 colours, opacity and transition plan, and every note; `--report` adds the
 contrast ratios and the memory estimate; `--json` prints the normalised
-package, the files, the notes and the estimates. It exits 0 when everything
-declared is used, 2 when anything is dropped, replaced or the package is not
-used, and 1 when it cannot run. The template declares a palette, the card
-object, the surfaces and a transition, which need no file, and a README
+package, the files, the notes and the estimates, as strict JSON (no `NaN`
+or infinities; a silent sound's `peak_dbfs` is `null`). It exits 0 when
+everything declared is used, 2 when anything is dropped, replaced or the
+package is not used, and 1 when it cannot run, for example with a cover that
+cannot be read (`cover_invalid`, `cover_too_large`); a cover is read up to
+its 1 MiB and decoded no further than its own size. When no block survives,
+each block's cause is still printed.
+
+`init` checks the whole destination before it writes anything, and writes
+nothing if the check fails. It refuses a link anywhere it would write
+(the folder itself, a folder on the way, a file's name, a dangling link),
+even with `--force`, and a folder or special file where a file goes
+(`shape_destination_link`, `shape_destination_type`). An existing file at a
+name it writes is refused (`shape_exists`) unless `--force`, which replaces
+those files only, each by writing a new file and renaming it over the name,
+so a file that is also linked elsewhere keeps its content there; every other
+file in the folder is left as it was. The template declares a palette, the
+card object, the surfaces and a transition, which need no file, and a README
 explains how to add the world and sounds.
 
 On a card, the package is the folder `content/mun-shape/`. For a

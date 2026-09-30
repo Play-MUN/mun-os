@@ -71,6 +71,9 @@ the folder that goes on a card as `content/mun-shape/`:
 ./mun card shape variants .local/shape-fixtures # one defective package per rule
 ```
 
+`init` writes nothing into a destination with links, or with files at the
+names it writes unless `--force`, which replaces only those files.
+
 Package layout: `minitoml` (strict TOML subset used on both sides),
 `validate` (manifest v0 rules, naming generations and `CardInfo`), `source`
 (mounted directory or `debugfs` image), `ext4` (superblock checks), `image`

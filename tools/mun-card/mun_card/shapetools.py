@@ -9,7 +9,8 @@ the shell derives with the same algorithm (docs/shape.md, "Read level").
 import json
 import math
 import os
-import shutil
+import secrets
+import stat
 import struct
 import zlib
 from pathlib import Path
@@ -17,6 +18,7 @@ from typing import Dict, List, Optional, Tuple
 
 from . import shape
 from .errors import CardError
+from .validate import COVER_MAX_BYTES, COVER_MAX_SIDE
 
 # ------------------------------------------------------------------ PNG I/O
 
@@ -86,7 +88,20 @@ def _samples(line: bytearray, width: int, depth: int, channels: int) -> List[int
 def decode_png(data: bytes, max_side: int = 4096) -> Tuple[int, int, List[bytes]]:
     """Decode a PNG to rows of 8-bit RGB, composited over black. Every colour
     type, bit depth and Adam7 interlacing; bounded by `max_side` before
-    anything is inflated. Host preview only."""
+    anything is inflated, and inflated no further than the image's size.
+    Host preview only. Any defect, including a stream that does not inflate,
+    raises CardError("png_invalid")."""
+    try:
+        return _decode_png(data, max_side)
+    except CardError:
+        raise
+    except (zlib.error, struct.error, IndexError, ValueError) as exc:
+        # Every size is checked before it is unpacked; this keeps a defect
+        # the checks did not foresee an error of the file, not of the tool.
+        raise CardError("png_invalid", "No es un PNG válido", f"{type(exc).__name__}: {exc}")
+
+
+def _decode_png(data: bytes, max_side: int) -> Tuple[int, int, List[bytes]]:
     try:
         header = shape.png_header(data)
     except shape._Invalid as exc:
@@ -94,14 +109,23 @@ def decode_png(data: bytes, max_side: int = 4096) -> Tuple[int, int, List[bytes]
     width, height, depth, colour = header["width"], header["height"], header["depth"], header["colour"]
     if width > max_side or height > max_side:
         raise CardError("png_too_large", "El PNG es demasiado grande para leerlo", f"{width}×{height}")
-    palette, transparency, compressed = b"", b"", bytearray()
+    palette, transparency, compressed = b"", None, bytearray()
     for kind, body in _chunks(data):
         if kind == b"PLTE":
             palette = body
         elif kind == b"tRNS":
+            if transparency is not None:
+                raise CardError("png_invalid", "tRNS repetido")
             transparency = body
         elif kind == b"IDAT":
             compressed += body
+    # tRNS has one size per colour type (PNG 11.3.2.1), checked before use.
+    if transparency is not None:
+        if colour == 0 and len(transparency) != 2 or colour == 2 and len(transparency) != 6 \
+                or colour == 3 and not 1 <= len(transparency) <= len(palette) // 3 or colour in (4, 6):
+            raise CardError("png_invalid", "tRNS no válido para este tipo de color",
+                            f"{len(transparency)} bytes, tipo {colour}")
+    transparency = transparency or b""
     channels = _CHANNELS[colour]
     bits = depth * channels
     passes = _ADAM7 if header["interlace"] else ((0, 0, 1, 1),)
@@ -113,9 +137,14 @@ def decode_png(data: bytes, max_side: int = 4096) -> Tuple[int, int, List[bytes]
         if pw and ph:
             expected += ph * (1 + (pw * bits + 7) // 8)
     inflater = zlib.decompressobj()
-    raw = inflater.decompress(bytes(compressed), expected)
-    if len(raw) != expected or inflater.unconsumed_tail:
-        raise CardError("png_invalid", "Los datos del PNG no tienen el tamaño de la imagen")
+    try:
+        raw = inflater.decompress(bytes(compressed), expected)
+    except zlib.error as exc:
+        raise CardError("png_invalid", "Los datos del PNG no se pueden descomprimir", str(exc))
+    # Exactly the image's bytes, and then the end of a complete stream: no
+    # more output, no truncated stream, nothing after it.
+    if len(raw) != expected or inflater.unconsumed_tail or not inflater.eof or inflater.unused_data:
+        raise CardError("png_invalid", "Los datos del PNG no tienen el tamaño de la imagen o el flujo está incompleto")
     pixels = [bytearray(width * 3) for _ in range(height)]
     key = None
     if transparency and colour == 0:
@@ -247,7 +276,13 @@ def read_palette(data: bytes) -> Dict[str, Optional[str]]:
     by luminance (Rec. 709 weights on the encoded values, ties by colour),
     each band averaged, and as accent the most saturated warm tone (first
     in reading order on ties) scaled to a brightness of 235, or None."""
-    width, height, rows = decode_png(data, max_side=shape.SIDE_LIMITS["window"])
+    if len(data) > COVER_MAX_BYTES:
+        raise CardError("cover_too_large", "La portada supera el tamaño permitido", f"más de {COVER_MAX_BYTES} bytes")
+    try:
+        width, height, rows = decode_png(data, max_side=COVER_MAX_SIDE)
+    except CardError as exc:
+        code = "cover_too_large" if exc.code == "png_too_large" else "cover_invalid"
+        raise CardError(code, "La portada no se puede leer", f"{exc.message}: {exc.detail}" if exc.detail else exc.message)
     cells = _shrink(width, height, rows)
     accent, best = None, 0
     for r, g, b in cells:
@@ -327,37 +362,153 @@ def template(cover: Optional[bytes] = None) -> Dict[str, object]:
 
 
 def dump(document: Dict[str, object]) -> str:
-    return json.dumps(document, indent=2, ensure_ascii=False) + "\n"
+    return json.dumps(document, indent=2, ensure_ascii=False, allow_nan=False) + "\n"
+
+
+def read_cover(cover: Path) -> bytes:
+    """A cover file, read bounded by the manifest's cover limit."""
+    try:
+        with open(cover, "rb") as handle:
+            data = handle.read(COVER_MAX_BYTES + 1)
+    except OSError as exc:
+        raise CardError("cover_unreadable", "No se pudo leer la portada", f"{cover}: {exc.strerror}")
+    if len(data) > COVER_MAX_BYTES:
+        raise CardError("cover_too_large", "La portada supera el tamaño permitido", f"más de {COVER_MAX_BYTES} bytes")
+    return data
+
+
+def _example_files(example: Path) -> Dict[str, bytes]:
+    """The regular files of a sample package, by relative path; links and
+    hidden entries are not part of a sample."""
+    files = {}
+    for path in sorted(Path(example).rglob("*")):
+        relative = path.relative_to(example)
+        if path.is_symlink() or any(part.startswith(".") for part in relative.parts) or not path.is_file():
+            continue
+        files[relative.as_posix()] = path.read_bytes()
+    return files
+
+
+_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+_DIRECTORY = getattr(os, "O_DIRECTORY", 0)
+
+
+def _plan(folder: Path, relatives: List[str], force: bool) -> None:
+    """Check the whole destination before anything is written: no link as
+    the folder, a folder on the way or a final name (dangling ones
+    included), no folder or special file where a file goes, and no existing
+    file unless forced. Raises CardError naming every problem."""
+    links, wrong, existing = [], [], []
+    info = _lstat(folder)
+    if info is not None and stat.S_ISLNK(info.st_mode):
+        raise CardError("shape_destination_link", "La carpeta de destino es un enlace simbólico", str(folder))
+    if info is not None and not stat.S_ISDIR(info.st_mode):
+        raise CardError("shape_destination_type", "El destino existe y no es una carpeta", str(folder))
+    seen, blocked = set(), set()
+    for relative in relatives:
+        parts = relative.split("/")
+        for depth in range(1, len(parts) + 1):
+            name = "/".join(parts[:depth])
+            if name in blocked:
+                break      # already reported; nothing below it is looked at
+            if name in seen:
+                continue
+            seen.add(name)
+            entry = _lstat(folder / name) if info is not None else None
+            if entry is None:
+                break      # absent: everything below it is new
+            final = depth == len(parts)
+            if stat.S_ISLNK(entry.st_mode):
+                links.append(name)
+                blocked.add(name)
+                break
+            if final and stat.S_ISREG(entry.st_mode):
+                existing.append(name)
+            elif final or not stat.S_ISDIR(entry.st_mode):
+                wrong.append(name)
+                blocked.add(name)
+                break
+    if links:
+        raise CardError("shape_destination_link", "El destino tiene enlaces simbólicos donde se escribiría; "
+                        "no se sigue ninguno, ni con --force", ", ".join(links))
+    if wrong:
+        raise CardError("shape_destination_type", "El destino tiene carpetas u otros objetos donde irían archivos",
+                        ", ".join(wrong))
+    if existing and not force:
+        raise CardError("shape_exists", "Estos archivos ya existen; usa --force para sustituirlos", ", ".join(existing))
+
+
+def _lstat(path: Path):
+    try:
+        return os.lstat(path)
+    except FileNotFoundError:
+        return None
+
+
+def _write_tree(folder: Path, files: Dict[str, bytes]) -> None:
+    """Write files under folder through directory descriptors, never
+    following a link: each folder is opened with O_NOFOLLOW, each file is
+    written to a new temporary name and renamed over its own name. A rename
+    replaces the name only, so a file that is also linked elsewhere keeps
+    its bytes there, and a link that appeared since the plan is replaced,
+    not followed."""
+    folder.mkdir(parents=True, exist_ok=True)
+    root = os.open(folder, os.O_RDONLY | _DIRECTORY | _NOFOLLOW)
+    try:
+        for relative, data in files.items():
+            *directories, name = relative.split("/")
+            fd = os.dup(root)
+            try:
+                for part in directories:
+                    try:
+                        os.mkdir(part, 0o755, dir_fd=fd)
+                    except FileExistsError:
+                        pass
+                    inner = os.open(part, os.O_RDONLY | _DIRECTORY | _NOFOLLOW, dir_fd=fd)
+                    os.close(fd)
+                    fd = inner
+                temporary = f".{name}.{secrets.token_hex(4)}.tmp"
+                out = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW, 0o644, dir_fd=fd)
+                try:
+                    with os.fdopen(out, "wb") as handle:
+                        handle.write(data)
+                    os.rename(temporary, name, src_dir_fd=fd, dst_dir_fd=fd)
+                except BaseException:
+                    try:
+                        os.unlink(temporary, dir_fd=fd)
+                    except OSError:
+                        pass
+                    raise
+            finally:
+                os.close(fd)
+    except OSError as exc:
+        raise CardError("shape_destination_changed", "El destino cambió mientras se escribía; revísalo",
+                        f"{folder}: {exc.strerror}")
+    finally:
+        os.close(root)
 
 
 def init_package(folder: Path, cover: Optional[Path] = None, example: Optional[Path] = None,
                  force: bool = False) -> List[str]:
-    """Write a template (or copy an example package) into `folder`. Refuses
-    to replace an existing shape.json unless forced. Returns the files written."""
+    """Write a template (or a copy of a sample package) into `folder`.
+
+    The destination is checked as a whole first and nothing is written if
+    it is refused: links (the folder itself, a folder on the way, a final
+    name, a dangling one) are refused even with `force`, as is a folder or
+    special file where a file goes. `force` replaces existing regular files
+    at the names written, by rename (never truncating a file linked
+    elsewhere); every other file is left as it was. Returns the files
+    written."""
     folder = Path(folder)
-    if (folder / shape.MANIFEST).exists() and not force:
-        raise CardError("shape_exists", f"{folder / shape.MANIFEST} ya existe; usa --force para sustituirlo")
-    folder.mkdir(parents=True, exist_ok=True)
-    written = []
     if example is not None:
-        for path in sorted(Path(example).rglob("*")):
-            relative = path.relative_to(example)
-            if path.is_symlink() or relative.name.startswith("."):
-                continue
-            target = folder / relative
-            if path.is_dir():
-                target.mkdir(exist_ok=True)
-            elif path.is_file():
-                shutil.copyfile(path, target)
-                written.append(str(relative))
-        return written
-    (folder / shape.MANIFEST).write_text(dump(template(Path(cover).read_bytes() if cover else None)), encoding="utf-8")
-    written.append(shape.MANIFEST)
-    readme = folder / "README.md"
-    if force or not readme.exists():
-        readme.write_text(TEMPLATE_README.format(folder=folder.name or "."), encoding="utf-8")
-        written.append("README.md")
-    return written
+        files = _example_files(Path(example))
+    else:
+        document = template(read_cover(Path(cover)) if cover else None)
+        files = {shape.MANIFEST: dump(document).encode("utf-8"),
+                 "README.md": TEMPLATE_README.format(folder=folder.name or ".").encode("utf-8")}
+    _plan(folder, list(files), force)
+    _write_tree(folder, files)
+    return list(files)
 
 
 # ---------------------------------------------------------------- fixtures

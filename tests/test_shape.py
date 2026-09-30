@@ -582,6 +582,218 @@ class ToolTests(unittest.TestCase):
         self.assertEqual(self.run_cli("shape", "check", str(self.tmp / "missing"))[0], 1)
 
 
+def snapshot(*roots):
+    """Every entry under the roots: kind, and bytes or link target."""
+    state = {}
+    for root in roots:
+        for path in sorted([root, *root.rglob("*")]) if root.exists() or root.is_symlink() else []:
+            key = str(path)
+            if path.is_symlink():
+                state[key] = ("link", os.readlink(path))
+            elif path.is_dir():
+                state[key] = ("dir",)
+            elif path.is_file():
+                state[key] = ("file", path.read_bytes(), path.stat().st_ino)
+    return state
+
+
+def chunk(kind, body):
+    return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body) & 0xFFFFFFFF)
+
+
+class InitDestinationTests(unittest.TestCase):
+    """init writes nothing unless the whole destination is safe, never
+    follows a link, and --force only replaces its own names' regular files."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="shape-init-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.outside = self.tmp / "outside"
+        self.outside.mkdir()
+        (self.outside / "window.png").write_bytes(b"OUTSIDE ART")
+        (self.outside / "keep.json").write_bytes(b"OUTSIDE JSON")
+
+    def run_cli(self, *argv):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = cli.main(list(argv))
+        return code, out.getvalue(), err.getvalue()
+
+    def refused(self, folder, code, *extra):
+        before = snapshot(self.tmp)
+        for force in ((), ("--force",)) if code != "shape_exists" else ((),):
+            result = self.run_cli("shape", "init", str(folder), *extra, *force)
+            self.assertEqual(result[0], 1, result)
+            self.assertIn(f"[{code}]", result[2])
+            self.assertEqual(snapshot(self.tmp), before, "nothing may be written or changed")
+
+    def test_existing_artwork_is_kept(self):
+        folder = self.tmp / "pkg"
+        (folder / "card").mkdir(parents=True)
+        (folder / "card" / "window.png").write_bytes(b"OWN ART")
+        (folder / "notes.txt").write_bytes(b"mine")
+        self.refused(folder, "shape_exists", "--example", "sea")
+        # --force replaces the sample's own names and nothing else.
+        self.assertEqual(self.run_cli("shape", "init", str(folder), "--example", "sea", "--force")[0], 0)
+        self.assertEqual((folder / "card" / "window.png").read_bytes(),
+                         (SAMPLES / "sea" / "card" / "window.png").read_bytes())
+        self.assertEqual((folder / "notes.txt").read_bytes(), b"mine")
+        self.assertFalse([p for p in folder.rglob(".*")], "no temporary file is left")
+
+    def test_a_linked_folder_on_the_way_is_never_followed(self):
+        folder = self.tmp / "pkg"
+        folder.mkdir()
+        (folder / "card").symlink_to(self.outside, target_is_directory=True)
+        self.refused(folder, "shape_destination_link", "--example", "sea")
+
+    def test_a_dangling_link_at_a_final_name_is_refused(self):
+        folder = self.tmp / "pkg"
+        folder.mkdir()
+        (folder / "shape.json").symlink_to(self.tmp / "created-outside.json")
+        self.refused(folder, "shape_destination_link")
+        self.assertFalse((self.tmp / "created-outside.json").exists())
+        (folder / "shape.json").unlink()
+        (folder / "README.md").symlink_to(self.outside / "keep.json")
+        self.refused(folder, "shape_destination_link")
+
+    def test_the_folder_itself_must_not_be_a_link_or_a_file(self):
+        link = self.tmp / "pkg"
+        link.symlink_to(self.outside, target_is_directory=True)
+        self.refused(link, "shape_destination_link")
+        file = self.tmp / "file"
+        file.write_bytes(b"x")
+        self.refused(file, "shape_destination_type")
+
+    def test_a_folder_where_a_file_goes_is_refused(self):
+        folder = self.tmp / "pkg"
+        (folder / "shape.json").mkdir(parents=True)
+        self.refused(folder, "shape_destination_type")
+        shutil.rmtree(folder)
+        (folder / "world").mkdir(parents=True)
+        (folder / "card").write_bytes(b"a file where a folder goes")
+        self.refused(folder, "shape_destination_type", "--example", "sea")
+
+    def test_force_never_truncates_a_file_linked_elsewhere(self):
+        folder = self.tmp / "pkg"
+        folder.mkdir()
+        os.link(self.outside / "keep.json", folder / "shape.json")
+        self.refused(folder, "shape_exists")
+        self.assertEqual(self.run_cli("shape", "init", str(folder), "--force")[0], 0)
+        self.assertEqual((self.outside / "keep.json").read_bytes(), b"OUTSIDE JSON")
+        self.assertEqual(json.loads((folder / "shape.json").read_text())["format"], shape.FORMAT)
+
+    def test_a_new_folder_is_created_whole(self):
+        folder = self.tmp / "a" / "b" / "pkg"
+        self.assertEqual(self.run_cli("shape", "init", str(folder), "--example", "paper")[0], 0)
+        written = {p.relative_to(folder).as_posix() for p in folder.rglob("*") if p.is_file()}
+        self.assertEqual(written, {p.relative_to(SAMPLES / "paper").as_posix()
+                                   for p in (SAMPLES / "paper").rglob("*") if p.is_file()})
+
+
+class DamagedCoverTests(unittest.TestCase):
+    """A damaged cover is an error of the file, with a stable code, for
+    both commands that read one; nothing is written."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="shape-cover-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        good = shapetools.encode_png(1, 1, [bytes([100, 120, 140])], False)
+        ihdr = good[8:33]
+        grey = chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 0, 0, 0, 0))
+        stream = zlib.compress(bytes([0, 100, 120, 140]))
+        self.covers = {
+            # The two files of the review: a zlib header over an invalid deflate
+            # block, and a grey image whose tRNS has one byte instead of two.
+            "bad-deflate": good[:8] + ihdr + chunk(b"IDAT", b"\x78\x9c\x07") + chunk(b"IEND", b""),
+            "short-trns": good[:8] + grey + chunk(b"tRNS", b"\x00") + chunk(b"IDAT", zlib.compress(bytes([0, 50])))
+            + chunk(b"IEND", b""),
+            "truncated-stream": good[:8] + ihdr + chunk(b"IDAT", stream[:-5]) + chunk(b"IEND", b""),
+            "data-after-stream": good[:8] + ihdr + chunk(b"IDAT", stream + b"extra") + chunk(b"IEND", b""),
+            "too-much-data": good[:8] + ihdr + chunk(b"IDAT", zlib.compress(bytes(40))) + chunk(b"IEND", b""),
+            "trns-on-rgba": png(1, 1, [[1, 2, 3, 4]], colour=6)[:33] + chunk(b"tRNS", b"\x00" * 6)
+            + png(1, 1, [[1, 2, 3, 4]], colour=6)[33:],
+            "not-png": b"GIF89a",
+        }
+
+    def run_cli(self, *argv):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = cli.main(list(argv))
+        return code, out.getvalue(), err.getvalue()
+
+    def test_both_commands_report_the_cover_without_a_traceback(self):
+        for name, data in self.covers.items():
+            with self.subTest(name=name):
+                cover = self.tmp / f"{name}.png"
+                cover.write_bytes(data)
+                code, _, err = self.run_cli("shape", "check", str(SAMPLES / "sea"), "--cover", str(cover))
+                self.assertEqual(code, 1)
+                self.assertIn("[cover_invalid]", err)
+                folder = self.tmp / f"init-{name}"
+                code, _, err = self.run_cli("shape", "init", str(folder), "--cover", str(cover))
+                self.assertEqual(code, 1)
+                self.assertIn("[cover_invalid]", err)
+                self.assertFalse(folder.exists(), "a refused cover writes nothing")
+
+    def test_decoding_is_bounded(self):
+        big = self.tmp / "big.png"
+        big.write_bytes(png(1, 1, [[0, 0, 0]], colour=2)[:33] + chunk(b"zTXt", b"k\0\0" + bytes(1024 * 1024))
+                        + png(1, 1, [[0, 0, 0]], colour=2)[33:])
+        code, _, err = self.run_cli("shape", "check", str(SAMPLES / "sea"), "--cover", str(big))
+        self.assertEqual((code, "[cover_too_large]" in err), (1, True))
+        wide = self.tmp / "wide.png"
+        wide.write_bytes(png(1025, 1, [[0, 0, 0] * 1025], colour=2))
+        code, _, err = self.run_cli("shape", "check", str(SAMPLES / "sea"), "--cover", str(wide))
+        self.assertEqual((code, "[cover_too_large]" in err), (1, True))
+
+
+class ReportTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="shape-report-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    def run_cli(self, *argv):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = cli.main(list(argv))
+        return code, out.getvalue(), err.getvalue()
+
+    def test_a_silent_sound_is_valid_and_the_report_is_strict_json(self):
+        folder = self.tmp / "silent"
+        folder.mkdir()
+        (folder / "zero.wav").write_bytes(shapetools.encode_wav([(0, 0)] * 480))
+        (folder / "shape.json").write_text(json.dumps({"format": "mun-shape/1",
+                                                       "sounds": {k: "zero.wav" for k in ("move", "enter", "back")}}))
+        code, out, _ = self.run_cli("shape", "check", str(folder), "--json")
+        self.assertEqual(code, 0)
+
+        def refuse(constant):
+            raise ValueError(constant)
+        report = json.loads(out, parse_constant=refuse)
+        self.assertIsNone(report["files"]["zero.wav"]["peak_dbfs"])
+        self.assertEqual(report["state"], "ready")
+        code, out, _ = self.run_cli("shape", "check", str(folder))
+        self.assertEqual(code, 0)
+        self.assertIn("silencio", out)
+        self.assertEqual(shape.wav_header(shapetools.encode_wav([(0, 1)] * 4))["peak_dbfs"],
+                         20 * __import__("math").log10(1 / 32768))
+
+    def test_the_cause_is_shown_when_no_block_survives(self):
+        folder = self.tmp / "single"
+        folder.mkdir()
+        (folder / "shape.json").write_text(json.dumps({"format": "mun-shape/1", "card": {"window": "missing.png"}}))
+        for extra in ((), ("--report",)):
+            code, out, _ = self.run_cli("shape", "check", str(folder), *extra)
+            self.assertEqual(code, 2)
+            for expected in ("SIN USO", "shape_path_missing", "card.window", "missing.png"):
+                self.assertIn(expected, out, (extra, out))
+        (folder / "shape.json").write_text(json.dumps({"format": "mun-shape/1", "card": {"morph": 2},
+                                                       "transition": {"in": "spin"}}))
+        code, out, _ = self.run_cli("shape", "check", str(folder))
+        for expected in ("shape_range", "card.morph", "shape_enum", "transition.in"):
+            self.assertIn(expected, out)
+
+
 class DocumentationTests(unittest.TestCase):
     def test_the_contract_names_every_code_and_limit(self):
         text = (ROOT / "docs" / "shape.md").read_text(encoding="utf-8")
@@ -592,6 +804,9 @@ class DocumentationTests(unittest.TestCase):
         for phrase in ("64 KiB", "32 MiB", "4 MiB", "1 MiB", "2048", "256", "1024", "128", "−1 dBFS", "4.5:1", "3:1",
                        "136 MiB", "200 MiB"):
             self.assertIn(phrase, text, phrase)
+        for code in ("shape_exists", "shape_destination_link", "shape_destination_type", "cover_invalid",
+                     "cover_too_large", "`null`"):
+            self.assertIn(code, text, code)
         self.assertIn("mun-shape", (ROOT / "docs" / "game-cards.md").read_text(encoding="utf-8"))
 
 

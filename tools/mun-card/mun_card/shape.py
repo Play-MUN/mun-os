@@ -580,7 +580,9 @@ def png_header(data: bytes) -> Dict[str, int]:
 def wav_header(data: bytes) -> Dict[str, Any]:
     """Accept exactly RIFF/WAVE with a 16-byte PCM `fmt ` chunk (48 kHz,
     16-bit, stereo) followed by one `data` chunk and nothing else: the shell's
-    reader needs no other case. Returns frames and peak. Raises _Invalid."""
+    reader needs no other case. Returns the duration and the peak in dBFS,
+    which is None for silence (every sample zero): a finite value in any
+    report, and a silent sound is valid. Raises _Invalid."""
     if len(data) < 44 or data[:4] != b"RIFF" or data[8:12] != b"WAVE":
         raise _Invalid("shape_wav", "no es RIFF/WAVE")
     (riff_size,) = struct.unpack("<I", data[4:8])
@@ -602,7 +604,7 @@ def wav_header(data: bytes) -> Dict[str, Any]:
     if sys.byteorder == "big":
         samples.byteswap()
     peak = max(max(samples), -min(samples))
-    peak_dbfs = 20 * math.log10(peak / 32768) if peak else -math.inf
+    peak_dbfs = 20 * math.log10(peak / 32768) if peak else None
     return {"seconds": size / (SOUND_RATE * 4), "peak_dbfs": peak_dbfs}
 
 
@@ -864,7 +866,7 @@ def _inspect_file(package: _Scoped, reference: _Reference, cache: Dict[str, Any]
         if found["seconds"] > seconds:
             raise _Invalid("shape_wav_duration", f"{reference.path}: {found['seconds']:.2f} s > {seconds:g} s",
                            reference.where)
-        if found["peak_dbfs"] > PEAK_MAX_DBFS:
+        if found["peak_dbfs"] is not None and found["peak_dbfs"] > PEAK_MAX_DBFS:
             raise _Invalid("shape_wav_peak", f"{reference.path}: {found['peak_dbfs']:.2f} dBFS > {PEAK_MAX_DBFS:g}",
                            reference.where)
     return found

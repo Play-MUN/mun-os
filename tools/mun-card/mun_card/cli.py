@@ -189,7 +189,8 @@ def _describe_block(name: str, block: dict, files: dict) -> str:
         for key in ("move", "enter", "back", "insert"):
             if key in block:
                 details = files[block[key]]
-                parts.append(f"{key} {details['seconds']:.2f} s {details['peak_dbfs']:.1f} dBFS")
+                peak = "silencio" if details["peak_dbfs"] is None else f"{details['peak_dbfs']:.1f} dBFS"
+                parts.append(f"{key} {details['seconds']:.2f} s {peak}")
         return " · ".join(parts)
     return ""
 
@@ -240,23 +241,19 @@ def _print_shape(folder: Path, result, report: bool, read_level) -> None:
         print(f"  {'':12s} sin paleta declarada: foco {read_level['focus']} sobre la placa de MUN "
               f"con opacidad {read_level['plate_opacity']:.3f}")
     for note in result.notes:
-        if note.level == "dropped" and note.block is not None:
+        # A dropped block's note is on its block's line above; when no block
+        # survived there is no such line, and the note is printed here.
+        if note.level == "dropped" and note.block is not None and result.shape is not None:
             continue
-        print(f"  nota [{note.code}] {note.message}" + (f" — {note.detail}" if note.detail else "")
+        label = f"descartado {_BLOCK_WORDS[note.block]}" if note.level == "dropped" and note.block else "nota"
+        print(f"  {label} [{note.code}] {note.message}" + (f" — {note.detail}" if note.detail else "")
               + (f" ({note.where})" if note.where else ""))
-
-
-def _cover_bytes(cover: str) -> bytes:
-    try:
-        return Path(cover).read_bytes()
-    except OSError as exc:
-        raise CardError("cover_unreadable", "No se pudo leer la portada", f"{cover}: {exc.strerror}")
 
 
 def _read_level(cover: Optional[str]):
     if not cover:
         return None
-    palette = shapetools.read_palette(_cover_bytes(cover))
+    palette = shapetools.read_palette(shapetools.read_cover(Path(cover)))
     palette["focus"], palette["plate_opacity"] = shape.lent_focus(palette["accent"])
     return palette
 
@@ -276,7 +273,8 @@ def cmd_shape_check(args: argparse.Namespace) -> int:
             report["memory_estimate"] = shape.memory_estimate(result)
         if read_level is not None:
             report["read_level"] = read_level
-        print(json.dumps(report, indent=2, ensure_ascii=False))
+        # Strict JSON: a value that is not finite is a bug here, not output.
+        print(json.dumps(report, indent=2, ensure_ascii=False, allow_nan=False))
     else:
         _print_shape(folder, result, args.report, read_level)
         if extra:
@@ -291,8 +289,6 @@ def cmd_shape_init(args: argparse.Namespace) -> int:
         example = SHAPE_EXAMPLES / args.example
         if not (example / shape.MANIFEST).is_file():
             raise CardError("shape_example_missing", f"No se encontró el ejemplo {args.example}", str(example))
-    if args.cover:
-        _cover_bytes(args.cover)
     written = shapetools.init_package(folder, Path(args.cover) if args.cover else None, example, args.force)
     print(f"escrito en {folder}: {', '.join(written)}")
     result = shape.check_package(DirectorySource(folder))
@@ -365,7 +361,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("folder")
     s.add_argument("--cover", metavar="PNG", help="fill the palette with the one the console would read from this cover")
     s.add_argument("--example", choices=("sea", "paper"), help="start from one of the sample packages instead")
-    s.add_argument("--force", action="store_true", help="replace an existing shape.json")
+    s.add_argument("--force", action="store_true",
+                   help="replace existing regular files at the names written (never links or folders; nothing else is touched)")
     s.set_defaults(func=cmd_shape_init)
     s = shape_sub.add_parser("check", help="check a package folder as a console would; exit 0 all used, 2 otherwise")
     s.add_argument("folder")

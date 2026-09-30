@@ -104,35 +104,31 @@ void SystemSounds::run()
     std::vector<Voice> voices;
     std::vector<int> mix(size_t(kPeriodFrames * kChannels));
     std::vector<qint16> period(mix.size());
-    std::chrono::steady_clock::time_point retryAt{};
+    std::chrono::steady_clock::time_point retryAt{}, lastSound{};
     bool reported = false;
+    int failures = 0;  // writes failed in a row
 
-    const auto giveUp = [&](const char *what, int error) {
-        if (!reported)
-            qWarning("mun-shell: interface sounds off: %s: %s", what, snd_strerror(error));
-        reported = true;
+    const auto closeDevice = [&] {
         if (pcm) {
             snd_pcm_close(pcm);
             pcm = nullptr;
         }
+    };
+    const auto giveUp = [&](const char *what, int error) {
+        if (!reported)
+            qWarning("mun-shell: interface sounds off: %s: %s", what, snd_strerror(error));
+        reported = true;
+        closeDevice();
         voices.clear();
+        failures = 0;
         retryAt = std::chrono::steady_clock::now() + kRetry;
     };
 
     for (;;) {
         {
             std::unique_lock lock(m_mutex);
-            const auto woken = [this] { return m_stop || !m_requests.empty(); };
-            if (voices.empty()) {
-                if (!pcm) {
-                    m_wake.wait(lock, woken);
-                } else if (!m_wake.wait_for(lock, kIdle, woken)) {
-                    // Silent for a while: let the device go.
-                    snd_pcm_close(pcm);
-                    pcm = nullptr;
-                    continue;
-                }
-            }
+            if (!pcm && voices.empty())
+                m_wake.wait(lock, [this] { return m_stop || !m_requests.empty(); });
             if (m_stop)
                 break;
             while (!m_requests.empty()) {
@@ -143,8 +139,19 @@ void SystemSounds::run()
             }
         }
 
+        const auto now = std::chrono::steady_clock::now();
+        if (!voices.empty()) {
+            lastSound = now;
+        } else if (pcm && now - lastSound >= kIdle) {
+            // Silent for a while: let the device go. What is left in it is
+            // silence, so it is dropped rather than played out.
+            snd_pcm_drop(pcm);
+            closeDevice();
+            continue;
+        }
+
         if (!pcm) {
-            if (std::chrono::steady_clock::now() < retryAt) {
+            if (now < retryAt) {
                 voices.clear();
                 continue;
             }
@@ -160,10 +167,13 @@ void SystemSounds::run()
                 giveUp("the sound device refuses 16-bit 48 kHz stereo", error);
                 continue;
             }
-            reported = false;
         }
 
-        // One period of everything sounding, mixed and limited.
+        // One period of everything sounding, mixed and limited; silence when
+        // nothing is. While the device is open it is never left to run dry:
+        // a stream that stops and starts again between sounds is what the
+        // laboratory's virtual device, played through the Mac's CoreAudio,
+        // failed to resume from (EIO), where a fresh device plays.
         std::fill(mix.begin(), mix.end(), 0);
         for (Voice &voice : voices) {
             const std::vector<qint16> &samples = voice.sound->samples;
@@ -178,22 +188,30 @@ void SystemSounds::run()
         for (size_t i = 0; i < mix.size(); ++i)
             period[i] = qint16(std::clamp(mix[i] * kGainNumerator / kGainDenominator, -32768, 32767));
 
-        // Blocking writes pace the loop to the device. Running dry between
-        // sounds is an underrun the next write recovers from.
+        // Blocking writes pace the loop to the device.
         const qint16 *next = period.data();
         snd_pcm_uframes_t left = kPeriodFrames;
-        while (left > 0 && pcm) {
+        while (left > 0) {
             snd_pcm_sframes_t written = snd_pcm_writei(pcm, next, left);
             if (written < 0)
                 written = snd_pcm_recover(pcm, int(written), 1);
             if (written < 0) {
-                giveUp("the sound device stopped", int(written));
+                // A device that fails mid-stream is opened afresh at once,
+                // the sounds keeping their place; one that fails again
+                // right after opening means silence for kRetry.
+                if (++failures > 1)
+                    giveUp("the sound device stopped", int(written));
+                else
+                    closeDevice();
                 break;
             }
             next += written * kChannels;
             left -= snd_pcm_uframes_t(written);
         }
+        if (left == 0) {
+            failures = 0;
+            reported = false;
+        }
     }
-    if (pcm)
-        snd_pcm_close(pcm);
+    closeDevice();
 }

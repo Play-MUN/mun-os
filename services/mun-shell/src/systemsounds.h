@@ -9,9 +9,11 @@
 // Playing never blocks the GUI thread: play() queues the sound and a worker
 // thread mixes whatever is sounding (up to kVoices at once, so quick moves
 // overlap instead of cutting each other) into the device. The device is
-// opened on the first sound and closed after kIdle of silence. No device,
-// or one that fails, means silence and one line in the journal, never an
-// error in the interface; the next sound tries again after kRetry.
+// opened on the first sound, fed silence between sounds so that it never
+// runs dry, and closed after kIdle of silence. A device that fails is opened
+// afresh at once; no device, or one that fails again, means silence and one
+// line in the journal, never an error in the interface, and the next sound
+// tries again after kRetry.
 //
 // Thread contract: play() on the GUI thread; the worker owns the ALSA handle
 // and is joined by the destructor, before any member it reads is destroyed.

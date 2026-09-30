@@ -247,10 +247,14 @@ console's sound device, and physical outputs are tested on the chosen board.
 games use: the unit adds the `audio` group. A worker thread mixes up to
 four at once at 3/4 of their level, so quick moves overlap rather than cut
 each other, with about 40 ms buffered ahead. The device is opened on the
-first sound and let go after three seconds of silence, and the shell holds
-none of it while a game runs (the launcher stops the shell first). No
-device, or one that fails, means silence and one line in the journal;
-the next sound tries again after five seconds. Settings › Picture and sound
+first sound, fed silence between sounds so that it never runs dry (the
+laboratory's virtual device, played through the Mac's CoreAudio, did not
+resume a stream that had: the first sound played, later ones failed with an
+I/O error), and let go after three seconds of silence; the shell holds none
+of it while a game runs (the launcher stops the shell first). A device that
+fails is opened afresh at once; no device, or one that fails again, means
+silence and one line in the journal, and the next sound tries again after
+five seconds. Settings › Picture and sound
 › System sounds turns them off. In the laboratory the guest's sound device
 is silent unless it plays to the Mac (`--window`, or `--audio coreaudio`)
 or records to `audio.wav` (`--audio wav`).

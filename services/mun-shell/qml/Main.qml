@@ -65,6 +65,51 @@ Window {
     readonly property string networkText: SystemInfo.wiredConnected ? I18n.t("Ethernet", "Cable")
         : SystemInfo.wifiConnected ? "Wi-Fi" : I18n.t("Offline", "Sin conexión")
 
+    // The Game Card's bands: MUN's glass in the game's plate colour under
+    // the status line, the path and the hints, at the opacity its text needs
+    // over any world. `under` is the item it lies under, a sibling.
+    component Band: Material {
+        required property Item under
+        visible: Shape.dressed
+        x: under.x - 26
+        y: under.y - 12
+        width: under.width + 52
+        height: under.height + 24
+        radii: [16]
+        plate: Shape.plate
+        material: "glass"
+        opacity: Shape.bandsOpacity
+    }
+
+    // ------------------------------------------------------------ MUN Shape
+
+    // The active card's identity (src/shape.h): fed the card's record and the
+    // player's choice; its colours reach only the main arc, the game's panel
+    // and the bands of the status line, the path and the hints.
+    Binding { target: Shape; property: "card"; value: CardClient.card }
+    Binding { target: Shape; property: "mode"; value: ShellSettings.shapeMode }
+    // The game's menu sounds, when it has them, the player wants them, MUN
+    // Shape is shown in full and the player is on the game's surfaces: in
+    // Settings and in any dialog the sounds are MUN's, as their looks are.
+    Binding {
+        target: SystemSounds
+        property: "gameSounds"
+        value: ShellSettings.gameSounds && ShellSettings.shapeMode === "full" && !window.inSettings && !window.modal
+    }
+    readonly property string shapeSounds: JSON.stringify(Shape.sounds)
+    onShapeSoundsChanged: SystemSounds.useGameSounds(Shape.sounds)
+    Connections {
+        target: Shape
+        // A card arriving with its identity is greeted once by its cue; the
+        // same card found at start (after a game) is not.
+        function onAdopted(live) {
+            if (live && window.powered && ShellSettings.systemSounds)
+                SystemSounds.playGame("insert")
+        }
+    }
+    readonly property bool shaped: Shape.dressed
+    readonly property color bandText: shaped ? Shape.text : Theme.ash
+
     // ------------------------------------------------------------ navigation
 
     property int level: 0
@@ -482,8 +527,9 @@ Window {
             anchors.fill: parent
             orb: Theme.orb
             hour: status.now.getHours() + status.now.getMinutes() / 60
-            glowColor: Theme.cardLight
-            running: !window.resting && window.powered
+            glowColor: Shape.ambient
+            tint: Shape.tint
+            running: !window.resting && window.powered && !ShellSettings.reduceMotion
         }
         HeroIcon {
             id: hero
@@ -493,7 +539,11 @@ Window {
             y: Theme.orb.y - height / 2 + bob
             icon: window.focusedEntry.key
             lit: window.cardReady ? 1 : 0.16
-            running: !window.resting && window.powered
+            running: !window.resting && window.powered && !ShellSettings.reduceMotion
+            cardWindow: Shape.window
+            cardShape: Shape.cardShape
+            morph: Shape.morph
+            cardGlow: Shape.glow
             onIconChanged: backdrop.ripple()
         }
 
@@ -502,6 +552,11 @@ Window {
             anchors.fill: parent
             scale: ShellSettings.safeArea / 100
             Behavior on scale { NumberAnimation { duration: 500; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.settle } }
+
+            // The Game Card's bands (Band, above).
+            Band { under: status }
+            Band { under: path }
+            Band { under: hints }
 
             StatusBar {
                 id: status
@@ -513,6 +568,8 @@ Window {
                 networkText: window.networkText
                 online: window.online
                 clockFormat: ShellSettings.clockFormat
+                textColour: window.bandText
+                clockColour: window.shaped ? Shape.text : Theme.moon
             }
 
             Item {
@@ -523,6 +580,7 @@ Window {
                     current: window.mainIndex
                     radius: 340
                     spread: 24
+                    dressed: true
                     hidden: window.inSettings
                     dimmed: window.level === 2 && window.previousLevel === 0
                     onActivated: (index) => { window.wake(); window.clickEntry(0, index) }
@@ -542,17 +600,21 @@ Window {
 
             DetailPanel {
                 content: window.panel
+                // The game's panel: the Game Card entry's, on the main arc.
+                dressed: window.focusedEntry.key === "card" && !window.inSettings
                 selected: window.level === 2 ? window.optionIndex : -1
                 note: window.note
                 onOptionClicked: (index) => { window.wake(); window.clickOption(index) }
             }
 
             MarkText {
+                id: path
                 x: Theme.gutter
                 anchors.bottom: parent.bottom
                 anchors.bottomMargin: 66
                 size: 15
                 tracking: 0.24
+                color: window.bandText
                 // The console's name, as its mark, where the trail starts.
                 readonly property string home: "MUN™"
                 readonly property string separator: "  ›  "
@@ -563,6 +625,7 @@ Window {
             }
 
             Row {
+                id: hints
                 anchors.right: parent.right
                 anchors.rightMargin: Theme.gutter
                 anchors.bottom: parent.bottom
@@ -579,19 +642,20 @@ Window {
                             radius: 18
                             color: "transparent"
                             border.width: 2
-                            border.color: Theme.ash
+                            border.color: window.bandText
                             UiText {
                                 anchors.centerIn: parent
                                 text: modelData[0]
                                 size: 17
                                 weight: 700
+                                color: window.shaped ? Shape.text : Theme.moon
                             }
                         }
                         UiText {
                             anchors.verticalCenter: parent.verticalCenter
                             text: modelData[1]
                             size: 23
-                            color: Theme.ash
+                            color: window.bandText
                         }
                     }
                 }

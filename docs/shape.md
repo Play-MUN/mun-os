@@ -8,9 +8,12 @@ package with the same code, and nothing on the card runs.
 
 **Status.** This document is the package contract, format `mun-shape/1`, and
 its checker, `mun-card shape`. The card service copies a valid card's
-package, checked, to RAM for the shell; **the shell does not render Shape
-yet**, so a card that carries a package looks and plays exactly as the same
-card without it. What each part does, and what is still to come, is under
+package, checked, to RAM for the shell, and the shell dresses Home with its
+**still** part: the palette and materials of the eligible surfaces, the card
+object, the ambient light and tint of MUN's world, the menu sounds and the
+insertion cue. **Worlds and transitions are not drawn yet**: a package's
+`world` and `transition` are checked and exported, not shown. What each part
+does, and what is still to come, is under
 [How the console uses a package](#how-the-console-uses-a-package); the
 resource figures there are objectives to be measured, not guarantees.
 
@@ -348,7 +351,32 @@ The algorithm, exact so that the console and the checker agree:
   strictly and published as released only once the copy has closed its
   files. A physical removal does not necessarily end a blocked read at once.
 
-**Still to come** (the shell, its settings and the renderer):
+**The shell, still identity** (implemented; details in its
+[README](../services/mun-shell/README.md#a-game-cards-identity-mun-shape)):
+
+- It reads only the service's copy for the insertion in the card's record,
+  decodes the window image and the cover on its own thread with their
+  dimensions checked first and an allocation limit, and verifies the
+  surfaces' colours again with the same rule, falling back to MUN's set.
+- Dressed: the main arc's entries, the game's panel and the bands of the
+  status line, the path and the hints (plates in their material at their
+  computed opacity, the text and focus colours); the card object (its
+  window image or the cover, its outline, its light); the ambient light and
+  a tint of MUN's world, in the card's hue at MUN's own luminance, so MUN's
+  texts over it keep their contrast; the menus' sounds on those surfaces,
+  and the insertion cue.
+- MUN's: Settings, their panels and every dialog, with MUN's focus and
+  sounds even for a card that lends colours; the start-up, the hand-over,
+  the layout and every word.
+- Without a palette: the lent colours, else the palette read from the
+  cover; its accent is the focus only if it keeps 3:1 on MUN's plate.
+- A change of identity is one step; a dressed label never eases through
+  unproven colours. Returning from a game with the same card keeps its
+  identity, without the cue.
+- Settings: *MUN Shape* Full, Colours only or Off; *Game sounds on the
+  menus*; *Reduce motion* (Home's world and objects hold still).
+
+**Still to come** (the worlds, their motion and the transitions):
 
 - **The shell** reads only the service's copy, decodes it off the interface
   thread with the dimensions checked first, paints the world into its own

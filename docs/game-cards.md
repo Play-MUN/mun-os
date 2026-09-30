@@ -72,8 +72,8 @@ background = "#BFD9F2"
 | `content.entry` | for `game` | a regular file: the executable |
 | `content.cover` | no | a PNG of at most 1 MiB and 1024×1024 |
 | `content.access` | no | `copy` (default: only the entry is staged) or `mount` (the content is also mounted read-only for the game; [runtime.md](runtime.md)) |
-| `presentation.accent` | no | `#RRGGBB`: while the card is the active one, the shell tints its accent (focus rings, marks, labels) with it |
-| `presentation.background` | no | `#RRGGBB`: likewise for the stage glow. The card lends colours, never layout or structure |
+| `presentation.accent` | no | `#RRGGBB`: while the card is the active one, the focus of Home's main arc and of the game's panel takes it, if it keeps its contrast there ([shape.md](shape.md#contrast)); Settings and dialogs keep MUN's |
+| `presentation.background` | no | `#RRGGBB`: likewise for the ambient light at Home's orb. The card lends colours, never layout or structure; a MUN Shape palette takes precedence |
 | `saves.location` | no | default `saves`; if present on the card it must be a directory |
 | `saves.directory`, `saves.units`, `saves.checks`, `saves.max_bytes` | no, all four or none | directory saves for a game that writes its own files ([saves.md](saves.md)) |
 

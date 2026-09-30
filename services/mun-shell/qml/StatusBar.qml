@@ -3,7 +3,9 @@ import MUN.Shell
 
 // The line at the top right: the slot, the network, tonight's moon and the
 // time. The slot's light is the console's LED colour while a Game Card is
-// ready; the network's is patina while an interface is connected.
+// ready; the network's is patina while an interface is connected. On a
+// Game Card's band (Shape, docs/shape.md) its words and clock take the
+// game's text colour; the lights keep their meaning and colours.
 Row {
     id: root
     property string slotText
@@ -11,6 +13,8 @@ Row {
     property string networkText
     property bool online: false
     property string clockFormat: "24h"
+    property color textColour: Theme.ash
+    property color clockColour: Theme.moon
     // The local time, to the minute.
     property date now: new Date()
 
@@ -49,7 +53,7 @@ Row {
             litColour: Theme.led
             glow: [{ blur: 12, spread: 2, color: Theme.rgba(221, 233, 255, 0.8) }]
         }
-        Status { text: root.slotText }
+        Status { text: root.slotText; color: root.textColour }
     }
     Row {
         anchors.verticalCenter: parent.verticalCenter
@@ -59,9 +63,9 @@ Row {
             litColour: Theme.patina
             glow: [{ blur: 10, spread: 2, color: Theme.rgba(127, 179, 163, 0.6) }]
         }
-        Status { text: root.networkText }
+        Status { text: root.networkText; color: root.textColour }
     }
-    Status { text: I18n.moonName(moon.phase) }
+    Status { text: I18n.moonName(moon.phase); color: root.textColour }
     MoonPhase {
         id: moon
         anchors.verticalCenter: parent.verticalCenter
@@ -75,7 +79,7 @@ Row {
         text: I18n.clock(root.now, root.clockFormat)
         size: 21
         tracking: 0.14
-        color: Theme.moon
+        color: root.clockColour
     }
 
     Timer {

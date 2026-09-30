@@ -11,11 +11,24 @@ import MUN.Shell
 // `content` is {kicker, title, text, options}; an option is
 // {kind: "head" | "choice" | "action" | "info", label, value}. `selected` is
 // the chosen option's index, -1 while the options do not have the focus.
+//
+// `dressed` is the game's panel (the Game Card entry's): it takes the active
+// card's identity (Shape, docs/shape.md), the game's plate, text and focus
+// while its colours hold, else MUN's look with the card's focus colour. Every
+// other panel is MUN's.
 ProjectedLayer {
     id: root
     property var content: ({ kicker: "", title: "", text: "", options: [] })
     property int selected: -1
     property string note: ""
+    property bool dressed: false
+    readonly property bool shaped: dressed && Shape.dressed
+    readonly property color focusColour: dressed ? Shape.focus : Theme.accent
+    // What MUN draws in ash, patina and moon on its panel, the game's text
+    // colour on its plate: every text on a dressed plate is the proven one.
+    readonly property color textColour: shaped ? Shape.text : Theme.moon
+    readonly property color secondColour: shaped ? Shape.text : Theme.ash
+    readonly property color labelColour: shaped ? Shape.text : Theme.patina
     // A pointer chose option `index`.
     signal optionClicked(int index)
 
@@ -41,6 +54,13 @@ ProjectedLayer {
     onContentChanged: refresh()
     onSelectedChanged: refresh()
     onNoteChanged: refresh()
+    onShapedChanged: refresh()
+    onFocusColourChanged: refresh()
+    Connections {
+        target: Shape
+        enabled: root.dressed
+        function onChanged() { root.refresh() }
+    }
 
     // Pointer input lands on what the view shows: back through the
     // projection to the flat option under it.
@@ -72,14 +92,24 @@ ProjectedLayer {
 
         Box {
             anchors.fill: parent
+            visible: !root.shaped
             radii: [26]
             gradient: ({ type: "linear", angle: 160, stops: [[0, Theme.rgba(62, 92, 130, 0.16)], [0.6, Theme.rgba(20, 24, 32, 0.35)], [1, Theme.rgba(7, 8, 10, 0.4)]] })
             insets: [{ y: 1, color: Theme.rgba(255, 255, 255, 0.08) }, { spread: 1, color: Theme.rgba(143, 176, 214, 0.10) }]
-            Shadow {
-                z: -1
-                radii: [26]
-                shadows: [{ y: 40, blur: 80, spread: -30, color: Theme.rgba(0, 0, 0, 0.8) }]
-            }
+        }
+        // Cast by the panel, whichever surface it shows (placed around its parent).
+        Shadow {
+            z: -1
+            radii: [26]
+            shadows: [{ y: 40, blur: 80, spread: -30, color: Theme.rgba(0, 0, 0, 0.8) }]
+        }
+        Material {
+            anchors.fill: parent
+            visible: root.shaped
+            radii: [26]
+            plate: Shape.plate
+            material: Shape.panelMaterial
+            opacity: Shape.panelOpacity
         }
 
         Column {
@@ -92,7 +122,7 @@ ProjectedLayer {
                 text: root.content.kicker
                 size: 15
                 tracking: 0.24
-                color: Theme.patina
+                color: root.labelColour
             }
             Item { width: 1; height: 14 }
             UiText {
@@ -104,6 +134,7 @@ ProjectedLayer {
                 tracking: -0.02
                 cssLineHeight: 1.04
                 wrapMode: Text.WordWrap
+                color: root.textColour
             }
             Item { width: 1; height: 18 }
             UiText {
@@ -112,7 +143,7 @@ ProjectedLayer {
                 text: root.content.text
                 size: 25
                 cssLineHeight: 1.45
-                color: Theme.ash
+                color: root.secondColour
                 wrapMode: Text.WordWrap
             }
             Item { width: 1; height: 30 }
@@ -161,7 +192,7 @@ ProjectedLayer {
                                 text: entry.head ? entry.option.label : ""
                                 size: 13
                                 tracking: 0.26
-                                color: Theme.patina
+                                color: root.labelColour
                             }
                             OptionRow {
                                 id: row
@@ -172,6 +203,8 @@ ProjectedLayer {
                                 value: entry.option.value || ""
                                 choice: entry.option.kind === "choice"
                                 on: entry.index === root.selected
+                                shaped: root.shaped
+                                focusColour: root.focusColour
                             }
                         }
                     }
@@ -184,7 +217,7 @@ ProjectedLayer {
                 height: Math.max(30, implicitHeight)
                 text: root.note
                 size: 21
-                color: Theme.ash
+                color: root.secondColour
                 wrapMode: Text.WordWrap
             }
         }

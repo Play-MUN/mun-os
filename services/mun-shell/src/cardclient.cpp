@@ -106,6 +106,22 @@ void CardClient::handleMessage(const QJsonObject &message)
         }
         if (!replaced)
             m_cards.append(card);
+    } else if (type == QLatin1String("shape")) {
+        // A change of a card's MUN Shape record alone (the card service sends
+        // it apart so the cover is not sent again): it belongs to that slot's
+        // card only while the insertion is the same.
+        const QString slot = message.value("slot").toString();
+        const QString insertion = message.value("insertion").toString();
+        bool found = false;
+        for (QVariantMap &existing : m_cards) {
+            if (existing.value("slot").toString() == slot && existing.value("insertion").toString() == insertion) {
+                existing.insert(QStringLiteral("shape"), message.value("shape").toVariant());
+                found = true;
+                break;
+            }
+        }
+        if (!found)
+            return;
     } else if (type == QLatin1String("removed")) {
         const QString slot = message.value("slot").toString();
         const bool wasActive = m_active.value("slot").toString() == slot;

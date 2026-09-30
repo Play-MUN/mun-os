@@ -16,6 +16,8 @@ Item {
     property bool compact: false
     property bool hidden: false
     property bool dimmed: false
+    // The main arc's entries take the active Game Card's identity (ArcNode).
+    property bool dressed: false
     // A pointer chose entry `index`.
     signal activated(int index)
 
@@ -39,6 +41,7 @@ Item {
             detail: root.entries[index] ? (root.entries[index].detail || "") : ""
             on: index === root.current
             compact: root.compact
+            dressed: root.dressed
             opacity: root.dimmed ? 0.4 : 1
             onClicked: root.activated(index)
         }

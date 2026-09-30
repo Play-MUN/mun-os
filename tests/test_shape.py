@@ -916,6 +916,89 @@ class ReportTests(unittest.TestCase):
             self.assertIn(expected, out)
 
 
+class ShellAgreementTests(unittest.TestCase):
+    """The shell applies the contract with its own code (C++ and QML): its
+    constants must be the checker's, and MUN's own surfaces must not read
+    the card's identity at all."""
+
+    SHELL = ROOT / "services" / "mun-shell"
+
+    def source(self, relative):
+        return (self.SHELL / relative).read_text(encoding="utf-8")
+
+    def constant(self, text, name):
+        match = re.search(rf"{name}\s*=\s*([0-9.]+)(?:\s*/\s*([0-9.]+))?", text)
+        self.assertIsNotNone(match, name)
+        value = float(match.group(1))
+        return value / float(match.group(2)) if match.group(2) else value
+
+    def test_the_contrast_rule_is_the_checkers(self):
+        contrast = self.source("src/contrast.h")
+        for name, value in (("kTextRatio", shape.TEXT_RATIO), ("kFocusRatio", shape.FOCUS_RATIO),
+                            ("kRounding", shape.ROUNDING), ("kGlassSheen", shape.GLASS_SHEEN),
+                            ("kPaperGrain", shape.PAPER_GRAIN), ("kGlassMinOpacity", shape.GLASS_MIN_OPACITY)):
+            self.assertAlmostEqual(self.constant(contrast, name), value, msg=name)
+        for token in ("0.04045", "12.92", "0.055", "1.055", "2.4", "0.2126", "0.7152", "0.0722"):
+            self.assertIn(token, contrast, "sRGB luminance as the checker computes it")
+        cpp = self.source("src/shape.cpp")
+        for key, colour in shape.NEUTRAL.items():
+            if key == "bar":
+                continue
+            rgb = ", ".join(f"0x{colour[i:i + 2]}" for i in (1, 3, 5))
+            self.assertIn(f"({rgb})", cpp, f"MUN's {key} {colour}")
+
+    def test_materials_stay_within_the_proofs_ranges(self):
+        material = self.source("qml/Material.qml")
+        alphas = [float(a) for a in re.findall(r"Theme\.rgba\(\s*(?:255|0),\s*(?:255|0),\s*(?:255|0),\s*([0-9.]+)\)", material)]
+        glass = material.split('"glass"', 1)[1].split("Box", 1)[0]
+        paper = material.split('"paper"', 1)[1]
+        self.assertTrue(alphas)
+        self.assertLessEqual(max(float(a) for a in re.findall(r",\s*([0-9.]+)\)", glass)), shape.GLASS_SHEEN)
+        self.assertLessEqual(max(float(a) for a in re.findall(r",\s*([0-9.]+)\)", paper)), shape.PAPER_GRAIN)
+
+    def test_the_read_level_is_the_checkers(self):
+        read = self.source("src/readpalette.cpp")
+        self.assertEqual(self.constant(read, "kCells"), shapetools.READ_SIZE)
+        self.assertEqual(self.constant(read, "kBrightness"), shapetools.ACCENT_BRIGHTNESS)
+        bands = dict((name, (int(a), int(b))) for name, a, b in re.findall(r'\{"(\w+)", (\d+), (\d+)\}', read))
+        self.assertEqual(bands, shapetools.READ_BANDS)
+        for rule in ("20 * spread <= 7 * high", "12 * (c.g - c.b) < 11 * spread", "2 * (c.b - c.g) < spread",
+                     "2126LL * a.r + 7152LL * a.g + 722LL * a.b", "(qRed(p) * a + 127) / 255", ">> 8"):
+            self.assertIn(rule, read)
+
+    def test_the_game_sounds_are_bounded_as_the_contract_says(self):
+        sounds = self.source("src/systemsounds.cpp")
+        self.assertEqual(shape.SOUND_MAX_BYTES, 1024 * 1024)
+        self.assertIn("kGameSoundMaxBytes = 1024 * 1024", sounds)
+        self.assertAlmostEqual(self.constant(sounds, "kGameMenuSeconds"), shape.SOUND_SECONDS["move"])
+        self.assertAlmostEqual(self.constant(sounds, "kGameInsertSeconds"), shape.SOUND_SECONDS["insert"])
+
+    def test_mun_keeps_its_own_surfaces(self):
+        # Settings, their panels and every dialog never read the card's
+        # identity; only the main arc, the game's panel and the bands do.
+        for name in ("ModalLayer.qml", "BootLayer.qml"):
+            self.assertNotIn("Shape.", self.source(f"qml/{name}"), name)
+        theme = self.source("qml/Theme.qml")
+        self.assertRegex(theme, r"readonly property color accent: copperLight\b")
+        self.assertRegex(theme, r"readonly property color accentDeep: copper\b")
+        self.assertNotIn("CardClient", theme, "MUN's focus never comes from a card")
+        main = self.source("qml/Main.qml")
+        self.assertEqual(main.count("dressed: true"), 1, "one arc is dressed, the main one")
+        self.assertIn('dressed: window.focusedEntry.key === "card" && !window.inSettings', main)
+        self.assertIn("property color focusColour: Theme.accent", self.source("qml/OptionRow.qml"))
+        self.assertIn("readonly property color accent: dressed ? Shape.focus : Theme.accent", self.source("qml/ArcNode.qml"))
+        self.assertIn("qml/Material.qml", self.source("CMakeLists.txt"))
+        for name in ("shape.cpp", "readpalette.cpp"):
+            self.assertIn(f"src/{name}", self.source("CMakeLists.txt"))
+
+    def test_only_the_services_exports_are_read(self):
+        cpp = self.source("src/shape.cpp")
+        self.assertIn('QStringLiteral("/run/mun/shape")', cpp)
+        self.assertIn("^([0-9a-f]{16})\\\\.([0-9]{1,9})$", cpp)
+        self.assertIn("setAllocationLimit", cpp)
+        self.assertIn("kWindowMaxSide = 1024", cpp)
+
+
 class DocumentationTests(unittest.TestCase):
     def test_the_contract_names_every_code_and_limit(self):
         text = (ROOT / "docs" / "shape.md").read_text(encoding="utf-8")

@@ -2,6 +2,7 @@
 
 #include <QFile>
 #include <QMetaObject>
+#include <QStringList>
 #include <QtEndian>
 
 #include <alsa/asoundlib.h>
@@ -15,6 +16,10 @@ namespace {
 constexpr int kQuarters = 4;
 constexpr int kMenuGain = 3;
 constexpr int kStartupGain = 4;
+// A game's sounds, as the Shape contract bounds them (docs/shape.md).
+constexpr qint64 kGameSoundMaxBytes = 1024 * 1024;
+constexpr double kGameMenuSeconds = 1.0;
+constexpr double kGameInsertSeconds = 3.0;
 
 quint16 u16(const QByteArray &bytes, qsizetype at)
 {
@@ -30,13 +35,12 @@ quint32 u32(const QByteArray &bytes, qsizetype at)
 
 SystemSounds::SystemSounds(QObject *parent) : QObject(parent)
 {
-    // Filled now and never again: the worker keeps pointers into it.
+    // Filled now and never again.
     m_sounds.reserve(4);
     for (const char *name : {"move", "enter", "back"})
         load(QString::fromLatin1(name), kMenuGain);
     load(QStringLiteral("startup"), kStartupGain);
-    if (!m_sounds.empty())
-        m_worker = std::thread(&SystemSounds::run, this);
+    m_worker = std::thread(&SystemSounds::run, this);
 }
 
 SystemSounds::~SystemSounds()
@@ -51,12 +55,10 @@ SystemSounds::~SystemSounds()
     m_worker.join();
 }
 
-void SystemSounds::load(const QString &name, int gain)
+// A RIFF/WAVE with a PCM format chunk in the device's format and a data
+// chunk, nothing assumed; `maxSeconds` bounds it (0: no bound). Null if not.
+SystemSounds::SoundPtr SystemSounds::parse(const QByteArray &wav, const QString &name, int gain, double maxSeconds)
 {
-    // Compiled in, but read as any file would be: a RIFF/WAVE with a PCM
-    // format chunk in the device's format and a data chunk, nothing assumed.
-    QFile file(QStringLiteral(":/qt/qml/MUN/Shell/sounds/%1.wav").arg(name));
-    const QByteArray wav = file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
     bool format = false;
     QByteArray data;
     if (wav.size() >= 12 && wav.startsWith("RIFF") && wav.mid(8, 4) == "WAVE") {
@@ -75,39 +77,118 @@ void SystemSounds::load(const QString &name, int gain)
             at = body + size + (size & 1);
         }
     }
-    if (!format || data.isEmpty() || data.size() % (kChannels * 2) != 0) {
+    if (!format || data.isEmpty() || data.size() % (kChannels * 2) != 0)
+        return nullptr;
+    if (maxSeconds > 0 && double(data.size()) / (kRate * kChannels * 2) > maxSeconds)
+        return nullptr;
+    auto sound = std::make_shared<Sound>(Sound{name, std::vector<qint16>(size_t(data.size() / 2)), gain});
+    for (size_t i = 0; i < sound->samples.size(); ++i)
+        sound->samples[i] = qFromLittleEndian<qint16>(data.constData() + 2 * i);
+    return sound;
+}
+
+void SystemSounds::load(const QString &name, int gain)
+{
+    // Compiled in, but read as any file would be.
+    QFile file(QStringLiteral(":/qt/qml/MUN/Shell/sounds/%1.wav").arg(name));
+    const QByteArray wav = file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+    SoundPtr sound = parse(wav, name, gain, 0);
+    if (!sound) {
         qWarning("mun-shell: sound %s is missing or not 16-bit %d Hz stereo PCM; it stays silent", qPrintable(name), kRate);
         return;
     }
-    Sound sound{name, std::vector<qint16>(size_t(data.size() / 2)), gain};
-    for (size_t i = 0; i < sound.samples.size(); ++i)
-        sound.samples[i] = qFromLittleEndian<qint16>(data.constData() + 2 * i);
     m_sounds.push_back(std::move(sound));
+}
+
+void SystemSounds::useGameSounds(const QVariantMap &files)
+{
+    // The files are the card service's copy in RAM, at most 1 MiB each: read
+    // here, parsed as MUN's own are. The set is whole or MUN's.
+    std::map<QString, SoundPtr> set;
+    bool whole = !files.isEmpty();
+    for (auto it = files.cbegin(); whole && it != files.cend(); ++it) {
+        const QString &name = it.key();
+        const bool menu = name == QLatin1String("move") || name == QLatin1String("enter") || name == QLatin1String("back");
+        if (!menu && name != QLatin1String("insert"))
+            continue;
+        QFile file(it.value().toString());
+        QByteArray wav;
+        if (file.open(QIODevice::ReadOnly) && file.size() <= kGameSoundMaxBytes)
+            wav = file.read(kGameSoundMaxBytes);
+        SoundPtr sound = parse(wav, name, kMenuGain, menu ? kGameMenuSeconds : kGameInsertSeconds);
+        if (!sound) {
+            qWarning("mun-shell: the game's sound %s is not usable; MUN's sounds stay", qPrintable(name));
+            whole = false;
+            break;
+        }
+        set[name] = std::move(sound);
+    }
+    whole = whole && set.count(QStringLiteral("move")) && set.count(QStringLiteral("enter")) && set.count(QStringLiteral("back"));
+    if (!whole)
+        set.clear();
+    if (set.empty() && m_game.empty())
+        return;
+    m_game = std::move(set);
+    emit gameSetChanged();
+}
+
+void SystemSounds::setGameSounds(bool on)
+{
+    if (on == m_gameSounds)
+        return;
+    m_gameSounds = on;
+    emit gameSoundsChanged();
+}
+
+QStringList SystemSounds::gameSet() const
+{
+    QStringList names;
+    for (const auto &entry : m_game)
+        names << entry.first;
+    return names;
+}
+
+void SystemSounds::queue(const SoundPtr &sound)
+{
+    {
+        std::lock_guard lock(m_mutex);
+        if (m_requests.size() < kVoices)
+            m_requests.push_back(sound);
+    }
+    m_wake.notify_one();
+}
+
+void SystemSounds::playGame(const QString &name)
+{
+    const auto it = m_game.find(name);
+    if (m_gameSounds && it != m_game.end())
+        queue(it->second);
 }
 
 void SystemSounds::play(const QString &name)
 {
-    for (const Sound &sound : m_sounds) {
-        if (sound.name != name)
-            continue;
-        {
-            std::lock_guard lock(m_mutex);
-            if (m_requests.size() < kVoices)
-                m_requests.push_back(&sound);
-        }
-        m_wake.notify_one();
+    // The game's version of a menu sound, while it has one and it is wanted.
+    const auto game = m_game.find(name);
+    if (m_gameSounds && game != m_game.end() && name != QLatin1String("insert")) {
+        queue(game->second);
         return;
+    }
+    for (const SoundPtr &sound : m_sounds) {
+        if (sound->name == name) {
+            queue(sound);
+            return;
+        }
     }
 }
 
 void SystemSounds::stop(const QString &name)
 {
-    for (const Sound &sound : m_sounds) {
-        if (sound.name != name)
+    for (const SoundPtr &sound : m_sounds) {
+        if (sound->name != name)
             continue;
         {
             std::lock_guard lock(m_mutex);
-            m_stops.push_back(&sound);
+            m_stops.push_back(sound);
         }
         m_wake.notify_one();
         return;
@@ -156,7 +237,7 @@ void SystemSounds::run()
             }
             while (!m_stops.empty()) {
                 for (Voice &voice : voices)
-                    if (voice.sound == m_stops.front() && voice.fade == 0)
+                    if (voice.sound->name == m_stops.front()->name && voice.fade == 0)
                         voice.fade = kFadeFrames;
                 m_stops.pop_front();
             }

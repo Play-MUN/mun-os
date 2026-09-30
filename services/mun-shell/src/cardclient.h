@@ -3,6 +3,8 @@
 // reconnects on its own, and never touches devices or mounts: everything it
 // knows arrived from mun-cardd. `readerAvailable` is false while the
 // socket is down, which the UI must show differently from "no card".
+// A card's `shape` (its MUN Shape record, docs/shape.md) arrives in its
+// record and, when only it changes, in a message of its own.
 #pragma once
 
 #include <QLocalSocket>

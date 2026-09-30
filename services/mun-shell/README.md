@@ -24,6 +24,7 @@ display, and a game drawing on `/dev/fb0` has it (see *Display path*).
 | `src/systemsounds.*` | The menus' sounds (move, enter, back), mixed on a worker thread and played through ALSA |
 | `src/powercontrol.*` | The only privileged request: runs `mun-power` through `sudo -n`; reports failure to the UI |
 | `src/cardclient.*` | Mirror of the card service over its UNIX socket: snapshot, events, reconnection; exposes state, manifest, error and cover (data URL) to QML |
+| `src/shape.*`, `src/contrast.h`, `src/readpalette.*` | A Game Card's MUN Shape on the eligible surfaces: the export read and decoded off the GUI thread, its colours verified again with the contrast rule, the palette read from a cover (*A Game Card's identity*) |
 | `src/launchclient.*` | Client of `mun-launchd`: `launch(slot, serial, version)`, `release(serial)`, `acknowledge()`, launcher state and the last session result (read from `/run/mun/launch/last-result.json` at start, then over the socket) |
 | `src/backdrop.*`, `src/heroicon.*` | Home's painted layers: the network of light behind everything, and the large object of the entry in focus |
 | `src/cssbox.*`, `src/blur.*` | Surfaces with CSS semantics (radii, gradients at any angle, outer and inset box shadows) and the blur they and the glows use |
@@ -32,7 +33,7 @@ display, and a game drawing on `/dev/fb0` has it (see *Display path*).
 | `qml/Main.qml` | The scene, the navigation, the actions and the key handling |
 | `qml/Panels.qml` | What each entry's panel and each dialog says, from the real state |
 | `qml/Theme.qml`, `qml/I18n.qml` | Design tokens and motion; the two languages |
-| `qml/ArcMenu.qml`, `ArcNode`, `DetailPanel`, `OptionRow`, `StatusBar`, `MoonPhase`, `ModalLayer`, `BootLayer`, `UiText`, `MarkText`, `Shadow`, `Logo.js`, `PlayMun.js` | Components: the arcs and their entries, the panel and its options, the status line, dialogs, the start-up and power-off screen, text and shadows; the MUN and Play MUN logos |
+| `qml/ArcMenu.qml`, `ArcNode`, `DetailPanel`, `OptionRow`, `StatusBar`, `MoonPhase`, `ModalLayer`, `BootLayer`, `UiText`, `MarkText`, `Shadow`, `Material`, `Logo.js`, `PlayMun.js` | Components: the arcs and their entries, the panel and its options, the status line, dialogs, the start-up and power-off screen, text and shadows; the MUN and Play MUN logos |
 | `fonts/` | Archivo and Michroma, compiled in, with their licences |
 | `sounds/` | The interface's sounds, compiled in: the menus' `move.wav`, `enter.wav`, `back.wav` and the start-up's `startup.wav` |
 | `deploy/mun-shell.service` | systemd unit on tty1 as user `mun-shell` with the display (DRM) and evdev environment and the state directory |
@@ -174,16 +175,64 @@ display through `/dev/fb0` and about 44 through DRM. Games keep drawing on
 `/dev/fb0` (or DRM, for the GL profile): the launcher stops the shell
 first, and the shell takes the display again when it restarts.
 
-### Colours lent by the card
+### A Game Card's identity (MUN Shape)
 
-A valid Game Card may carry `[presentation] accent` and `background`
-([manifest](../../docs/game-cards.md#manifest)). While it is the active
-card, the focus (a chosen entry's ring, dot, wire and edge, a chosen
-option's frame) takes the accent, and the ambient light at the orb the
-background, at the hour's strength. Everything else, from the logo to the
-type, wording, layout and navigation, stays MUN. The moment the card is
-released or removed the shell is MUN again. Cards without the table change
-nothing.
+A valid Game Card dresses part of Home while it is the active card
+([docs/shape.md](../../docs/shape.md)), from what the card service exported
+for this insertion and nothing else (`src/shape.*`):
+
+- **What it dresses**: the main arc's entries (the game's plate under each
+  label, in its material and at the opacity its text needs over any world,
+  its text colour, a chosen bar of that colour with the plate's colour as
+  label, its focus on the knob, wire and edge); the game's panel (the Game
+  Card entry's: plate, text, focus on its options); bands of MUN's glass in
+  the plate's colour under the status line, the path and the hints, whose
+  words take the text colour (the lights keep theirs); the card object,
+  whose screen shows the package's window image or the card's cover in
+  place of the crescent, with an organic outline if the package asks
+  (still, shaped by its `morph`) and its light in the game's colour; the
+  ambient light at the orb and a tint of the world's two glows, both in the
+  card's hue at MUN's own luminance (the world is never lighter or darker
+  than MUN draws it, so MUN's texts over it keep their contrast); and the
+  menus' sounds on those surfaces, with the package's insertion cue played
+  once when a card arrives.
+- **What stays MUN's**: Settings (their arc, panels, focus and sounds),
+  every dialog (and its sounds), the start-up and power-off, the hand-over screen, the layout,
+  sizes, order and focus behaviour, every word and its language, the
+  path's MUN™, the lights. The focus there is always MUN's copper, lent
+  colours included.
+- **Where the colours come from**: the package's surfaces, as the card
+  service's checker proved them, verified again here with the same rule
+  (`src/contrast.h`) and replaced by MUN's, as a set, if they do not hold.
+  Where the package has no palette, the card's `[presentation]` colours;
+  with neither, the palette read from the cover (`src/readpalette.*`, the
+  checker's algorithm). A lent or read accent becomes the focus only if it
+  keeps 3:1 on MUN's plate; over MUN's own world the entries keep MUN's
+  look.
+- **Contrast**: on a dressed entry the label's colour changes in one step,
+  never easing through colours the rule has not proven; a change of
+  identity is one step too (transitions come with the worlds).
+- **Decoding**: the export's `shape.json` (bound to the insertion), the
+  window image and the cover are read and decoded on the loader's own
+  thread, with the dimensions checked first (at most 1024 × 1024) and an
+  allocation limit of 16 MiB; the shell reads only
+  `/run/mun/shape/<insertion>.<attempt>/` for the insertion in the record.
+  A marker in the runtime directory (`shape-decoding`) names the insertion
+  being decoded: if the shell ends meanwhile, its next start skips that
+  insertion's identity, so a decoder that crashes cannot do it in a loop.
+  Sounds are read in the mixer's format and within the contract's
+  durations, the set whole or not at all.
+- **Returning from a game**: the shell starts again with the same card, and
+  its identity is applied at once, without the cue.
+- **Settings** (Picture and sound): *MUN Shape* Full (default), Colours only
+  (colours and plates, no images or sounds) or Off (MUN alone); *Game sounds
+  on the menus*; *Reduce motion*, which holds Home's world and objects still.
+- The journal says what was applied, once per identity: `shape for
+  insertion …: shape; dressed: entries glass 0.722, …; focus #F2B85C;
+  window 512x512; sounds back/enter/insert/move`.
+
+Worlds, their motion and the transitions between identities are not
+drawn yet.
 
 ## Resolution
 
@@ -234,6 +283,9 @@ displays that crop their edges.
 | Resolution | Automatic (default), or 720p, 1080p or 1440p where the display takes them; kept once confirmed (*Resolution*) |
 | Safe area | 100 (default), 97, 94 or 91 %; kept |
 | System sounds | On (default) or Off: the menus' sounds and the start-up's (*Sounds*); kept |
+| Game sounds on the menus | On (default) or Off: a Game Card's own menu sounds and cue (*A Game Card's identity*); kept |
+| MUN Shape | Full (default), Colours only or Off (*A Game Card's identity*); kept |
+| Reduce motion | Off (default) or On: Home's world and objects hold still; kept |
 | Auto power off | Never, or after 1 (default), 3 or 6 hours without input on the menus; kept. A game in progress does not count: the shell is stopped while it runs |
 | Turn off console, About, Reset settings | Work; reset keeps the language |
 | Time zone, developer mode | Shown as they are (the system's zone, set by the image); changing them is not available yet |
@@ -260,6 +312,10 @@ twelve (`tests/test_os.py` checks all of that); the start-up's was made
 from its 96 kHz, 24-bit master, resampled and dithered to 16 bits. The shell asks ALSA for that format and lets it convert
 when a device plays another; it has been heard only through the virtual
 console's sound device, and physical outputs are tested on the chosen board.
+
+While a Game Card with its own sounds is active and *Game sounds on the
+menus* is on, the menus play the game's `move`, `enter` and `back` instead,
+and its `insert` once when the card arrives (*A Game Card's identity*).
 
 `src/systemsounds.*` plays them through ALSA's default device, the one the
 games use: the unit adds the `audio` group. A worker thread mixes up to

@@ -49,6 +49,11 @@ qt_add_executable(mun-shell
     src/heroicon.h
     src/projectedview.cpp
     src/projectedview.h
+    src/contrast.h
+    src/readpalette.cpp
+    src/readpalette.h
+    src/shape.cpp
+    src/shape.h
 )
 
 # The generated QML type registration includes headers by basename.
@@ -75,6 +80,7 @@ set(MUN_QML_FILES
     qml/ArcNode.qml
     qml/ArcMenu.qml
     qml/OptionRow.qml
+    qml/Material.qml
     qml/DetailPanel.qml
     qml/StatusBar.qml
     qml/MoonPhase.qml

@@ -8,6 +8,13 @@ import MUN.Shell
 // design, the bar's background changes at once and its light and shadows
 // over 0.3 s. `compact` is the Settings arc's smaller size.
 //
+// A `dressed` entry (the main arc's) takes the active Game Card's identity
+// (Shape, docs/shape.md): its focus colour, and, while the card's colours
+// hold, the game's plate under its label (at the opacity the contrast rule
+// gives, in the package's material), its text colour, and a chosen bar of
+// the text's colour with the plate's colour as label. Every other entry, the
+// Settings arc's among them, stays MUN's.
+//
 // The entry is laid out flat and shown through its part of the arcs'
 // perspective (ProjectedLayer), projected again only while it changes.
 ProjectedLayer {
@@ -16,6 +23,7 @@ ProjectedLayer {
     property string detail
     property bool on: false
     property bool compact: false
+    property bool dressed: false
     // The entry's corner in the arcs' plane and the arc's shift along it.
     property real originX
     property real originY
@@ -40,15 +48,31 @@ ProjectedLayer {
                  .times(Qt.matrix4x4(1, 0, 0, -m, 0, 1, 0, -m, 0, 0, 1, 0, 0, 0, 0, 1))
     }
     // The transitions below last up to 0.35 s: the copy follows them frame
-    // by frame, then rests.
+    // by frame, then rests. A change of identity is one step (a cut).
     live: transition.running
     Timer { id: transition; interval: 450 }
     onOnChanged: transition.restart()
     onLabelChanged: refresh()
     onDetailChanged: refresh()
     onCompactChanged: refresh()
-    readonly property color accent: Theme.accent
+
+    // The entry's colours: the game's while dressed and its set holds, MUN's
+    // otherwise. The focus may be the game's even where the plates are MUN's
+    // (a lent or cover-read accent).
+    readonly property bool shaped: dressed && Shape.dressed
+    readonly property color accent: dressed ? Shape.focus : Theme.accent
+    readonly property color accentDeep: dressed ? Shape.focusDeep : Theme.accentDeep
+    function accentAlpha(a) { return Theme.alpha(root.accent, a) }
+    function accentDeepAlpha(a) { return Theme.alpha(root.accentDeep, a) }
+    readonly property color labelColour: shaped ? (on ? Shape.barText : Shape.text) : (on ? Theme.inkOnMoon : Theme.moon)
+    readonly property color detailColour: shaped ? (on ? Shape.barText : Shape.text) : (on ? Theme.ashOnMoon : Theme.ash)
     onAccentChanged: transition.restart()
+    onShapedChanged: transition.restart()
+    Connections {
+        target: Shape
+        enabled: root.dressed
+        function onChanged() { transition.restart() }
+    }
 
     MouseArea {
         parent: root
@@ -89,7 +113,7 @@ ProjectedLayer {
         Shadow {
             z: -1
             radii: [root.knobSize / 2]
-            shadows: [{ blur: 16, color: Theme.accentAlpha(0.3) }]
+            shadows: [{ blur: 16, color: root.accentAlpha(0.3) }]
             opacity: root.on ? 1 : 0
             Behavior on opacity { Fade {} }
         }
@@ -103,7 +127,7 @@ ProjectedLayer {
         Box {
             anchors.fill: parent
             radii: [root.knobSize / 2]
-            insets: [{ spread: 1.5, color: Theme.accent }]
+            insets: [{ spread: 1.5, color: root.accent }]
             opacity: root.on ? 1 : 0
             Behavior on opacity { Fade {} }
         }
@@ -112,12 +136,12 @@ ProjectedLayer {
             width: 9
             height: 9
             radius: 4.5
-            color: root.on ? Theme.accent : Theme.rgba(143, 176, 214, 0.35)
+            color: root.on ? root.accent : Theme.rgba(143, 176, 214, 0.35)
             Behavior on color { Tint {} }
             Shadow {
                 z: -1
                 radii: [4.5]
-                shadows: [{ blur: 8, spread: 1, color: Theme.accentAlpha(0.7) }]
+                shadows: [{ blur: 8, spread: 1, color: root.accentAlpha(0.7) }]
                 opacity: root.on ? 1 : 0
                 Behavior on opacity { Fade {} }
             }
@@ -133,8 +157,8 @@ ProjectedLayer {
         radius: 1
         gradient: Gradient {
             orientation: Gradient.Horizontal
-            GradientStop { position: 0; color: root.on ? Theme.accentDeepAlpha(0.6) : Theme.rgba(143, 176, 214, 0.18) }
-            GradientStop { position: 1; color: root.on ? Theme.accent : Theme.rgba(218, 215, 209, 0.28) }
+            GradientStop { position: 0; color: root.on ? root.accentDeepAlpha(0.6) : Theme.rgba(143, 176, 214, 0.18) }
+            GradientStop { position: 1; color: root.on ? root.accent : Theme.rgba(218, 215, 209, 0.28) }
         }
     }
 
@@ -158,42 +182,59 @@ ProjectedLayer {
             shadows: [
                 { y: 2, color: Theme.rgba(75, 53, 37, 0.55) },
                 { y: 12, blur: 26, spread: -12, color: Theme.rgba(0, 0, 0, 0.75) },
-                { blur: 30, spread: -8, color: Theme.accentAlpha(0.25) }
+                { blur: 30, spread: -8, color: root.accentAlpha(0.25) }
             ]
             opacity: root.on ? 1 : 0
             Behavior on opacity { Fade {} }
         }
+        // MUN's bars.
         Box {
             anchors.fill: parent
-            visible: !root.on
+            visible: !root.on && !root.shaped
             radii: root.barRadii
             gradient: ({ type: "linear", angle: 160, stops: [[0, Theme.rgba(62, 92, 130, 0.16)], [0.6, Theme.rgba(20, 24, 32, 0.42)], [1, Theme.rgba(10, 12, 16, 0.5)]] })
         }
         Box {
             anchors.fill: parent
-            visible: root.on
+            visible: root.on && !root.shaped
             radii: root.barRadii
             gradient: ({ type: "linear", angle: 180, stops: [[0, "#E8E5DF"], [1, "#CCC9C3"]] })
         }
         Box {
             anchors.fill: parent
+            visible: !root.shaped
             radii: root.barRadii
             insets: [{ y: 1, color: Theme.rgba(255, 255, 255, 0.06) }, { spread: 1, color: Theme.rgba(143, 176, 214, 0.14) }]
             opacity: root.on ? 0 : 1
             Behavior on opacity { Fade {} }
         }
+        // The game's: its plate, in its material, at the opacity its text
+        // needs over any world; chosen, a bar of its text's colour.
+        Material {
+            anchors.fill: parent
+            visible: root.shaped
+            radii: root.barRadii
+            plate: root.on ? Shape.bar : Shape.plate
+            opacity: root.on ? 1 : Shape.entriesOpacity
+            material: root.on ? "solid" : Shape.entriesMaterial
+        }
         Box {
             anchors.fill: parent
             radii: root.barRadii
-            insets: [{ x: 4, color: Theme.accentDeep }, { y: 1, color: Theme.rgba(255, 255, 255, 0.7) }]
+            insets: [{ x: 4, color: root.shaped ? root.accent : root.accentDeep }, { y: 1, color: Theme.rgba(255, 255, 255, root.shaped ? 0.06 : 0.7) }]
             opacity: root.on ? 1 : 0
             Behavior on opacity { Fade {} }
         }
 
+        // The label and detail in MUN's colours, which ease as the choice
+        // changes; dressed, in the game's, which change in one step: text
+        // over a game's plate switches colour at one point, never passing
+        // through colours the contrast rule has not proven (docs/shape.md).
         UiText {
             id: label
             x: 26
             anchors.verticalCenter: parent.verticalCenter
+            visible: !root.shaped
             text: root.label
             size: root.labelSize
             weight: 700
@@ -203,15 +244,34 @@ ProjectedLayer {
             Behavior on color { Tint {} }
         }
         UiText {
+            anchors.fill: label
+            visible: root.shaped
+            text: root.label
+            size: root.labelSize
+            weight: 700
+            stretch: 118
+            tracking: 0.01
+            color: root.labelColour
+        }
+        UiText {
             id: detail
             anchors.right: parent.right
             anchors.rightMargin: 26
             anchors.verticalCenter: parent.verticalCenter
+            visible: !root.shaped
             text: root.detail
             size: 19
             weight: 500
             color: root.on ? Theme.ashOnMoon : Theme.ash
             Behavior on color { Tint {} }
+        }
+        UiText {
+            anchors.fill: detail
+            visible: root.shaped
+            text: root.detail
+            size: 19
+            weight: 500
+            color: root.detailColour
         }
     }
 

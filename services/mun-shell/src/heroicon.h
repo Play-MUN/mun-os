@@ -22,15 +22,23 @@
 // the gear and the float slow to a stop (Pace); a load in progress still
 // finishes.
 //
+// A Game Card's MUN Shape (docs/shape.md) dresses the card object: its
+// screen shows the card's window image (or its cover) instead of the
+// crescent, its outline may be organic, shaped by `morph`, and its light
+// takes the game's colour. Still: the outline does not move, and the layers
+// are painted again only when these change.
+//
 // The item is square and centred on the orb (640 x 640 logical pixels fits
 // every object). GUI thread only.
 #pragma once
 
 #include "sceneclock.h"
 
+#include <QColor>
 #include <QElapsedTimer>
 #include <QHash>
 #include <QImage>
+#include <QVariant>
 #include <QQuickPaintedItem>
 #include <QString>
 #include <QtQml/qqmlregistration.h>
@@ -45,6 +53,13 @@ class HeroIcon : public QQuickPaintedItem {
     Q_PROPERTY(bool running READ running WRITE setRunning NOTIFY runningChanged)
     // Vertical offset of the float, whole logical pixels.
     Q_PROPERTY(int bob READ bob NOTIFY bobChanged)
+    // The card object's MUN Shape: the image its screen shows (a QImage;
+    // anything else, MUN's crescent), its outline ("card" or "organic"), how
+    // far the organic outline is shaped (0 to 1), its light (invalid: MUN's).
+    Q_PROPERTY(QVariant cardWindow READ cardWindow WRITE setCardWindow NOTIFY cardChanged)
+    Q_PROPERTY(QString cardShape READ cardShape WRITE setCardShape NOTIFY cardChanged)
+    Q_PROPERTY(qreal morph READ morph WRITE setMorph NOTIFY cardChanged)
+    Q_PROPERTY(QColor cardGlow READ cardGlow WRITE setCardGlow NOTIFY cardChanged)
 
 public:
     explicit HeroIcon(QQuickItem *parent = nullptr);
@@ -59,12 +74,21 @@ public:
     bool running() const { return m_running; }
     void setRunning(bool running);
     int bob() const { return m_bob; }
+    QVariant cardWindow() const { return m_window.isNull() ? QVariant() : QVariant::fromValue(m_window); }
+    void setCardWindow(const QVariant &window);
+    QString cardShape() const { return m_cardShape; }
+    void setCardShape(const QString &shape);
+    qreal morph() const { return m_morph; }
+    void setMorph(qreal morph);
+    QColor cardGlow() const { return m_cardGlow; }
+    void setCardGlow(const QColor &glow);
 
 signals:
     void iconChanged();
     void litChanged();
     void runningChanged();
     void bobChanged();
+    void cardChanged();
 
 private:
     void onTick(quint64 frame);
@@ -108,4 +132,9 @@ private:
     qreal m_time = 0;         // seconds of motion shown, for the gear and the float
     QElapsedTimer m_clock;
     QHash<QString, Layers> m_layers;   // of the object in focus and the one fading out
+    void cardRestyled();
+    QImage m_window;          // the card's screen, from its Shape
+    QString m_cardShape = QStringLiteral("card");
+    qreal m_morph = 0;
+    QColor m_cardGlow;
 };

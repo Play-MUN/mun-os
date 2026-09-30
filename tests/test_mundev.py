@@ -225,5 +225,20 @@ class ResultTests(Fixture):
         self.assertEqual(main.call_args.args[0][2:], ["open"], "the window picks this host's audible backend itself")
 
 
+class LicenceTests(unittest.TestCase):
+    def test_a_download_carries_the_texts_the_image_carries(self):
+        texts = mundev.licence_texts()
+        names = [text.name for text in texts]
+        self.assertEqual(names[:3], ["LICENSE", "NOTICE", "NAME-AND-LOGO.txt"])
+        self.assertTrue(any(name.endswith("-OFL.txt") for name in names), "and the typefaces' licences")
+        for text in texts:
+            self.assertTrue(text.is_file(), text)
+            self.assertTrue(text.name in ("LICENSE", "NOTICE") or text.name.endswith(".txt"),
+                            f"{text.name}: a name every version of ./mun get accepts")
+        image = (ROOT / "os" / "mkosi" / "mkosi.build.chroot").read_text()
+        for name in names[:3]:
+            self.assertIn(f'"$MUN/{name}" "$DESTDIR/usr/share/doc/mun-os/{name}"', image)
+
+
 if __name__ == "__main__":
     unittest.main()

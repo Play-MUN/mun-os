@@ -10,7 +10,8 @@ A bundle is a directory, or the same files under one URL:
                                 against it again whenever a guest is made
     card-<name>.img.xz          ready Game Cards (xz), so that playing needs
                                 no card tool
-    LICENSE, NOTICE, *-OFL.txt  MUN OS's licence and notice, and the typefaces' licences
+    LICENSE, NOTICE, *.txt      MUN OS's licence and notice, the terms of the MUN name
+                                and logo, and the typefaces' licences
                                 compiled into MUN Shell
 
 All files sit side by side, as a release's assets do.

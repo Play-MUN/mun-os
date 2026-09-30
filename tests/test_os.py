@@ -305,8 +305,12 @@ class InputTests(unittest.TestCase):
         build = (MKOSI / "mkosi.build.chroot").read_text()
         self.assertIn('"$MUN/LICENSE" "$DESTDIR/usr/share/doc/mun-os/LICENSE"', build)
         self.assertIn('"$MUN/NOTICE" "$DESTDIR/usr/share/doc/mun-os/NOTICE"', build)
+        self.assertIn('"$MUN/NAME-AND-LOGO.txt" "$DESTDIR/usr/share/doc/mun-os/NAME-AND-LOGO.txt"', build,
+                      "the logo is not under the licence: its own terms go with the image")
         notice = (ROOT / "NOTICE").read_text()
         self.assertIn("Copyright 2026 Iván Moreno Mendoza", notice)
+        self.assertIn("NAME-AND-LOGO.txt", notice, "the notice points to the terms it does not cover")
+        self.assertIn("Logo.js", (ROOT / "NAME-AND-LOGO.txt").read_text())
         stage = (ROOT / "services" / "mun-shell" / "deploy" / "stage.sh").read_text()
         self.assertIn('fonts/*-OFL.txt', stage, "the typefaces compiled into the shell go with their licence")
         for font in (ROOT / "services" / "mun-shell" / "fonts").glob("*.ttf"):

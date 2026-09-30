@@ -4,7 +4,10 @@ Copyright 2026 Iván Moreno Mendoza
 MUN is developed by Play MUN, the studio of Iván Moreno Mendoza, who holds
 the rights to MUN OS's own work and to the MUN name and logo.
 
-MUN OS's own work is licensed under the Apache License, Version 2.0 (see
-LICENSE). Third-party components keep their own copyright notices and
-licences, listed in docs/licensing.md. Contributions remain their authors'
-and are licensed under the same terms.
+MUN OS's own work, except the MUN logo, is licensed under the Apache
+License, Version 2.0 (see LICENSE). The MUN name and logo are not licensed
+under it; their terms are in NAME-AND-LOGO.txt, beside this file.
+Third-party components keep their own copyright notices and licences, which
+come with them; docs/licensing.md in MUN OS's source
+(https://github.com/Play-MUN/mun-os) lists them. Contributions remain their
+authors' and are licensed under the same terms.

@@ -1,0 +1,21 @@
+The MUN name and logo
+
+The MUN name, the Play MUN name and the MUN logo belong to Iván Moreno
+Mendoza, who develops MUN as Play MUN. The Apache License 2.0 that covers
+MUN OS's own work grants no rights to them (its section 6), and the logo's
+drawing (the paths in services/mun-shell/qml/Logo.js of MUN OS's source,
+which MUN Shell draws) is not licensed under it. These are its terms:
+
+- An official MUN OS image or release may be redistributed unchanged, under
+  its own name.
+- The logo may be redistributed unmodified as part of MUN OS, or of a
+  modified version of it, where its interface shows it.
+- A modified version, a fork or another product may not use the MUN name or
+  logo to present itself as MUN or MUN OS, as official, or as endorsed by
+  Play MUN. A fork distributed to others takes its own name, and replaces
+  the logo when it is presented as its own product.
+- Saying truthfully that a work is based on MUN OS, or that it runs MUN
+  Game Cards, is fine.
+
+For anything else, ask: hello@playmun.com.
+MUN OS's source: https://github.com/Play-MUN/mun-os

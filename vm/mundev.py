@@ -33,7 +33,7 @@ import tarfile
 import tempfile
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bundle  # noqa: E402
@@ -545,6 +545,14 @@ BUNDLED_CARDS = {
 }
 
 
+def licence_texts() -> Tuple[Path, ...]:
+    """The texts a download carries beside the image, as the image carries
+    them in /usr/share/doc: MUN OS's licence, its notice, the terms of the
+    MUN name and logo, and the typefaces' licences."""
+    return (REPO_ROOT / "LICENSE", REPO_ROOT / "NOTICE", REPO_ROOT / "NAME-AND-LOGO.txt",
+            *sorted((REPO_ROOT / "services" / "mun-shell" / "fonts").glob("*-OFL.txt")))
+
+
 def cmd_bundle(args: argparse.Namespace) -> None:
     """A downloadable bundle of a finished build (vm/bundle.py), with its cards."""
     build = BUILDS_ROOT / args.build
@@ -571,10 +579,8 @@ def cmd_bundle(args: argparse.Namespace) -> None:
             if result.returncode:
                 raise vm.LabError(f"making the {name} card failed: {(result.stderr or result.stdout).strip()}")
             cards[name] = (image, title)
-        licences = (REPO_ROOT / "LICENSE", REPO_ROOT / "NOTICE",
-                    *sorted((REPO_ROOT / "services" / "mun-shell" / "fonts").glob("*-OFL.txt")))
         try:
-            manifest = bundle.make(build, destination, cards, licences)
+            manifest = bundle.make(build, destination, cards, licence_texts())
         except bundle.BundleError as exc:
             raise vm.LabError(str(exc)) from exc
     total = sum(entry["size"] for entry in manifest["files"])
@@ -595,7 +601,7 @@ def cmd_sources(args: argparse.Namespace) -> None:
         raise vm.LabError(f"{exc}; run the same command again to resume") from exc
     size = sum(int(f["size"]) for s in manifest["sources"] for f in s["files"])
     log(f"{'listed' if args.list else 'sources in'} {out}: {len(manifest['sources'])} source packages, "
-        f"{size / 1e6:.0f} MB; publish the directory beside the release (docs/licensing.md)")
+        f"{size / 1e6:.0f} MB; archive the directory and publish it beside the release (docs/releasing.md)")
 
 
 def install(source: str, name: Optional[str] = None) -> Path:

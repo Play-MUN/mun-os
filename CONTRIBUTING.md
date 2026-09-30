@@ -18,8 +18,8 @@ itself).
 ## Before you start
 
 - **Small fixes and documentation**: open a pull request directly.
-- **Anything larger** (a new feature, a change of behaviour a card, a save
-  or a game can see, a new dependency or component): open an issue first and
+- **Anything larger** (a new feature, a change of behaviour that a card, a
+  save or a game can see, a new dependency or component): open an issue first and
   describe the problem and the proposal, so it can be discussed before you
   spend time on it. Architectural changes are agreed in the issue before
   they are implemented.

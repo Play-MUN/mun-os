@@ -44,16 +44,23 @@ sizes and SHA-256.
 
 ```sh
 ./mun dev sources --build dev2 --out .local/mun/sources/mun-os-v0.1.0-dev.2-sources
-tar -cf .local/mun/mun-os-v0.1.0-dev.2-sources.tar -C .local/mun/sources mun-os-v0.1.0-dev.2-sources
+COPYFILE_DISABLE=1 tar --no-mac-metadata --no-xattrs --no-acls --no-fflags \
+    --uid 0 --gid 0 --uname root --gname root \
+    -cf .local/mun/mun-os-v0.1.0-dev.2-sources.tar -C .local/mun/sources mun-os-v0.1.0-dev.2-sources
 (cd .local/mun && shasum -a 256 mun-os-v0.1.0-dev.2-sources.tar > mun-os-v0.1.0-dev.2-sources.tar.sha256)
+tar -tf .local/mun/mun-os-v0.1.0-dev.2-sources.tar | grep -E '(^|/)\._'    # prints nothing
 ```
 
 The first command fetches, verified, the Debian source of every package in
 the image, its initrd and its kernel, and of what they were built using
-(vm/sources.py; about 1.1 GB), and
-`SOURCES.json` names the build and lists the sources with the binaries each
-built ([licensing](licensing.md#images-and-their-corresponding-source)).
-Running it again only fetches what is missing. On Linux, `sha256sum`
+(vm/sources.py; about 1.1 GB), and `SOURCES.json` names the build and lists
+the sources with the binaries each built
+([licensing](licensing.md#images-and-their-corresponding-source)). Running
+it again only fetches what is missing, and a copy of another build's
+directory saves the download when the sources are the same. The archive
+carries the files and nothing of the Mac that made it: no `._` companion
+files, extended attributes or local user names. On Linux, GNU tar does the
+same with `tar --owner=0 --group=0 --numeric-owner -cf …`, and `sha256sum`
 replaces `shasum -a 256`. A release asset must stay under 2 GiB.
 
 ## 5. Check it as a player would

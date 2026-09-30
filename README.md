@@ -1,15 +1,16 @@
 # MUN OS
 
-**BOP — Buy. Own. Play.** MUN is a console for games you own on Game Cards:
-insert a card, play offline, and your progress travels with the card. MUN
-OS is its operating system.
+**BOP — Buy. Own. Play.** MUN is a game console in development, for games
+you own on Game Cards: insert a card, play offline, and your progress
+travels with the card. MUN OS is its open-source operating system.
 
 ![MUN Shell's Home with the MUN Collect Game Card inserted](docs/images/mun-shell-home.jpg)
 
 MUN OS is **experimental**. There is no MUN hardware and no supported
-release yet. What exists is a development image for QEMU that your computer
-runs as a virtual console, ARM64 like the console will be, marked as such in
-the image (`environment = "qemu-arm64"`, `release = false`).
+release yet. What exists is one development image, ARM64 like the console
+will be, that QEMU runs as a virtual console on macOS, Linux and Windows
+computers; the image says so itself (`environment = "qemu-arm64"`,
+`release = false`).
 
 MUN -1, the first console, will have **one officially supported hardware
 configuration**, not selected yet; the assembled console and DIY builds on
@@ -31,20 +32,27 @@ Not there yet: controllers, card and system updates, and any physical
 hardware. [Architecture](docs/architecture.md) says what exists and what is
 planned.
 
-## Three ways in
+## Where to start
 
-- **Try it.** Download the tools and a preview image, start the console and
-  play the included Game Card. No compiler needed.
-  [Getting started](docs/getting-started.md).
+- **Try the preview.** Download the tools and the image of a
+  [preview release](https://github.com/Play-MUN/mun-os/releases), start the
+  console and play the Game Card that comes with it; no compiler needed.
+  [Getting started](docs/getting-started.md) has the steps for each
+  computer.
 - **Make a Game Card.** Put a game on a card, play it, save on it, eject it
   and continue, with MUN Collect as the example:
   [create a Game Card](docs/guides/create-game-card.md), then
   [bring a game to MUN](docs/guides/port-a-game.md).
+- **Build the image.** Compose it yourself from pinned inputs, on a Mac with
+  Apple Silicon: [build the image yourself](docs/getting-started.md#build-the-image-yourself)
+  and [image build](os/README.md).
 - **Contribute.** Run the checks, pick an issue, open a pull request:
   [contributing](CONTRIBUTING.md).
 
 ## Where it runs
 
+Every computer below runs the same image with the same tools; only how QEMU
+is installed differs ([getting started](docs/getting-started.md#1-what-you-need)).
 QEMU runs the console with the processor's own virtualization on an ARM64
 computer whose system offers it to QEMU (macOS on Apple Silicon, Linux with
 KVM); otherwise, on x86_64 and on ARM64 alike, it emulates the processor:

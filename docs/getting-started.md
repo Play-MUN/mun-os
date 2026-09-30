@@ -63,8 +63,9 @@ Windows: `py mun get …`.
 ./mun play --card collect
 ```
 
-The console opens in a window (with sound, on the computer's own output) and
-MUN Collect goes in once it is up. The window has the keyboard while it is in
+The console opens in a window, with sound on the computer's own output
+(window and sound have been checked on macOS so far), and MUN Collect goes in
+once it is up. The window has the keyboard while it is in
 front:
 
 | Key | In MUN Shell |

@@ -71,6 +71,12 @@ The Hosts workflow downloads the release on macOS, Linux (x86_64, ARM64)
 and Windows (x86_64, ARM64) and runs the same check there. If it fails, the
 release is marked as such in its notes and the fix goes into the next one.
 
+## After publishing
+
+Point the preview's address in [getting started](getting-started.md#3-the-image)
+and in the bug report template (`.github/ISSUE_TEMPLATE/bug_report.yml`) at the
+new release.
+
 ## Release notes
 
 What changed; the commands to get and play it

@@ -20,8 +20,9 @@ saves as the contracts describe ([running a game](../runtime.md)):
 
 A Windows or macOS program, or an x86_64 Linux one, is not a MUN game, on a
 card or anywhere else: it has to be built again. Engines and libraries the
-image does not provide either come with the game (linked statically or
-carried as data under `content/`) or cannot be used yet. In the development
+image does not provide must be linked into the game statically: the card's
+`content/` is mounted `noexec`, so nothing there runs or loads as code; it
+holds data only. In the development
 image OpenGL is rendered in software: it costs CPU, and a game must pace
 itself.
 

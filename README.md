@@ -23,7 +23,7 @@ standing in for cards) are validated and shown; a game on a card starts
 sandboxed and hands the console back however it ends; saves are written to
 the card and restored on another console or another build; a card is
 ejected safely; the resolution (720p, 1080p, 1440p) applies at once, and
-games start in it; the menus have sound; English and Spanish. The examples
+games built on SDL or OpenGL start in it; the menus have sound; English and Spanish. The examples
 are MUN Collect, a small game, and a graphics and audio probe.
 
 Not there yet: controllers, card and system updates, and any physical
@@ -50,7 +50,7 @@ slower.
 
 | Your computer | The console's processor | Checked |
 | --- | --- | --- |
-| macOS, Apple Silicon | Virtualized (HVF) | On a Mac (macOS 27), with window and sound; in CI on macOS 15, headless |
+| macOS, Apple Silicon | Virtualized (HVF) | On a Mac (macOS 27), with window and sound; in CI on macOS 15, headless and emulated (no HVF in a VM) |
 | Linux, x86_64 or ARM64 | Emulated; KVM on ARM64 not tried yet | In CI and in Ubuntu 24.04 virtual machines, headless |
 | Windows, x86_64 or ARM64 | Emulated | In CI (Windows Server 2025; Windows 11 ARM64), headless |
 

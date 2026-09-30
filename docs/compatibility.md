@@ -40,7 +40,7 @@ later (`mke2fs`, `debugfs`).
 | Computer | State |
 | --- | --- |
 | macOS, with `brew install e2fsprogs` | Checked |
-| Linux, with the distribution's e2fsprogs | Expected to work; run by the pull-request checks on Ubuntu |
+| Linux, with the distribution's e2fsprogs | Expected to work; the pull-request checks exercise it on Ubuntu |
 | Windows | Not supported natively; use WSL 2 (not tried) |
 
 A preview release already carries its cards: playing needs none of this.

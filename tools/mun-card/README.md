@@ -14,8 +14,16 @@ so the host and the guest apply exactly the same rules
 ./mun card hash demo
 ./mun card hash demo --files --ignore saves   # per-file digests of the content, saves left out
 ./mun card create old --earlier-names         # a card of the earlier naming generation (neptune.toml)
+./mun card create mine --variant game --game mun-collect --title "My Collect" \
+    --id org.example.mycollect --version 1.0.0 --cover cover.png --accent "#2E7EC5"   # a card of your own
 ./mun card convert old new --game-supports-mun-names   # a MUN-names copy; old is never changed
 ```
+
+`--id` and `--version` set `card.id` (the same for every edition of a game:
+saves belong to it) and `content.version`, checked by the console's own rules
+when the card is made; without them a variant keeps its own. The whole walk,
+from the executable to a save restored after a restart, is in
+[create a Game Card](../../docs/guides/create-game-card.md).
 
 New cards carry `mun.toml` and their saves `mun-save/1`; `--earlier-names`
 makes a card with `neptune.toml` and `neptune-save/1` for compatibility

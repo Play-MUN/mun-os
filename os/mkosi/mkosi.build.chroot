@@ -18,10 +18,10 @@ sh "$MUN/services/mun-cardd/deploy/stage.sh" "$MUN/services/mun-cardd" "$MUN/too
 sh "$MUN/services/mun-launchd/deploy/stage.sh" "$MUN/services/mun-launchd" "$DESTDIR"
 
 echo "== licences"
-# MUN OS's own licence, its notice and the terms of the MUN name and logo, which
-# the licence does not cover; each component's third-party texts come with it
-# (mun-shell: the typefaces) and each Debian package keeps its own in
-# /usr/share/doc/<package>/copyright.
+# MUN OS's own licence, its notice and the terms of the MUN and Play MUN names
+# and logos, which the licence does not cover; each component's third-party
+# texts come with it (mun-shell: the typefaces) and each Debian package keeps
+# its own in /usr/share/doc/<package>/copyright.
 install -D -m 0644 "$MUN/LICENSE" "$DESTDIR/usr/share/doc/mun-os/LICENSE"
 install -D -m 0644 "$MUN/NOTICE" "$DESTDIR/usr/share/doc/mun-os/NOTICE"
 install -D -m 0644 "$MUN/NAME-AND-LOGO.txt" "$DESTDIR/usr/share/doc/mun-os/NAME-AND-LOGO.txt"

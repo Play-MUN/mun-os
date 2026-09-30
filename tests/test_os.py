@@ -174,7 +174,7 @@ class ShellTests(unittest.TestCase):
         # samples: authoring tools add chunks (metadata, provenance) that have
         # no place in the console.
         sounds = sorted((self.SHELL / "sounds").glob("*.wav"))
-        self.assertEqual([p.stem for p in sounds], ["back", "enter", "move"])
+        self.assertEqual([p.stem for p in sounds], ["back", "enter", "move", "startup"])
         cmake = (self.SHELL / "CMakeLists.txt").read_text()
         player = (self.SHELL / "src" / "systemsounds.cpp").read_text()
         for path in sounds:
@@ -189,11 +189,17 @@ class ShellTests(unittest.TestCase):
             fmt, samples = chunks[0][1], chunks[1][1]
             tag, channels, rate = int.from_bytes(fmt[0:2], "little"), int.from_bytes(fmt[2:4], "little"), int.from_bytes(fmt[4:8], "little")
             self.assertEqual((tag, channels, rate, int.from_bytes(fmt[14:16], "little")), (1, 2, 48000, 16), path.name)
-            self.assertLessEqual(len(samples) / (48000 * 4), 1.0, f"{path.name}: a menu sound lasts under a second")
+            if path.stem == "startup":
+                self.assertLessEqual(len(samples) / (48000 * 4), 12.0, "the start-up lasts as long as the console takes")
+            else:
+                self.assertLessEqual(len(samples) / (48000 * 4), 1.0, f"{path.name}: a menu sound lasts under a second")
             self.assertIn(f"sounds/{path.name}", cmake, "compiled in")
             self.assertIn(f'"{path.stem}"', player, "loaded by the player")
         played = set(re.findall(r'sound\("([a-z]+)"\)', (self.SHELL / "qml" / "Main.qml").read_text()))
-        self.assertEqual(played, {p.stem for p in sounds}, "every sound the menus ask for exists, and every one is used")
+        self.assertEqual(played, {p.stem for p in sounds} - {"startup"}, "every sound the menus ask for exists, and every one is used")
+        boot = (self.SHELL / "qml" / "BootLayer.qml").read_text()
+        self.assertIn('SystemSounds.play("startup")', boot, "the start-up plays its sound")
+        self.assertIn("ShellSettings.systemSounds", boot, "and only with the interface sounds on")
         unit = (self.SHELL / "deploy" / "mun-shell.service").read_text()
         self.assertRegex(unit, r"(?m)^SupplementaryGroups=.*\baudio\b", "the shell may open the sound device")
 
@@ -310,7 +316,9 @@ class InputTests(unittest.TestCase):
         notice = (ROOT / "NOTICE").read_text()
         self.assertIn("Copyright 2026 Iván Moreno Mendoza", notice)
         self.assertIn("NAME-AND-LOGO.txt", notice, "the notice points to the terms it does not cover")
-        self.assertIn("Logo.js", (ROOT / "NAME-AND-LOGO.txt").read_text())
+        terms = (ROOT / "NAME-AND-LOGO.txt").read_text()
+        self.assertIn("qml/Logo.js", terms)
+        self.assertIn("qml/PlayMun.js", terms, "both logos' drawings are outside the licence")
         stage = (ROOT / "services" / "mun-shell" / "deploy" / "stage.sh").read_text()
         self.assertIn('fonts/*-OFL.txt', stage, "the typefaces compiled into the shell go with their licence")
         for font in (ROOT / "services" / "mun-shell" / "fonts").glob("*.ttf"):

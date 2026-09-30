@@ -40,7 +40,7 @@
 - [Contributing](../CONTRIBUTING.md), [security](../SECURITY.md),
   [releasing](releasing.md).
 - [Licensing](licensing.md): MUN OS's licence, third-party components,
-  images and their source, the MUN name and logo.
+  images and their source, the MUN and Play MUN names and logos.
 
 Components document their own protocols, units and privileges:
 [MUN Shell](../services/mun-shell/README.md),

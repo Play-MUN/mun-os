@@ -1,19 +1,20 @@
-The MUN name and logo
+The MUN and Play MUN names and logos
 
-The MUN name, the Play MUN name and the MUN logo belong to Iván Moreno
-Mendoza, who develops MUN as Play MUN. The Apache License 2.0 that covers
-MUN OS's own work grants no rights to them (its section 6), and the logo's
-drawing (the paths in services/mun-shell/qml/Logo.js of MUN OS's source,
-which MUN Shell draws) is not licensed under it. These are its terms:
+The MUN name, the Play MUN name, the MUN logo and the Play MUN logo belong
+to Iván Moreno Mendoza, who develops MUN as Play MUN. The Apache License
+2.0 that covers MUN OS's own work grants no rights to them (its section 6),
+and the logos' drawings (the paths in services/mun-shell/qml/Logo.js and
+services/mun-shell/qml/PlayMun.js of MUN OS's source, which MUN Shell
+draws) are not licensed under it. These are their terms:
 
 - An official MUN OS image or release may be redistributed unchanged, under
   its own name.
-- The logo may be redistributed unmodified as part of MUN OS, or of a
-  modified version of it, where its interface shows it.
-- A modified version, a fork or another product may not use the MUN name or
-  logo to present itself as MUN or MUN OS, as official, or as endorsed by
-  Play MUN. A fork distributed to others takes its own name, and replaces
-  the logo when it is presented as its own product.
+- The logos may be redistributed unmodified as part of MUN OS, or of a
+  modified version of it, where its interface shows them.
+- A modified version, a fork or another product may not use the MUN or
+  Play MUN names or logos to present itself as MUN or MUN OS, as official,
+  or as endorsed by Play MUN. A fork distributed to others takes its own
+  name, and replaces the logos when it is presented as its own product.
 - Saying truthfully that a work is based on MUN OS, or that it runs MUN
   Game Cards, is fine.
 

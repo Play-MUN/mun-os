@@ -12,7 +12,7 @@ must keep are in [docs/](docs/README.md).
 MUN OS is founded and maintained by Iván Moreno Mendoza (Play MUN). The
 maintainer reviews pull requests and decides what goes into the official
 version, `main` and its releases; a fork may of course go its own way
-([licensing](docs/licensing.md#the-mun-name-and-logo) says how it may name
+([licensing](docs/licensing.md#the-mun-and-play-mun-names-and-logos) says how it may name
 itself).
 
 ## Before you start
@@ -99,7 +99,7 @@ that you wrote the change or otherwise have the right to submit it under the
 project's licence. Submit only what you may license this way. Code, fonts,
 images or other material from elsewhere keep their own terms: say where they
 come from and under which licence, so [licensing](docs/licensing.md) can
-list them. The MUN name and logo are not licensed.
+list them. The MUN and Play MUN names and logos are not licensed.
 
 ## What stays out of Git
 

@@ -457,6 +457,13 @@ Window {
         Keys.onPressed: (event) => {
             event.accepted = true
             window.wake()
+            // Any key skips the start-up to the console's logo; Home follows
+            // once the services have answered.
+            if (boot.playing) {
+                if (!event.isAutoRepeat)
+                    boot.skip()
+                return
+            }
             if (!window.interactive || window.starting)
                 return
             switch (event.key) {

@@ -5,12 +5,13 @@
 MUN OS's own work is Copyright 2026 Iván Moreno Mendoza, who develops MUN as
 Play MUN, and is licensed under the [Apache License 2.0](../LICENSE): the
 services, the card tools, the image build configuration, the laboratory, the
-example games, the interface sounds, the tests and the documentation; not
-the MUN logo (below). The licence lets anyone use, modify and redistribute it
+example games, the interface sounds (the start-up sound among them), the
+tests and the documentation; not the MUN and Play MUN logos (below). The
+licence lets anyone use, modify and redistribute it
 under its conditions; it does not transfer its ownership. Whoever
 redistributes it keeps its attribution notices, those in [NOTICE](../NOTICE)
 among them, in one of the places section 4 of the licence allows. Every
-image carries the licence, NOTICE and the terms of the name and logo in
+image carries the licence, NOTICE and the terms of the names and logos in
 `/usr/share/doc/mun-os/`, and every download beside the image.
 
 Contributions stay their authors'. Whoever submits a contribution licenses it
@@ -56,13 +57,14 @@ archive with its SHA-256, never in Git
 guidance on distributing derived images:
 [Debian for vendors](https://www.debian.org/CD/vendors/legal).
 
-## The MUN name and logo
+## The MUN and Play MUN names and logos
 
-The Apache License grants no rights to the MUN name, the Play MUN name or the
-MUN logo (section 6); they are Iván Moreno Mendoza's. The logo's drawing, the
-paths in `services/mun-shell/qml/Logo.js`, is not covered by the licence.
-Their terms are in [NAME-AND-LOGO.txt](../NAME-AND-LOGO.txt), which goes with
+The Apache License grants no rights to the MUN and Play MUN names or to the
+MUN and Play MUN logos (section 6); they are Iván Moreno Mendoza's. The
+logos' drawings, the paths in `services/mun-shell/qml/Logo.js` and
+`services/mun-shell/qml/PlayMun.js`, are not covered by the licence. Their
+terms are in [NAME-AND-LOGO.txt](../NAME-AND-LOGO.txt), which goes with
 every image and every download: official images may be redistributed
-unchanged, the logo goes with MUN OS and its modified versions where their
-interface shows it, and a fork distributed to others takes its own name and
-logo; saying truthfully that a work is based on MUN OS is fine.
+unchanged, the logos go with MUN OS and its modified versions where their
+interface shows them, and a fork distributed to others takes its own name
+and logo; saying truthfully that a work is based on MUN OS is fine.

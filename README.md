@@ -121,8 +121,8 @@ what goes into its official version. MUN OS's own work is Copyright 2026
 Iván Moreno Mendoza, licensed under the [Apache License 2.0](LICENSE)
 ([NOTICE](NOTICE)); contributions stay their authors' and are licensed under
 the same terms. Third-party components (typefaces, Debian packages) keep
-their own terms, and the Apache License grants no rights to the MUN name or
-logo, which have [their own terms](NAME-AND-LOGO.txt):
+their own terms, and the Apache License grants no rights to the MUN and
+Play MUN names and logos, which have [their own terms](NAME-AND-LOGO.txt):
 [licensing](docs/licensing.md).
 
 The project had another name before. Game Cards made then carry

@@ -32,9 +32,9 @@ display, and a game drawing on `/dev/fb0` has it (see *Display path*).
 | `qml/Main.qml` | The scene, the navigation, the actions and the key handling |
 | `qml/Panels.qml` | What each entry's panel and each dialog says, from the real state |
 | `qml/Theme.qml`, `qml/I18n.qml` | Design tokens and motion; the two languages |
-| `qml/ArcMenu.qml`, `ArcNode`, `DetailPanel`, `OptionRow`, `StatusBar`, `MoonPhase`, `ModalLayer`, `BootLayer`, `UiText`, `MarkText`, `Shadow`, `Logo.js` | Components: the arcs and their entries, the panel and its options, the status line, dialogs, the start-up and power-off screen, text and shadows |
+| `qml/ArcMenu.qml`, `ArcNode`, `DetailPanel`, `OptionRow`, `StatusBar`, `MoonPhase`, `ModalLayer`, `BootLayer`, `UiText`, `MarkText`, `Shadow`, `Logo.js`, `PlayMun.js` | Components: the arcs and their entries, the panel and its options, the status line, dialogs, the start-up and power-off screen, text and shadows; the MUN and Play MUN logos |
 | `fonts/` | Archivo and Michroma, compiled in, with their licences |
-| `sounds/` | The menus' sounds, compiled in: `move.wav`, `enter.wav`, `back.wav` |
+| `sounds/` | The interface's sounds, compiled in: the menus' `move.wav`, `enter.wav`, `back.wav` and the start-up's `startup.wav` |
 | `deploy/mun-shell.service` | systemd unit on tty1 as user `mun-shell` with the display (DRM) and evdev environment and the state directory |
 | `deploy/mun-shell.sudoers` | Allows exactly `mun-power poweroff|reboot` for that user |
 | `deploy/mun-power` | Root-side helper with a fixed vocabulary in front of `systemctl` |
@@ -79,9 +79,17 @@ card's crescent on the Game Card object (the logo's moon) fills while a
 card is in the slot. The ambient light at the orb follows the local hour:
 cold at night, pale at dawn, grey-white by day, copper at dusk.
 
-Motion: the start-up plays once per boot: on black the letters appear, the
-arc draws itself from its tip and the power light comes on; two seconds
-later the screen fades into Home. Moving to another entry: the chosen bar
+Motion: the start-up plays once per boot, over the start-up sound, in two
+acts. The house: an ivory dawn, and on it PLAY, then MUN, then the copper
+stroke under them, each with one of the sound's three notes (2.30, 3.24 and
+3.86 s into it), and a sheen across the letters. The console: the night,
+the MUN letters written and filled, the arc drawing itself from its tip with
+the sound's last breath (6.74 s), moon dust rising. From 9.3 s, once the
+card service and the launcher have answered (20 s after the start at the
+latest), the screen fades into Home; any key skips to the console's logo.
+The picture keeps time with the sound: its clock starts when the sound's
+first samples reach the device, less the 40 ms the device holds ahead; with
+System sounds off it plays silent. Moving to another entry: the chosen bar
 turns light at once while its copper edge, glow and text colour settle in
 0.3 s and it slides 4 px out; the new object loads in 0.9 s, a radar-like
 sweep drawing its glowing wireframe with a copper line and its face
@@ -223,12 +231,12 @@ displays that crop their edges.
 | Clock format | 24-hour (default) or 12-hour; kept |
 | Resolution | Automatic (default), or 720p, 1080p or 1440p where the display takes them; kept once confirmed (*Resolution*) |
 | Safe area | 100 (default), 97, 94 or 91 %; kept |
-| System sounds | On (default) or Off: the menus' sounds (*Sounds*); kept |
+| System sounds | On (default) or Off: the menus' sounds and the start-up's (*Sounds*); kept |
 | Auto power off | Never, or after 1 (default), 3 or 6 hours without input on the menus; kept. A game in progress does not count: the shell is stopped while it runs |
 | Turn off console, About, Reset settings | Work; reset keeps the language |
 | Time zone, developer mode | Shown as they are (the system's zone, set by the image); changing them is not available yet |
 | Ethernet, Wi-Fi | Shown as the kernel sees them (not detected, not connected, connected; no adapter); joining networks is not available yet |
-| Account, HDR, refresh rate, audio output and format, start-up sound, status light, setting the time, updates | Not available yet |
+| Account, HDR, refresh rate, audio output and format, status light, setting the time, updates | Not available yet |
 
 The settings live in `/var/lib/mun-shell/settings.ini`
 (`StateDirectory=mun-shell`). The file is read as untrusted input: a value
@@ -240,10 +248,14 @@ console: games and saves live on their Game Cards.
 Moving the focus or changing a choice plays `move`, going in or running an
 action `enter`, going back or closing a dialog `back`: only when a key or
 the pointer changed something, never for the console's own changes (a card
-arriving, a result shown). They are MUN's own, compiled in from `sounds/`,
-all in one chosen format: PCM, 16-bit, 48 kHz, stereo, only the format and
-the samples (no metadata chunks), under a second each (`tests/test_os.py`
-checks all of that). The shell asks ALSA for that format and lets it convert
+arriving, a result shown). The start-up sound, `startup` (10.1 s), plays
+once per boot with the start-up (*Motion*), at the level it was mastered at
+rather than the menus' 3/4; a key that skips the start-up fades it out in
+0.1 s. They are MUN's own, compiled in from `sounds/`, all in one chosen
+format: PCM, 16-bit, 48 kHz, stereo, only the format and the samples (no
+metadata chunks), the menus' under a second each and the start-up's under
+twelve (`tests/test_os.py` checks all of that); the start-up's was made
+from its 96 kHz, 24-bit master, resampled and dithered to 16 bits. The shell asks ALSA for that format and lets it convert
 when a device plays another; it has been heard only through the virtual
 console's sound device, and physical outputs are tested on the chosen board.
 

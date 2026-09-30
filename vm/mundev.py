@@ -548,7 +548,7 @@ BUNDLED_CARDS = {
 def licence_texts() -> Tuple[Path, ...]:
     """The texts a download carries beside the image, as the image carries
     them in /usr/share/doc: MUN OS's licence, its notice, the terms of the
-    MUN name and logo, and the typefaces' licences."""
+    MUN and Play MUN names and logos, and the typefaces' licences."""
     return (REPO_ROOT / "LICENSE", REPO_ROOT / "NOTICE", REPO_ROOT / "NAME-AND-LOGO.txt",
             *sorted((REPO_ROOT / "services" / "mun-shell" / "fonts").glob("*-OFL.txt")))
 

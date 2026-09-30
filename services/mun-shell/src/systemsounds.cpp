@@ -1,6 +1,7 @@
 #include "systemsounds.h"
 
 #include <QFile>
+#include <QMetaObject>
 #include <QtEndian>
 
 #include <alsa/asoundlib.h>
@@ -9,11 +10,11 @@
 
 namespace {
 
-// The mock-up's level for these sounds, leaving headroom when they overlap.
-constexpr int kGainNumerator = 3;
-constexpr int kGainDenominator = 4;
-// What ALSA may buffer ahead: short enough that a sound follows its key.
-constexpr unsigned kLatencyMicroseconds = 40000;
+// Gains in quarters: the mock-up's level for the menus' sounds, leaving
+// headroom when they overlap; the start-up sound as it was mastered.
+constexpr int kQuarters = 4;
+constexpr int kMenuGain = 3;
+constexpr int kStartupGain = 4;
 
 quint16 u16(const QByteArray &bytes, qsizetype at)
 {
@@ -30,9 +31,10 @@ quint32 u32(const QByteArray &bytes, qsizetype at)
 SystemSounds::SystemSounds(QObject *parent) : QObject(parent)
 {
     // Filled now and never again: the worker keeps pointers into it.
-    m_sounds.reserve(3);
+    m_sounds.reserve(4);
     for (const char *name : {"move", "enter", "back"})
-        load(QString::fromLatin1(name));
+        load(QString::fromLatin1(name), kMenuGain);
+    load(QStringLiteral("startup"), kStartupGain);
     if (!m_sounds.empty())
         m_worker = std::thread(&SystemSounds::run, this);
 }
@@ -49,7 +51,7 @@ SystemSounds::~SystemSounds()
     m_worker.join();
 }
 
-void SystemSounds::load(const QString &name)
+void SystemSounds::load(const QString &name, int gain)
 {
     // Compiled in, but read as any file would be: a RIFF/WAVE with a PCM
     // format chunk in the device's format and a data chunk, nothing assumed.
@@ -77,7 +79,7 @@ void SystemSounds::load(const QString &name)
         qWarning("mun-shell: sound %s is missing or not 16-bit %d Hz stereo PCM; it stays silent", qPrintable(name), kRate);
         return;
     }
-    Sound sound{name, std::vector<qint16>(size_t(data.size() / 2))};
+    Sound sound{name, std::vector<qint16>(size_t(data.size() / 2)), gain};
     for (size_t i = 0; i < sound.samples.size(); ++i)
         sound.samples[i] = qFromLittleEndian<qint16>(data.constData() + 2 * i);
     m_sounds.push_back(std::move(sound));
@@ -98,12 +100,27 @@ void SystemSounds::play(const QString &name)
     }
 }
 
+void SystemSounds::stop(const QString &name)
+{
+    for (const Sound &sound : m_sounds) {
+        if (sound.name != name)
+            continue;
+        {
+            std::lock_guard lock(m_mutex);
+            m_stops.push_back(&sound);
+        }
+        m_wake.notify_one();
+        return;
+    }
+}
+
 void SystemSounds::run()
 {
     snd_pcm_t *pcm = nullptr;
     std::vector<Voice> voices;
     std::vector<int> mix(size_t(kPeriodFrames * kChannels));
     std::vector<qint16> period(mix.size());
+    std::vector<QString> begun;  // sounds whose first samples this period holds
     std::chrono::steady_clock::time_point retryAt{}, lastSound{};
     bool reported = false;
     int failures = 0;  // writes failed in a row
@@ -134,8 +151,14 @@ void SystemSounds::run()
             while (!m_requests.empty()) {
                 if (voices.size() == kVoices)
                     voices.erase(voices.begin());  // the oldest makes room
-                voices.push_back({m_requests.front(), 0});
+                voices.push_back({m_requests.front(), 0, 0});
                 m_requests.pop_front();
+            }
+            while (!m_stops.empty()) {
+                for (Voice &voice : voices)
+                    if (voice.sound == m_stops.front() && voice.fade == 0)
+                        voice.fade = kFadeFrames;
+                m_stops.pop_front();
             }
         }
 
@@ -175,18 +198,29 @@ void SystemSounds::run()
         // laboratory's virtual device, played through the Mac's CoreAudio,
         // failed to resume from (EIO), where a fresh device plays.
         std::fill(mix.begin(), mix.end(), 0);
+        begun.clear();
         for (Voice &voice : voices) {
             const std::vector<qint16> &samples = voice.sound->samples;
-            const size_t count = std::min(mix.size(), samples.size() - voice.sample);
-            for (size_t i = 0; i < count; ++i)
-                mix[i] += samples[voice.sample + i];
+            if (voice.sample == 0)
+                begun.push_back(voice.sound->name);
+            size_t count = std::min(mix.size(), samples.size() - voice.sample);
+            if (voice.fade > 0)
+                count = std::min(count, voice.fade * kChannels);
+            for (size_t i = 0; i < count; ++i) {
+                int value = samples[voice.sample + i] * voice.sound->gain;
+                if (voice.fade > 0)  // linear, frame by frame, to silence
+                    value = int(qint64(value) * qint64(voice.fade - i / kChannels) / qint64(kFadeFrames));
+                mix[i] += value;
+            }
             voice.sample += count;
+            if (voice.fade > 0 && (voice.fade -= count / kChannels) == 0)
+                voice.sample = samples.size();  // faded out
         }
         voices.erase(std::remove_if(voices.begin(), voices.end(),
                                     [](const Voice &voice) { return voice.sample >= voice.sound->samples.size(); }),
                      voices.end());
         for (size_t i = 0; i < mix.size(); ++i)
-            period[i] = qint16(std::clamp(mix[i] * kGainNumerator / kGainDenominator, -32768, 32767));
+            period[i] = qint16(std::clamp(mix[i] / kQuarters, -32768, 32767));
 
         // Blocking writes pace the loop to the device.
         const qint16 *next = period.data();
@@ -211,6 +245,8 @@ void SystemSounds::run()
         if (left == 0) {
             failures = 0;
             reported = false;
+            for (const QString &name : begun)
+                QMetaObject::invokeMethod(this, [this, name] { emit started(name); }, Qt::QueuedConnection);
         }
     }
     closeDevice();

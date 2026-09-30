@@ -690,6 +690,128 @@ class InitDestinationTests(unittest.TestCase):
                                    for p in (SAMPLES / "paper").rglob("*") if p.is_file()})
 
 
+class LateDestinationTests(unittest.TestCase):
+    """A name absent when init checks the destination, created just before
+    init publishes its file there (the race is injected at the publishing
+    call, with real files): without --force it is kept, bytes and inode,
+    the temporary is removed and init stops with a controlled error."""
+
+    SENTINEL = b"CONCURRENT EDIT: DO NOT REPLACE\n"
+    # The real calls, for the concurrent writer while init's are patched.
+    REAL_LINK = staticmethod(os.link)
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="shape-late-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    def run_with_arrival(self, folder, target, arrival, *extra):
+        """Run init; just before the file named like `target` is published,
+        `arrival(name, dir_fd)` creates something there."""
+        real_link, real_rename = os.link, os.rename
+        seen = {}
+
+        def arrive(destination, kwargs):
+            if destination == Path(target).name and not seen:
+                seen["inode"] = arrival(destination, kwargs["dst_dir_fd"])
+
+        def link(source, destination, **kwargs):
+            arrive(destination, kwargs)
+            return real_link(source, destination, **kwargs)
+
+        def rename(source, destination, **kwargs):
+            arrive(destination, kwargs)
+            return real_rename(source, destination, **kwargs)
+        out, err = io.StringIO(), io.StringIO()
+        with unittest.mock.patch.object(shapetools.os, "link", side_effect=link), \
+                unittest.mock.patch.object(shapetools.os, "rename", side_effect=rename), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = cli.main(["shape", "init", str(folder), *extra])
+        self.assertIn("inode", seen, "the arrival was injected")
+        return code, err.getvalue(), seen["inode"]
+
+    def concurrent_file(self, name, directory_fd):
+        fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644, dir_fd=directory_fd)
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(self.SENTINEL)
+        return os.stat(name, dir_fd=directory_fd, follow_symlinks=False).st_ino
+
+    def assert_kept(self, folder, target, code, err, inode):
+        self.assertEqual(code, 1)
+        self.assertIn("[shape_exists]", err)
+        self.assertIn(target, err)
+        path = folder / target
+        self.assertEqual(path.read_bytes(), self.SENTINEL)
+        self.assertEqual(path.stat().st_ino, inode)
+        self.assertEqual([p.name for p in folder.rglob(".*")], [], "no temporary is left")
+
+    def test_a_manifest_that_appears_late_is_kept(self):
+        folder = self.tmp / "template"
+        code, err, inode = self.run_with_arrival(folder, "shape.json", self.concurrent_file)
+        self.assert_kept(folder, "shape.json", code, err, inode)
+
+    def test_a_resource_that_appears_late_is_kept(self):
+        folder = self.tmp / "sample"
+        code, err, inode = self.run_with_arrival(folder, "card/window.png", self.concurrent_file, "--example", "sea")
+        self.assert_kept(folder, "card/window.png", code, err, inode)
+        # It is the first file published: init stops there and writes nothing more.
+        self.assertEqual([p.relative_to(folder).as_posix() for p in folder.rglob("*") if p.is_file()],
+                         ["card/window.png"])
+
+    def test_the_files_published_before_are_named(self):
+        folder = self.tmp / "sample"
+        code, err, inode = self.run_with_arrival(folder, "world/fish.png", self.concurrent_file, "--example", "sea")
+        self.assert_kept(folder, "world/fish.png", code, err, inode)
+        self.assertIn("ya escritos: card/window.png", err)
+
+    def test_a_link_that_appears_late_is_kept_and_not_followed(self):
+        folder = self.tmp / "template"
+        outside = self.tmp / "created-outside.json"
+
+        def concurrent_link(name, directory_fd):
+            os.symlink(str(outside), name, dir_fd=directory_fd)
+            return os.stat(name, dir_fd=directory_fd, follow_symlinks=False).st_ino
+        code, err, inode = self.run_with_arrival(folder, "shape.json", concurrent_link)
+        self.assertEqual(code, 1)
+        self.assertIn("[shape_exists]", err)
+        self.assertTrue((folder / "shape.json").is_symlink())
+        self.assertEqual(os.lstat(folder / "shape.json").st_ino, inode)
+        self.assertFalse(outside.exists())
+        self.assertEqual([p.name for p in folder.rglob(".*")], [])
+
+    def test_with_force_a_late_file_is_replaced_only_at_its_name(self):
+        folder = self.tmp / "template"
+        other = self.tmp / "elsewhere.json"
+
+        def concurrent_hard_link(name, directory_fd):
+            other.write_bytes(self.SENTINEL)
+            self.REAL_LINK(str(other), name, dst_dir_fd=directory_fd)
+            return other.stat().st_ino
+        code, err, inode = self.run_with_arrival(folder, "shape.json", concurrent_hard_link, "--force")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(other.read_bytes(), self.SENTINEL)          # replaced by name, never truncated
+        self.assertEqual(json.loads((folder / "shape.json").read_text())["format"], shape.FORMAT)
+        self.assertEqual([p.name for p in folder.rglob(".*")], [])
+
+    def test_a_volume_without_hard_links_is_a_controlled_error(self):
+        folder = self.tmp / "template"
+        import errno
+        with unittest.mock.patch.object(shapetools.os, "link", side_effect=OSError(errno.ENOTSUP, "not supported")):
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                code = cli.main(["shape", "init", str(folder)])
+        self.assertEqual(code, 1)
+        self.assertIn("[shape_destination_unsupported]", err.getvalue())
+        self.assertEqual(sorted(p.name for p in folder.iterdir()), [], "nothing is published, no temporary left")
+
+    def test_an_ordinary_init_leaves_no_temporary(self):
+        folder = self.tmp / "plain"
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(cli.main(["shape", "init", str(folder)]), 0)
+        self.assertEqual(sorted(p.name for p in folder.iterdir()), ["README.md", "shape.json"])
+        self.assertEqual((folder / "shape.json").stat().st_nlink, 1)
+
+
 class DamagedCoverTests(unittest.TestCase):
     """A damaged cover is an error of the file, with a stable code, for
     both commands that read one; nothing is written."""
@@ -804,7 +926,8 @@ class DocumentationTests(unittest.TestCase):
         for phrase in ("64 KiB", "32 MiB", "4 MiB", "1 MiB", "2048", "256", "1024", "128", "−1 dBFS", "4.5:1", "3:1",
                        "136 MiB", "200 MiB"):
             self.assertIn(phrase, text, phrase)
-        for code in ("shape_exists", "shape_destination_link", "shape_destination_type", "cover_invalid",
+        for code in ("shape_exists", "shape_destination_link", "shape_destination_type",
+                     "shape_destination_unsupported", "cover_invalid",
                      "cover_too_large", "`null`"):
             self.assertIn(code, text, code)
         self.assertIn("mun-shape", (ROOT / "docs" / "game-cards.md").read_text(encoding="utf-8"))

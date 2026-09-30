@@ -361,10 +361,16 @@ nothing if the check fails. It refuses a link anywhere it would write
 (the folder itself, a folder on the way, a file's name, a dangling link),
 even with `--force`, and a folder or special file where a file goes
 (`shape_destination_link`, `shape_destination_type`). An existing file at a
-name it writes is refused (`shape_exists`) unless `--force`, which replaces
-those files only, each by writing a new file and renaming it over the name,
-so a file that is also linked elsewhere keeps its content there; every other
-file in the folder is left as it was. The template declares a palette, the
+name it writes is refused (`shape_exists`) unless `--force`. Each file is
+written whole under a temporary name, then published. Without `--force` the
+publication never replaces anything, even a file or link that appeared after
+the check: it is kept as it is, the temporary is removed and `init` stops
+with `shape_exists`, naming the files it had already written. This needs a
+folder that allows hard links; one that does not is refused
+(`shape_destination_unsupported`). `--force` replaces the names it writes
+only, each by renaming its new file over the name, so a file that is also
+linked elsewhere keeps its content there; every other file in the folder is
+left as it was. The template declares a palette, the
 card object, the surfaces and a transition, which need no file, and a README
 explains how to add the world and sounds.
 

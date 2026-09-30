@@ -6,6 +6,7 @@ PNG decoder here serves the publisher's preview of the cover palette, which
 the shell derives with the same algorithm (docs/shape.md, "Read level").
 """
 
+import errno
 import json
 import math
 import os
@@ -445,14 +446,25 @@ def _lstat(path: Path):
         return None
 
 
-def _write_tree(folder: Path, files: Dict[str, bytes]) -> None:
+# Where a hard link cannot be made, exclusive publication is impossible.
+_NO_LINKS = {getattr(errno, name) for name in ("EPERM", "ENOTSUP", "EOPNOTSUPP", "EMLINK", "EXDEV")
+             if hasattr(errno, name)}
+
+
+def _write_tree(folder: Path, files: Dict[str, bytes], replace: bool) -> None:
     """Write files under folder through directory descriptors, never
-    following a link: each folder is opened with O_NOFOLLOW, each file is
-    written to a new temporary name and renamed over its own name. A rename
-    replaces the name only, so a file that is also linked elsewhere keeps
-    its bytes there, and a link that appeared since the plan is replaced,
-    not followed."""
+    following a link: each folder is opened with O_NOFOLLOW, and each file
+    is written whole to a new temporary name first, then published.
+
+    Without `replace`, publication is a hard link from the temporary to the
+    name, which the kernel refuses atomically if the name exists, whatever
+    it is: a file that appeared after the plan keeps its bytes and inode,
+    and init stops with shape_exists. With `replace` (--force), a rename
+    replaces the name only, so a file also linked elsewhere keeps its bytes
+    there, and a link at the name is replaced, not followed. The temporary
+    is removed in every case."""
     folder.mkdir(parents=True, exist_ok=True)
+    written: List[str] = []
     root = os.open(folder, os.O_RDONLY | _DIRECTORY | _NOFOLLOW)
     try:
         for relative, data in files.items():
@@ -472,18 +484,32 @@ def _write_tree(folder: Path, files: Dict[str, bytes]) -> None:
                 try:
                     with os.fdopen(out, "wb") as handle:
                         handle.write(data)
-                    os.rename(temporary, name, src_dir_fd=fd, dst_dir_fd=fd)
-                except BaseException:
+                    if replace:
+                        os.rename(temporary, name, src_dir_fd=fd, dst_dir_fd=fd)
+                    else:
+                        os.link(temporary, name, src_dir_fd=fd, dst_dir_fd=fd)
+                except FileExistsError:
+                    raise CardError("shape_exists", "Un archivo apareció en el destino después de la comprobación; "
+                                    "se conserva y no se escribe nada más",
+                                    f"{relative}" + (f"; ya escritos: {', '.join(written)}" if written else ""))
+                except OSError as exc:
+                    if not replace and exc.errno in _NO_LINKS:
+                        raise CardError("shape_destination_unsupported",
+                                        "El sistema de archivos del destino no permite publicar sin sustituir "
+                                        "(enlaces duros); usa otra carpeta o --force",
+                                        f"{relative}: {exc.strerror}")
+                    raise
+                finally:
                     try:
                         os.unlink(temporary, dir_fd=fd)
-                    except OSError:
+                    except FileNotFoundError:
                         pass
-                    raise
+                written.append(relative)
             finally:
                 os.close(fd)
     except OSError as exc:
         raise CardError("shape_destination_changed", "El destino cambió mientras se escribía; revísalo",
-                        f"{folder}: {exc.strerror}")
+                        f"{folder}: {exc.strerror}" + (f"; ya escritos: {', '.join(written)}" if written else ""))
     finally:
         os.close(root)
 
@@ -495,10 +521,11 @@ def init_package(folder: Path, cover: Optional[Path] = None, example: Optional[P
     The destination is checked as a whole first and nothing is written if
     it is refused: links (the folder itself, a folder on the way, a final
     name, a dangling one) are refused even with `force`, as is a folder or
-    special file where a file goes. `force` replaces existing regular files
-    at the names written, by rename (never truncating a file linked
-    elsewhere); every other file is left as it was. Returns the files
-    written."""
+    special file where a file goes. Without `force` no name is ever
+    replaced, not even one that appears after that check (_write_tree).
+    `force` replaces existing regular files at the names written, by rename
+    (never truncating a file linked elsewhere); every other file is left as
+    it was. Returns the files written."""
     folder = Path(folder)
     if example is not None:
         files = _example_files(Path(example))
@@ -507,7 +534,7 @@ def init_package(folder: Path, cover: Optional[Path] = None, example: Optional[P
         files = {shape.MANIFEST: dump(document).encode("utf-8"),
                  "README.md": TEMPLATE_README.format(folder=folder.name or ".").encode("utf-8")}
     _plan(folder, list(files), force)
-    _write_tree(folder, files)
+    _write_tree(folder, files, replace=force)
     return list(files)
 
 

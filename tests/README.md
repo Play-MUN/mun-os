@@ -12,7 +12,7 @@ use temporary directories and fake process, protocol and device boundaries.
 | `test_card.py` | Manifest validation, both naming generations, image creation and variants, offline inspection, conversion |
 | `test_shape.py` | MUN Shape packages: the strict JSON profile, schema, file headers, budgets, contrast proofs and transition plans, the cover palette, the template, every defective package, the two samples, a card image read like its folder |
 | `test_cardd.py` | The card service: eligibility, states, framing, staging, single-object saves and their failures, safe release |
-| `test_cardd_shape.py` | The card service's MUN Shape export: after `valid`, whole or nothing, links and FIFOs, Play and saves during a copy, safe release within a chunk or pending past a stuck read, removal, replacement and late completions, start/stop cleanup |
+| `test_cardd_shape.py` | The card service's MUN Shape export: after `valid`, whole or nothing, links and FIFOs, Play and saves during a copy, safe release within a chunk or pending past a stuck read, a release meeting a save and a copy in either order, removal, replacement and late completions, a retry beside a deferred cleanup, failures on the way to publication, start/stop cleanup |
 | `test_directory_saves.py` | Directory saves: checks, capture rule, carried units, restore, adoption, failure cases |
 | `test_launchd.py` | The launcher: launch flow, identity, runtime profiles, environment, results, cleanup, recovery |
 | `test_launch_cleanup.py` | The cleanup helper and unit |

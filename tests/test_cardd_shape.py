@@ -103,6 +103,10 @@ class ShapeHarness:
     def exports(self):
         return sorted(os.listdir(self.shape_root)) if self.shape_root.exists() else []
 
+    def owners(self):
+        """The insertion each published export belongs to (`<insertion>.<attempt>`)."""
+        return [name.rsplit(".", 1)[0] for name in self.exports() if not name.startswith(".")]
+
 
 class Gate:
     """Holds a worker at one point until opened; `reached` says it got there."""
@@ -152,7 +156,8 @@ class ShapeExportTests(unittest.TestCase):
         record = card["shape"]
         self.assertEqual((record["state"], record["insertion"], record["version"]), ("ready", card["insertion"], "0.1.0"))
         export = Path(record["path"])
-        self.assertEqual(h.exports(), [card["insertion"]], "published under the insertion, no .part left")
+        self.assertEqual(h.exports(), [export.name], "published under its own name, no .part left")
+        self.assertEqual(h.owners(), [card["insertion"]])
         files = {p.relative_to(export).as_posix() for p in export.rglob("*") if p.is_file()}
         expected = {p.relative_to(SEA).as_posix() for p in SEA.rglob("*") if p.is_file()}
         self.assertEqual(files, expected)
@@ -319,7 +324,8 @@ class ShapeExportTests(unittest.TestCase):
         self.assertEqual(released[0]["error"]["code"], "unmount_failed")
         h.pump(until=lambda: h.shape_states()[-1] == "ready")
         self.assertEqual(h.card()["state"], "valid")
-        self.assertEqual(h.exports(), [h.card()["insertion"]])
+        self.assertEqual(h.owners(), [h.card()["insertion"]])
+        self.assertEqual(h.exports(), [Path(h.card()["shape"]["path"]).name])
 
     # --- removal, replacement and late completions --------------------------------
     def test_removal_during_the_copy_leaves_nothing_and_no_late_state(self):
@@ -347,7 +353,7 @@ class ShapeExportTests(unittest.TestCase):
             self.insert(h)
             gate.wait_reached(self)
             insertion = h.card()["insertion"]
-            self.assertEqual(h.exports(), [insertion])
+            self.assertEqual(h.owners(), [insertion])
             h.manager.device_removed("vdc")
             gate.opened.set()
             h.pump(until=lambda: h.manager._shape_running is None)
@@ -378,7 +384,7 @@ class ShapeExportTests(unittest.TestCase):
             h.pump(until=h.settled("c2"))
         second = h.card("c2")
         self.assertEqual(second["shape"]["state"], "ready")
-        self.assertEqual(h.exports(), [second["insertion"]], "only the current insertion's export exists")
+        self.assertEqual(h.owners(), [second["insertion"]], "only the current insertion's export exists")
 
     def test_a_quick_reinsertion_of_the_same_card_gets_only_its_own_export(self):
         gate = self.hold_between_chunks(after=6)
@@ -392,7 +398,7 @@ class ShapeExportTests(unittest.TestCase):
         h.pump(until=h.settled("c2"))
         second = h.card("c2")
         self.assertNotEqual(first, second["insertion"])
-        self.assertEqual(h.exports(), [second["insertion"]])
+        self.assertEqual(h.owners(), [second["insertion"]])
         self.assertTrue(all(e["insertion"] == second["insertion"] for e in h.events
                             if e["type"] == "shape" and e["shape"] and e["shape"]["state"] != "preparing"))
 
@@ -446,6 +452,243 @@ class ShapeExportTests(unittest.TestCase):
         self.assertIsNone(view.apply({"type": "shape", "slot": "c1", "insertion": "x", "shape": {"state": "ready"}}))
         frame = cardd.encode_frame(h.events[-1])
         self.assertLess(len(frame), 16 * 1024, "a Shape state change never resends the cover")
+
+
+
+class SaveReadAndEjectTests(unittest.TestCase):
+    """A release meets a save in flight and a Shape copy with an open
+    descriptor: the card is unmounted only once both have ended, in either
+    order; the caller is answered once; nothing is enabled meanwhile."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="cardd-shape-save-"))
+        self.addCleanup(lambda: ShapeExportTests.cleanup(self))
+        self.reader, self.writer = Gate(), Gate()
+        real_open, held = cardd._open_package_file, []
+
+        def hold_open(mount, relative):
+            fd = real_open(mount, relative)          # a real descriptor on the card, kept open
+            if relative.endswith(".wav") and not held:
+                held.append(fd)
+                self.reader.hold()
+            return fd
+
+        def hold_write(*args, **kwargs):
+            self.writer.hold()
+            return {"ok": True, "bytes": 10, "sha256": "ab", "path": "saves/x"}
+        for patcher in (patch.object(cardd, "_open_package_file", hold_open),
+                        patch.object(cardd, "_write_save", hold_write)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.h = ShapeHarness(self.tmp, {"vdc": SEA})
+        self.h.manager.device_added("vdc", "NPT-game", "/dev/vdc")
+        self.h.pump(until=lambda: "preparing" in self.h.shape_states())
+        self.reader.wait_reached(self)
+        self.card = self.h.manager.cards["vdc"]
+        self.saves, self.releases = [], []
+        self.h.manager.save({"type": "save", "slot": "c1", "insertion": self.card.insertion, "serial": "NPT-game",
+                             "version": "0.1.0", "game": "mun.collect", "session": "s1", "schema": 1,
+                             "payload": {"n": 1}}, self.saves.append)
+        self.writer.wait_reached(self)
+        self.h.manager.release({"type": "release", "serial": "NPT-game"}, self.releases.append)
+
+    def unmounted(self):
+        return ("umount", "c1") in self.h.mounter.log
+
+    def test_the_save_ends_first_then_the_copy(self):
+        self.assertEqual((self.releases, self.h.timers), ([], []), "waiting for the save: no deadline yet")
+        self.writer.opened.set()
+        self.h.pump(until=lambda: self.saves)
+        self.assertTrue(self.saves[0]["ok"])
+        self.assertEqual(self.releases, [])
+        self.assertFalse(self.unmounted(), "the Shape reader is still open")
+        self.assertEqual(len(self.h.timers), 1, "the wait for the copy is bounded from here")
+        self.reader.opened.set()
+        self.h.pump(until=lambda: self.releases)
+        self.assertEqual([r["ok"] for r in self.releases], [True])
+        self.assertTrue(self.unmounted())
+        self.assertEqual(self.h.card()["state"], "released")
+        self.assertEqual(self.h.exports(), [])
+        self.h.timers.pop()()                        # the deadline, late: nothing more
+        self.assertEqual(len(self.releases), 1)
+
+    def test_the_copy_ends_first_then_the_save(self):
+        self.reader.opened.set()
+        self.h.pump(until=lambda: self.h.manager._shape_running is None)
+        self.assertEqual(self.releases, [])
+        self.assertFalse(self.unmounted(), "the save is still in flight")
+        self.assertEqual(self.h.timers, [])
+        self.writer.opened.set()
+        self.h.pump(until=lambda: self.releases)
+        self.assertTrue(self.saves[0]["ok"])
+        self.assertEqual([r["ok"] for r in self.releases], [True])
+        self.assertTrue(self.unmounted())
+        self.assertEqual(self.h.exports(), [])
+
+    def test_past_the_deadline_the_release_stays_pending_until_both_end(self):
+        self.writer.opened.set()
+        self.h.pump(until=lambda: self.saves)
+        self.h.timers.pop()()                        # the copy has not closed its files in time
+        self.assertEqual([r["error"]["code"] for r in self.releases], ["card_busy"])
+        self.assertTrue(self.card.releasing, "still pending")
+        refused = []
+        self.h.manager.save({"type": "save", "slot": "c1", "insertion": self.card.insertion, "serial": "NPT-game",
+                             "version": "0.1.0", "game": "mun.collect", "session": "s2", "schema": 1,
+                             "payload": {"n": 2}}, refused.append)
+        self.h.manager.stage({"type": "stage", "slot": "c1", "insertion": self.card.insertion, "serial": "NPT-game",
+                              "version": "0.1.0", "session": "s3", "dest": "/run/mun/launch/s3"}, refused.append)
+        self.assertEqual([r["error"]["code"] for r in refused], ["card_unavailable", "card_unavailable"])
+        self.assertFalse(self.unmounted())
+        self.reader.opened.set()
+        self.h.pump(until=lambda: self.h.card()["state"] == "released")
+        self.assertTrue(self.unmounted())
+        self.assertEqual(len(self.releases), 1, "answered once; the card event says released")
+
+    def test_a_failed_unmount_after_both_is_answered_once_and_the_copy_comes_back(self):
+        self.h.mounter.fail_strict_unmount = True
+        self.writer.opened.set()
+        self.reader.opened.set()
+        self.h.pump(until=lambda: self.releases)
+        self.assertEqual([r["error"]["code"] for r in self.releases], ["unmount_failed"])
+        self.assertFalse(self.card.releasing, "usable again, as after any failed release")
+        self.h.pump(until=lambda: self.h.shape_states()[-1] == "ready")
+        self.assertEqual(self.h.owners(), [self.card.insertion])
+        self.assertEqual(len(self.releases), 1)
+
+    def test_a_card_pulled_while_its_release_waits_is_answered_and_left_alone(self):
+        self.h.manager.device_removed("vdc")
+        self.assertEqual([r["error"]["code"] for r in self.releases], ["card_removed"])
+        removed_at = len(self.h.events)
+        self.writer.opened.set()
+        self.reader.opened.set()
+        self.h.pump(until=lambda: self.saves and self.h.manager._shape_running is None)
+        self.assertEqual([e for e in self.h.events[removed_at:] if e["type"] == "card"], [],
+                         "no released state for a card that is gone")
+        self.assertEqual(len(self.releases), 1)
+        self.assertEqual(self.h.exports(), [])
+
+
+class RetryAndCleanupTests(unittest.TestCase):
+    """A copy started again after a failed release has names of its own: the
+    previous attempt's cleanup, deferred and asynchronous, never touches it."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="cardd-shape-retry-"))
+        self.addCleanup(lambda: ShapeExportTests.cleanup(self))
+        self.h = ShapeHarness(self.tmp, {"vdc": SEA})
+        self.deferred = []
+        self.h.manager.remove_export = self.deferred.append      # cleanup that has not run yet
+
+    def publish_then_fail_release(self, during_retry=None):
+        """Attempt 1 publishes and is held before its result reaches the loop;
+        a release cancels it and its unmount fails; attempt 2 starts while the
+        cleanup of attempt 1 is still pending. `during_retry(export)` runs at
+        attempt 2's first check."""
+        real_copy, real_check, held = cardd.ShapeExport._copy, cardd.ShapeExport.check, Gate()
+
+        def copy(export):
+            result = real_copy(export)
+            if export.final.name.endswith(".1"):
+                held.hold()                           # published; the loop not told yet
+            return result
+
+        def check(export):
+            if during_retry and export.final.name.endswith(".2") and not getattr(export, "_ran", False):
+                export._ran = True
+                during_retry(export)
+            real_check(export)
+        with patch.object(cardd.ShapeExport, "_copy", copy), patch.object(cardd.ShapeExport, "check", check):
+            self.h.manager.device_added("vdc", "NPT-game", "/dev/vdc")
+            self.h.pump(until=lambda: "preparing" in self.h.shape_states())
+            held.wait_reached(self)
+            first = self.h.exports()
+            self.h.mounter.fail_strict_unmount = True
+            replies = []
+            self.h.manager.release({"type": "release", "serial": "NPT-game"}, replies.append)
+            held.opened.set()
+            self.h.pump(until=lambda: replies and self.h.shape_states()[-1] in ("ready", "partial", "unused"))
+        self.assertEqual([r["error"]["code"] for r in replies], ["unmount_failed"])
+        return first
+
+    def test_the_retry_is_ready_beside_a_cleanup_that_has_not_run(self):
+        first = self.publish_then_fail_release()
+        record = self.h.card()["shape"]
+        self.assertEqual(record["state"], "ready")
+        self.assertEqual(sorted(self.h.exports()), sorted(first + [Path(record["path"]).name]))
+        self.assertEqual([p.name for p in self.deferred], first, "attempt 1's export awaits its cleanup")
+        for path in self.deferred:
+            cardd._remove_tree(path)                  # the late cleanup runs now
+        self.assertEqual(self.h.exports(), [Path(record["path"]).name], "only the current attempt remains")
+        self.assertEqual((Path(record["path"]) / "world" / "fish.png").read_bytes(),
+                         (SEA / "world" / "fish.png").read_bytes())
+
+    def test_a_cleanup_that_runs_during_the_retry_leaves_it_whole(self):
+        def clean_meanwhile(export):
+            workers = [threading.Thread(target=cardd._remove_tree, args=(path,)) for path in self.deferred]
+            for worker in workers:
+                worker.start()
+            for worker in workers:
+                worker.join(10)
+        self.publish_then_fail_release(during_retry=clean_meanwhile)
+        record = self.h.card()["shape"]
+        self.assertEqual(record["state"], "ready")
+        self.assertEqual(self.h.exports(), [Path(record["path"]).name])
+        files = {p.relative_to(record["path"]).as_posix() for p in Path(record["path"]).rglob("*") if p.is_file()}
+        self.assertEqual(files, {p.relative_to(SEA).as_posix() for p in SEA.rglob("*") if p.is_file()})
+
+
+class PublicationFailureTests(unittest.TestCase):
+    """A copy that fails on its way to publication leaves neither its staging
+    copy nor a result, and never touches another attempt's."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="cardd-shape-fail-"))
+        self.addCleanup(lambda: ShapeExportTests.cleanup(self))
+        self.h = ShapeHarness(self.tmp, {"vdc": SEA})
+        self.other = self.h.shape_root / "0123456789abcdef.9"     # another attempt's result
+        self.other.mkdir(parents=True)
+        (self.other / "shape.json").write_text("{}")
+
+    def run_card(self):
+        self.h.manager.device_added("vdc", "NPT-game", "/dev/vdc")
+        self.h.pump(until=self.h.settled())
+        return self.h.card()["shape"]
+
+    def assert_failed_cleanly(self, record, detail):
+        self.assertEqual((record["state"], record["notes"][0]["code"]), ("unused", "shape_export_failed"))
+        self.assertIn(detail, record["notes"][0]["detail"])
+        self.assertNotIn("path", record)
+        self.assertEqual(self.h.exports(), [self.other.name], "no .part, no result; the other attempt kept")
+        self.assertEqual((self.other / "shape.json").read_text(), "{}")
+
+    def test_sealing_fails(self):
+        real_chmod = os.chmod
+
+        def chmod(path, mode, *args, **kwargs):
+            if Path(path).name.endswith(".part") and mode == 0o550:
+                raise OSError(5, "injected failure sealing the copy")
+            return real_chmod(path, mode, *args, **kwargs)
+        with patch.object(cardd.os, "chmod", chmod):
+            self.assert_failed_cleanly(self.run_card(), "sealing")
+
+    def test_the_publishing_rename_fails(self):
+        real_rename = os.rename
+
+        def rename(source, destination, *args, **kwargs):
+            if str(source).endswith(".part"):
+                raise OSError(5, "injected failure publishing")
+            return real_rename(source, destination, *args, **kwargs)
+        with patch.object(cardd.os, "rename", rename):
+            self.assert_failed_cleanly(self.run_card(), "publishing")
+
+    def test_a_failure_after_publication_removes_that_result_only(self):
+        real_copy = cardd.ShapeExport._copy
+
+        def copy(export):
+            real_copy(export)
+            raise OSError(5, "injected failure after publication")
+        with patch.object(cardd.ShapeExport, "_copy", copy):
+            self.assert_failed_cleanly(self.run_card(), "after publication")
 
 
 if __name__ == "__main__":

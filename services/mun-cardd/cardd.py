@@ -108,6 +108,7 @@ class Card:
     releasing: bool = False      # safe removal requested: no new writes, unmount when idle
     release_reply: Optional[Callable[[dict], None]] = None
     release_timer: int = 0       # bumps per release; a deadline for an earlier one does nothing
+    release_armed: bool = False  # this release's deadline for the Shape copy is set
     # MUN Shape: the record published with the card, and this insertion's copy.
     shape: Optional[dict] = None
     export: Optional["ShapeExport"] = None
@@ -141,6 +142,7 @@ class CardManager:
         self.later = later or self._timer
         self.remove_export = remove_export or _remove_in_background
         self._shape_running: Optional["ShapeExport"] = None   # at most one copy reads a card at a time
+        self._shape_attempts = 0      # each copy's own names, so a late cleanup never meets a later copy
         self._shape_deferred: Optional[Card] = None           # a valid card waiting for that copy to end
 
     def _timer(self, seconds: float, fn: Callable[[], None]) -> None:
@@ -172,9 +174,10 @@ class CardManager:
             return
         card.generation += 1
         self._drop_shape(card)
-        if card.release_reply is not None and not card.saving:
-            # A safe release that was waiting for the Shape copy: the card went
-            # before it could finish, so this was not a safe removal.
+        if card.release_reply is not None:
+            # A safe release that was waiting (for a save or the Shape copy):
+            # the card went before it could finish, so this was not a safe
+            # removal. The waits that end later find the card gone and stop.
             reply, card.release_reply = card.release_reply, None
             card.release_timer += 1
             reply({"type": "released", "ok": False, "slot": card.slot, "serial": card.serial,
@@ -319,8 +322,7 @@ class CardManager:
             + ("ok, " + str(outcome.get("bytes")) + " bytes" if outcome.get("ok")
                else "failed: " + outcome["error"]["code"] + (" (" + outcome["error"].get("detail", "") + ")" if outcome["error"].get("detail") else "")))
         reply({"type": "saved", "session": request.get("session"), **outcome})
-        if card.releasing and card.release_reply is not None:
-            self._release_now(card)
+        self._advance_release(card)
 
     def release(self, request: dict, reply: Callable[[dict], None]) -> None:
         """Safe removal: no new writes, finish the one in flight, stop the
@@ -339,20 +341,35 @@ class CardManager:
         card.releasing = True
         card.release_reply = reply
         card.release_timer += 1
+        card.release_armed = False
         self._cancel_shape(card)
+        self._advance_release(card)
+
+    def _advance_release(self, card: Card) -> None:
+        """The one way a release proceeds, called by `release`, at the end of
+        a save and at the end of a Shape copy: the card is unmounted only
+        when no save is in flight and no Shape copy still reads it, in
+        whichever order they end. Waiting for a save needs no deadline (it
+        ends and reports); waiting for the copy arms one, once per release,
+        so the caller is answered within SHAPE_RELEASE_WAIT. Nothing here
+        blocks: each end calls back."""
+        if not card.releasing or self.cards.get(card.device) is not card:
+            return
         if card.saving:
             log(f"release of {card.slot} waits for the save in flight")
             return
         if self._shape_reading(card):
-            log(f"release of {card.slot} waits for the Shape copy to close its files")
-            token = card.release_timer
-            self.later(SHAPE_RELEASE_WAIT, lambda: self._release_overdue(card, token))
+            if not card.release_armed:
+                card.release_armed = True
+                log(f"release of {card.slot} waits for the Shape copy to close its files")
+                token = card.release_timer
+                self.later(SHAPE_RELEASE_WAIT, lambda: self._release_overdue(card, token))
             return
         self._release_now(card)
 
     def _release_overdue(self, card: Card, token: int) -> None:
         if token != card.release_timer or not card.releasing or card.release_reply is None \
-                or not self._shape_reading(card):
+                or card.saving or not self._shape_reading(card):
             return
         reply, card.release_reply = card.release_reply, None
         log(f"release of {card.slot} ({card.serial}): the Shape copy has not closed its files after "
@@ -368,7 +385,7 @@ class CardManager:
         except CardError as exc:
             # Not released: the card keeps its state and mount, writes are
             # allowed again, and the caller must not unplug. It may retry.
-            card.releasing = False
+            card.releasing, card.release_armed = False, False
             log(f"release of {card.slot} ({card.serial}) failed: {exc.detail or exc.message}; card still in use")
             if reply is not None:
                 reply({"type": "released", "ok": False, "slot": card.slot, "serial": card.serial, "error": exc.to_dict()})
@@ -467,8 +484,10 @@ class CardManager:
             self._publish_shape(card)
             log(f"shape for {card.slot} waits for the copy of insertion {running.insertion} to close its files")
             return
+        self._shape_attempts += 1
         export = ShapeExport(self.shape_root, Path(card.mount), card.info["root"], card.insertion,
-                             card.info.get("version"), card.generation, lambda: card.generation)
+                             card.info.get("version"), card.generation, lambda: card.generation,
+                             attempt=self._shape_attempts)
         card.export, self._shape_running = export, export
         self._publish_shape(card)
         export.start(lambda outcome: self.schedule(lambda: self._shape_finished(card, export, outcome)))
@@ -515,8 +534,10 @@ class CardManager:
                 card.export = None
             log(f"discarding the Shape copy of insertion {export.insertion}"
                 + (" (cancelled)" if export.cancel.is_set() else " (stale)"))
-        if card.releasing and card.export is None and not card.saving and self.cards.get(card.device) is card:
-            self._release_now(card)     # a release was waiting for this copy
+        if card.releasing:
+            self._advance_release(card)     # a release may have been waiting for this copy
+        elif not current and card.export is None and self.cards.get(card.device) is card:
+            self._start_shape(card)         # cancelled, yet the card is still in use: copy again
         deferred, self._shape_deferred = self._shape_deferred, None
         if deferred is not None and self.cards.get(deferred.device) is deferred:
             self._start_shape(deferred)
@@ -1006,24 +1027,29 @@ class ShapeExport:
     """One insertion's copy of its card's Shape package (docs/shape.md).
 
     A worker thread reads the package through the shared checker, bounded
-    and in chunks, into `.<insertion>.part/` (0700) under the root; keeps
-    only the files the checker accepted and adds the normalised
-    `shape.json`; makes files 0440 and folders 0550 (group: the shell's);
-    and publishes `<insertion>/` with one rename. Anything that fails,
-    including cancellation, ends with the staging directory deleted and
-    nothing published. `finished` is set on the manager thread when it
-    receives the outcome; `done` by the worker as its very last step."""
+    and in chunks, into `.<insertion>.<attempt>.part/` (0700) under the
+    root; keeps only the files the checker accepted and adds the normalised
+    `shape.json`; seals files 0440 and folders 0550 (group: the shell's);
+    and, as its last step, publishes `<insertion>.<attempt>/` with one
+    rename. Anything that fails, including cancellation, ends with this
+    attempt's staging copy and result deleted and nothing published.
+    `finished` is set on the manager thread when it receives the outcome;
+    `done` by the worker as its very last step."""
 
     def __init__(self, root: Path, mount: Path, content_root: str, insertion: str, version: Optional[str],
-                 generation: int, current_generation: Callable[[], int]):
+                 generation: int, current_generation: Callable[[], int], attempt: int = 1):
         self.root, self.mount, self.content_root = root, mount, content_root
         self.insertion, self.version, self.generation = insertion, version, generation
         self.current_generation = current_generation
         self.cancel = threading.Event()
         self.done = threading.Event()
         self.finished = False
-        self.staging = root / f".{insertion}.part"
-        self.final = root / insertion
+        # Names of this attempt alone: a copy started again for the same
+        # insertion (after a failed release) never meets the one before it,
+        # nor that one's cleanup, which may still be running.
+        name = f"{insertion}.{attempt}"
+        self.staging = root / f".{name}.part"
+        self.final = root / name
         self.published: Optional[Path] = None
 
     def start(self, on_done: Callable[[dict], None]) -> None:
@@ -1049,6 +1075,11 @@ class ShapeExport:
             record = {"state": "unused", "insertion": self.insertion, "version": self.version, "notes": notes}
         finally:
             _remove_tree(self.staging)
+        if record.get("path") is None and self.published is not None:
+            # Published, then failed: remove this attempt's own result, which
+            # no other attempt shares a name with.
+            _remove_tree(self.published)
+            self.published = None
         try:
             on_done({"record": record, "notes": notes, "seconds": time.monotonic() - started})
         finally:
@@ -1076,14 +1107,11 @@ class ShapeExport:
                       0o600)
         with os.fdopen(out, "wb") as handle:
             handle.write((json.dumps(document, ensure_ascii=False, allow_nan=False) + "\n").encode("utf-8"))
-        group = _shape_group()
-        _seal(self.staging, group)
+        _seal(self.staging, _shape_group())
         self.check()
+        # Publication is the last step: nothing that can fail comes after it.
         os.rename(self.staging, self.final)       # complete and immutable, or nothing
         self.published = self.final
-        os.chmod(self.final, 0o550)
-        if group is not None:
-            os.chown(self.final, -1, group)
         record.update(path=str(self.final), files=len(result.files),
                       bytes=sum(details["bytes"] for details in result.files.values()))
         return record, notes
@@ -1105,18 +1133,18 @@ def _prune(staging: Path, keep: set) -> None:
 
 
 def _seal(staging: Path, group: Optional[int]) -> None:
-    """Files 0440 and folders 0550, group the shell's; the top folder is
-    sealed after it is renamed."""
+    """Files 0440 and folders 0550, the top one included, group the shell's:
+    all before the rename that publishes it (renaming a folder within the
+    same parent needs no write permission on the folder itself)."""
     for directory, folders, files in os.walk(staging, topdown=False):
         for name in files:
             path = os.path.join(directory, name)
             os.chmod(path, 0o440)
             if group is not None:
                 os.chown(path, -1, group)
-        if directory != str(staging):
-            os.chmod(directory, 0o550)
-            if group is not None:
-                os.chown(directory, -1, group)
+        os.chmod(directory, 0o550)
+        if group is not None:
+            os.chown(directory, -1, group)
 
 
 def _remove_tree(path: Path) -> None:

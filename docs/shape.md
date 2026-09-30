@@ -317,17 +317,19 @@ The algorithm, exact so that the console and the checker agree:
 - The worker reads the package through the same checker as `mun-card`
   (`mun_card/shape.py`), which checks every file's entry, size and the
   budget before reading it; each file it reads is read once from the card,
-  in chunks of 256 KiB, into `/run/mun/shape/.<insertion>.part/`, and the
+  in chunks of 256 KiB, into `/run/mun/shape/.<insertion>.<attempt>.part/`, and the
   checker validates exactly those bytes. Links are never followed and a FIFO
   under a package name is never waited on. Cancellation and the card's
   identity are checked between chunks. The service never decodes an image
   or a sound.
 - The export holds only the files the checker accepted and the normalised
   `shape.json`, bound to the insertion and content version; files are 0440
-  and folders 0550 (group: the shell's), published with one rename as
-  `/run/mun/shape/<insertion>/`. Complete and immutable, or nothing: a copy
-  that fails, is cancelled or arrives for an insertion that is no longer
-  current is deleted, never published or kept.
+  and folders 0550 (group: the shell's), sealed before it is published,
+  as the last step, with one rename as `/run/mun/shape/<insertion>.<attempt>/`.
+  Complete and immutable, or nothing: a copy that fails, is cancelled or
+  arrives for an insertion that is no longer current is deleted, never
+  published or kept. Each attempt has names of its own, so the background
+  cleanup of an earlier one never touches a copy started again.
 - The card record gains `shape` (`preparing`, then `ready`, `partial`,
   `unused` or `none`, with its notes and, when there is an export, its
   path); a change of it travels as its own `shape` message.
@@ -336,9 +338,11 @@ The algorithm, exact so that the console and the checker agree:
 - One copy reads a card at a time: a card that becomes valid while an
   earlier copy has not closed its files (a read stuck on a card already
   removed) waits in `preparing`, valid and playable, until that copy ends.
-- ***Eject safely* stays exact.** A release cancels the copy and waits for
-  it to close its files, asynchronously and for at most 3 s. Past that (a
-  read blocked on a failing card cannot be interrupted) the answer is
+- ***Eject safely* stays exact.** A release cancels the copy; the card is
+  unmounted only once no save is in flight and the copy has closed its
+  files, whichever ends last. The wait for the copy is asynchronous and at
+  most 3 s. Past that (a read blocked on a failing card cannot be
+  interrupted) the answer is
   `card_busy`, "La tarjeta sigue en uso; no la retires", and the release
   stays pending: no new saves, games or copies, and the card is unmounted
   strictly and published as released only once the copy has closed its

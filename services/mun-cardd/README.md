@@ -75,13 +75,16 @@ the service does with it.
 - When a card becomes `valid` (after that state is published), a worker
   thread checks its `<content.root>/mun-shape/` with `mun_card.shape`,
   copying each file the checker reads once from the card, in 256 KiB
-  chunks, into `/run/mun/shape/.<insertion>.part/` (0700), and validating
-  those bytes. It keeps only the accepted files, writes the normalised
-  `shape.json` (with `insertion` and `version`), seals files 0440 and
-  folders 0550 with the group `mun-shell`, and renames the folder to
-  `/run/mun/shape/<insertion>/`. Card files are opened one component at a
-  time with `O_NOFOLLOW` and non-blocking; the event loop never reads the
-  card for this.
+  chunks, into `/run/mun/shape/.<insertion>.<attempt>.part/` (0700), and
+  validating those bytes. It keeps only the accepted files, writes the
+  normalised `shape.json` (with `insertion` and `version`), seals files
+  0440 and folders 0550 with the group `mun-shell`, and, as its last step,
+  renames the folder to `/run/mun/shape/<insertion>.<attempt>/`. Card files
+  are opened one component at a time with `O_NOFOLLOW` and non-blocking;
+  the event loop never reads the card for this. `<attempt>` counts copies
+  within the service's lifetime: a copy started again for the same
+  insertion (after a failed release) has names of its own, so the earlier
+  attempt's cleanup, which runs in the background, never touches it.
 - Record: `shape = {state, insertion, version, notes, path?, files?, bytes?}`
   with `state` ∈ `preparing | ready | partial | unused | none`, `notes`
   the checker's (`code, level, block, where, detail`, at most 32, with
@@ -92,13 +95,18 @@ the service does with it.
   generation. A result for an insertion that is no longer current, or that
   was cancelled, is deleted, never published. One copy runs at a time; a card
   that becomes valid meanwhile waits in `preparing`.
-- `release` cancels the copy and, if it is still reading, waits for it
-  without blocking the loop, for `MUN_CARDD_SHAPE_RELEASE_WAIT` seconds (3).
-  Past that it answers `released {ok: false, error: card_busy}` and the
-  release stays pending (no saves, stages or copies); when the copy closes
-  its files, the card is unmounted strictly and published as `released`, or,
-  if the unmount fails, is usable again as after any failed release. A card
-  pulled while its release waits for the copy is answered `card_removed`.
+- `release` cancels the copy, then proceeds by one path, taken again when
+  a save in flight ends and when the copy ends, in either order: the card is
+  unmounted only when no save is in flight and no copy still reads it.
+  Waiting for a save has no deadline (it ends and answers); waiting for the
+  copy has one, `MUN_CARDD_SHAPE_RELEASE_WAIT` seconds (3), armed once per
+  release, without blocking the loop. Past it the caller is answered
+  `released {ok: false, error: card_busy}` and the release stays pending
+  (no saves, stages or copies); when both have ended the card is unmounted
+  strictly and published as `released`, or, if the unmount fails, is usable
+  again as after any failed release and its copy starts again. The caller
+  is answered once. A card pulled while its release waits is answered
+  `card_removed`, and what ends later leaves it alone.
 - The export is deleted on release, removal and replacement; everything under
   `/run/mun/shape/` is deleted at start and at stop.
 - Hooks: `MUN_CARDD_SHAPE_ROOT` (default `/run/mun/shape`), and

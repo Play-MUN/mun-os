@@ -174,7 +174,7 @@ class ShellTests(unittest.TestCase):
         # samples: authoring tools add chunks (metadata, provenance) that have
         # no place in the console.
         sounds = sorted((self.SHELL / "sounds").glob("*.wav"))
-        self.assertEqual([p.stem for p in sounds], ["back", "enter", "move"])
+        self.assertEqual([p.stem for p in sounds], ["back", "enter", "move", "startup"])
         cmake = (self.SHELL / "CMakeLists.txt").read_text()
         player = (self.SHELL / "src" / "systemsounds.cpp").read_text()
         for path in sounds:
@@ -189,13 +189,56 @@ class ShellTests(unittest.TestCase):
             fmt, samples = chunks[0][1], chunks[1][1]
             tag, channels, rate = int.from_bytes(fmt[0:2], "little"), int.from_bytes(fmt[2:4], "little"), int.from_bytes(fmt[4:8], "little")
             self.assertEqual((tag, channels, rate, int.from_bytes(fmt[14:16], "little")), (1, 2, 48000, 16), path.name)
-            self.assertLessEqual(len(samples) / (48000 * 4), 1.0, f"{path.name}: a menu sound lasts under a second")
+            if path.stem == "startup":
+                self.assertLessEqual(len(samples) / (48000 * 4), 12.0, "the start-up lasts as long as the console takes")
+            else:
+                self.assertLessEqual(len(samples) / (48000 * 4), 1.0, f"{path.name}: a menu sound lasts under a second")
             self.assertIn(f"sounds/{path.name}", cmake, "compiled in")
             self.assertIn(f'"{path.stem}"', player, "loaded by the player")
         played = set(re.findall(r'sound\("([a-z]+)"\)', (self.SHELL / "qml" / "Main.qml").read_text()))
-        self.assertEqual(played, {p.stem for p in sounds}, "every sound the menus ask for exists, and every one is used")
+        self.assertEqual(played, {p.stem for p in sounds} - {"startup"}, "every sound the menus ask for exists, and every one is used")
+        boot = (self.SHELL / "qml" / "BootLayer.qml").read_text()
+        self.assertIn('SystemSounds.play("startup")', boot, "the start-up plays its sound")
+        self.assertIn("ShellSettings.systemSounds", boot, "and only with the interface sounds on")
         unit = (self.SHELL / "deploy" / "mun-shell.service").read_text()
         self.assertRegex(unit, r"(?m)^SupplementaryGroups=.*\baudio\b", "the shell may open the sound device")
+
+    def test_the_lab_display_describes_the_shells_three_modes(self):
+        # The virtual display's EDID (os/builder/lab_edid.py): what the
+        # initrd carries is the generator's output, a valid EDID 1.3 block
+        # whose detailed timings are exactly the shell's modes, 1080p first
+        # (preferred), each at 60 Hz.
+        spec = importlib.util.spec_from_file_location("lab_edid", ROOT / "os" / "builder" / "lab_edid.py")
+        lab_edid = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(lab_edid)
+        shipped = ROOT / "os/mkosi/mkosi.images/initrd/mkosi.profiles/qemu-dev/extra/usr/lib/firmware/edid/mun-lab.bin"
+        block = shipped.read_bytes()
+        self.assertEqual(block, lab_edid.edid(), "regenerate it with os/builder/lab_edid.py")
+        self.assertEqual((len(block), block[:8], sum(block) % 256), (128, bytes.fromhex("00ffffffffffff00"), 0))
+        self.assertTrue(block[24] & 0x02, "the first detailed timing is the preferred mode")
+        modes = []
+        for at in (54, 72, 90):
+            d = block[at:at + 18]
+            clock = int.from_bytes(d[0:2], "little") * 10_000
+            ha, hb = d[2] | (d[4] >> 4) << 8, d[3] | (d[4] & 0x0F) << 8
+            va, vb = d[5] | (d[7] >> 4) << 8, d[6] | (d[7] & 0x0F) << 8
+            self.assertAlmostEqual(clock / ((ha + hb) * (va + vb)), 60, delta=0.1)
+            modes.append(f"{ha}x{va}")
+        self.assertEqual(modes, ["1920x1080", "2560x1440", "1280x720"])
+        source = (self.SHELL / "src" / "displaymode.cpp").read_text()
+        offered = re.findall(r'QStringLiteral\("(\d+x\d+)"\)', source.split("kModes{", 1)[1].split("};", 1)[0])
+        self.assertEqual(sorted(modes), sorted(offered), "the lab display takes every mode the shell offers")
+        profile = (ROOT / "os/mkosi/mkosi.profiles/qemu-dev/mkosi.conf").read_text()
+        self.assertIn("drm.edid_firmware=Virtual-1:edid/mun-lab.bin", profile)
+
+    def test_the_launcher_may_open_the_display_card_and_nothing_else(self):
+        # DisplayHold (launchd.py) keeps the console's mode for a game: one
+        # device, and no capability to master a display someone else holds.
+        unit = (ROOT / "services/mun-launchd/deploy/mun-launchd.service").read_text()
+        self.assertRegex(unit, r"(?m)^DevicePolicy=closed$")
+        self.assertEqual(re.findall(r"(?m)^DeviceAllow=(.+)$", unit), ["/dev/dri/card0 rw"])
+        capabilities = re.search(r"(?m)^CapabilityBoundingSet=(.+)$", unit).group(1).split()
+        self.assertNotIn("CAP_SYS_ADMIN", capabilities)
 
     def test_every_compiled_in_font_carries_its_licence(self):
         cmake = (self.SHELL / "CMakeLists.txt").read_text()
@@ -267,6 +310,15 @@ class InputTests(unittest.TestCase):
     def test_the_image_carries_the_licences(self):
         build = (MKOSI / "mkosi.build.chroot").read_text()
         self.assertIn('"$MUN/LICENSE" "$DESTDIR/usr/share/doc/mun-os/LICENSE"', build)
+        self.assertIn('"$MUN/NOTICE" "$DESTDIR/usr/share/doc/mun-os/NOTICE"', build)
+        self.assertIn('"$MUN/NAME-AND-LOGO.txt" "$DESTDIR/usr/share/doc/mun-os/NAME-AND-LOGO.txt"', build,
+                      "the logo is not under the licence: its own terms go with the image")
+        notice = (ROOT / "NOTICE").read_text()
+        self.assertIn("Copyright 2026 Iván Moreno Mendoza", notice)
+        self.assertIn("NAME-AND-LOGO.txt", notice, "the notice points to the terms it does not cover")
+        terms = (ROOT / "NAME-AND-LOGO.txt").read_text()
+        self.assertIn("qml/Logo.js", terms)
+        self.assertIn("qml/PlayMun.js", terms, "both logos' drawings are outside the licence")
         stage = (ROOT / "services" / "mun-shell" / "deploy" / "stage.sh").read_text()
         self.assertIn('fonts/*-OFL.txt', stage, "the typefaces compiled into the shell go with their licence")
         for font in (ROOT / "services" / "mun-shell" / "fonts").glob("*.ttf"):

@@ -8,6 +8,7 @@ located explicitly rather than through PATH changes.
 
 import hashlib
 import os
+import re
 import shutil
 import struct
 import subprocess
@@ -17,6 +18,7 @@ import zlib
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from . import validate
 from .errors import CardError
 from .validate import MANIFEST_NAMES
 
@@ -175,7 +177,8 @@ def populate(staging: Path, variant: str = "valid", title: str = "MUN Test Card"
              game_binary: Optional[Path] = None, content_dir: Optional[Path] = None,
              access: Optional[str] = None, cover: Optional[Path] = None,
              accent: Optional[str] = None, background: Optional[str] = None,
-             saves: Optional[Dict[str, object]] = None, naming: str = "mun") -> None:
+             saves: Optional[Dict[str, object]] = None, naming: str = "mun",
+             card_id: Optional[str] = None, version: Optional[str] = None) -> None:
     """Write the staging tree for a variant. `staging` must be empty.
 
     `content_dir` (game-gl only) copies a data tree into content/ and
@@ -185,7 +188,9 @@ def populate(staging: Path, variant: str = "valid", title: str = "MUN Test Card"
     [presentation] table the shell tints itself with. `saves` (game-gl
     only) adds directory saves to [saves]: directory, units, checks, max_bytes
     (docs/saves.md). `naming` picks the card's names (docs/game-cards.md): "mun" writes
-    mun.toml, "earlier" writes neptune.toml, as cards made before it."""
+    mun.toml, "earlier" writes neptune.toml, as cards made before it.
+    `card_id` and `version` replace the variant's card.id and
+    content.version; they are checked by the console's own rules first."""
     if naming not in MANIFEST_NAMES:
         raise CardError("naming_unknown", f"Generación de nombres desconocida: {naming}", ", ".join(MANIFEST_NAMES))
     if variant not in VARIANTS:
@@ -314,6 +319,15 @@ def populate(staging: Path, variant: str = "valid", title: str = "MUN Test Card"
         old_saves = 'location = "saves"     # reserved for future save data; empty in v0\n'
         assert old_saves in manifest
         manifest = manifest.replace(old_saves, 'location = "saves"\n' + extra, 1)
+    if card_id is not None:
+        if not validate.ID_PATTERN.fullmatch(card_id):
+            raise CardError("id_invalid", "El identificador de la tarjeta no es válido",
+                            "3-64 caracteres: minúsculas, dígitos, punto, guion o guion bajo")
+        manifest = re.sub(r'(?m)^id = "[^"]*"$', f'id = "{card_id}"', manifest, count=1)
+    if version is not None:
+        if not validate.VERSION_PATTERN.fullmatch(version):
+            raise CardError("version_invalid", "La versión del contenido no tiene un formato válido", version)
+        manifest = re.sub(r'(?m)^version = "[^"]*"$', f'version = "{version}"', manifest, count=1)
     if accent or background:
         lines = ["", "[presentation]"]
         if accent:

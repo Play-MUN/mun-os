@@ -79,6 +79,7 @@ coverage.xml
 htmlcov/
 node_modules/
 dist/
+examples/mun-collect/mun-collect
 examples/mun-collect/tests/test_save
 examples/mun-gl-probe/mun-gl-probe
 

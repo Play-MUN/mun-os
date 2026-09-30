@@ -1,7 +1,7 @@
 # Game Cards
 
 A Game Card carries a game, its presentation and its saves. This document is
-the contract of card format v0 as MUN OS implements it: the image, the
+the contract of card format v0 as MUN™ OS implements it: the image, the
 manifest, how the console treats a card, and the two naming generations it
 reads. Saves are described in [saves.md](saves.md), what a game may do once
 started in [runtime.md](runtime.md).

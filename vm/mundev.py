@@ -33,10 +33,11 @@ import tarfile
 import tempfile
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bundle  # noqa: E402
+import sources as package_sources  # noqa: E402
 import munvm as vm  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "os" / "builder"))
 import recipes as game_recipes  # noqa: E402
@@ -48,6 +49,7 @@ CACHE_ROOT = Path(os.environ.get("MUN_CACHE_DIR", str(MUN_ROOT / "cache")))
 BUILDERS_ROOT = MUN_ROOT / "builders"
 BUILDS_ROOT = MUN_ROOT / "builds"
 BUNDLES_ROOT = MUN_ROOT / "bundles"
+SOURCES_ROOT = MUN_ROOT / "sources"
 CARD_TOOL = REPO_ROOT / "tools" / "mun-card" / "mun-card"
 GUESTS_ROOT = vm.GUESTS_ROOT
 INPUTS_FILE = REPO_ROOT / "os" / "inputs.json"
@@ -543,6 +545,14 @@ BUNDLED_CARDS = {
 }
 
 
+def licence_texts() -> Tuple[Path, ...]:
+    """The texts a download carries beside the image, as the image carries
+    them in /usr/share/doc: MUN OS's licence, its notice, the terms of the
+    MUN and Play MUN names and logos, and the typefaces' licences."""
+    return (REPO_ROOT / "LICENSE", REPO_ROOT / "NOTICE", REPO_ROOT / "NAME-AND-LOGO.txt",
+            *sorted((REPO_ROOT / "services" / "mun-shell" / "fonts").glob("*-OFL.txt")))
+
+
 def cmd_bundle(args: argparse.Namespace) -> None:
     """A downloadable bundle of a finished build (vm/bundle.py), with its cards."""
     build = BUILDS_ROOT / args.build
@@ -569,14 +579,29 @@ def cmd_bundle(args: argparse.Namespace) -> None:
             if result.returncode:
                 raise vm.LabError(f"making the {name} card failed: {(result.stderr or result.stdout).strip()}")
             cards[name] = (image, title)
-        licences = (REPO_ROOT / "LICENSE", *sorted((REPO_ROOT / "services" / "mun-shell" / "fonts").glob("*-OFL.txt")))
         try:
-            manifest = bundle.make(build, destination, cards, licences)
+            manifest = bundle.make(build, destination, cards, licence_texts())
         except bundle.BundleError as exc:
             raise vm.LabError(str(exc)) from exc
     total = sum(entry["size"] for entry in manifest["files"])
     log(f"bundle of build {args.build} ({manifest['build_id']}): {destination} "
         f"({len(manifest['files'])} files, {total / 1e6:.0f} MB); serve the directory, then `./mun get <URL>`")
+
+
+def cmd_sources(args: argparse.Namespace) -> None:
+    """The corresponding source of a build's Debian packages (vm/sources.py)."""
+    build = BUILDS_ROOT / args.build
+    if build not in builds():
+        raise vm.LabError(f"no finished build {args.build} in {BUILDS_ROOT}")
+    info = json.loads((build / "BUILD-INFO.json").read_text())
+    out = Path(args.out) if args.out else SOURCES_ROOT / info["build_id"]
+    try:
+        manifest = package_sources.collect(info, out, fetch_files=not args.list, report=log)
+    except package_sources.SourcesError as exc:
+        raise vm.LabError(f"{exc}; run the same command again to resume") from exc
+    size = sum(int(f["size"]) for s in manifest["sources"] for f in s["files"])
+    log(f"{'listed' if args.list else 'sources in'} {out}: {len(manifest['sources'])} source packages, "
+        f"{size / 1e6:.0f} MB; archive the directory and publish it beside the release (docs/releasing.md)")
 
 
 def install(source: str, name: Optional[str] = None) -> Path:
@@ -831,6 +856,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--build", required=True)
     p.add_argument("--out", help="directory to create (default .local/mun/bundles/<build>)")
     p.set_defaults(func=cmd_bundle)
+    p = sub.add_parser("sources", help="fetch the source of a build's Debian packages, to publish beside its release")
+    p.add_argument("--build", required=True)
+    p.add_argument("--out", help="directory (default .local/mun/sources/<build id>)")
+    p.add_argument("--list", action="store_true", help="only resolve and list them (SOURCES.json), fetch nothing")
+    p.set_defaults(func=cmd_sources)
     return parser
 
 

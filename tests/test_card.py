@@ -144,6 +144,21 @@ class ValidatorTests(unittest.TestCase):
             image.populate(tmp / "nogl", "game-gl")
         self.assertEqual(info.access, "copy", "no access field: the default")
 
+    def test_a_card_can_have_its_own_identifier_and_version(self):
+        # What the Game Card guide asks an author to choose; the console's own
+        # rules are applied when the card is made, not only when it is read.
+        tmp = Path(tempfile.mkdtemp(prefix="mun-id-")); self.addCleanup(shutil.rmtree, tmp, True)
+        fake = tmp / "mun-collect"; fake.write_bytes(b"\x7fELF fake"); fake.chmod(0o755)
+        staging = tmp / "mine"; staging.mkdir()
+        image.populate(staging, "game", "My Collect", game_binary=fake, card_id="org.example.mycollect", version="1.2.0")
+        info = validate_card(DirectorySource(staging))
+        self.assertEqual((info.id, info.version, info.title), ("org.example.mycollect", "1.2.0", "My Collect"))
+        for field, value, code in (("card_id", "Bad ID", "id_invalid"), ("version", "one", "version_invalid")):
+            (tmp / field).mkdir()
+            with self.assertRaises(CardError) as refused:
+                image.populate(tmp / field, "game", game_binary=fake, **{field: value})
+            self.assertEqual(refused.exception.code, code)
+
     def test_game_gl_content_directory_is_copied_and_declares_mount_access(self):
         tmp = Path(tempfile.mkdtemp(prefix="mun-glc-")); self.addCleanup(shutil.rmtree, tmp, True)
         fake = tmp / "game"; fake.write_bytes(b"\x7fELF fake"); fake.chmod(0o755)

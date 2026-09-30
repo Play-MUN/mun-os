@@ -1,6 +1,6 @@
 # Running a game
 
-What MUN OS does when the player chooses Play, and what a game on a Game
+What MUN™ OS does when the player chooses Play, and what a game on a Game
 Card may expect and must do. The card format is in
 [game-cards.md](game-cards.md), saves in [saves.md](saves.md). The launcher's
 internals (states, recovery, adoption after a restart) are in
@@ -89,12 +89,31 @@ is software rendered; it costs CPU, and a game must pace itself.
 | `MUN_RUNTIME_PROFILE` | the card's profile |
 | `MUN_CONTENT_DIR` | with `content.access = "mount"`: the content directory, read-only |
 | `MUN_SAVE_FILE`, `MUN_SAVE_SOCKET` | single-object saves ([saves.md](saves.md)); absent for a directory-save game |
+| `MUN_DISPLAY_MODE` | with `linux-arm64-gl-v0`: the display's mode as the game starts, `WIDTHxHEIGHT` (*Display*) |
 | `HOME` | the session's `work/` |
 
 For a card of the earlier naming generation (`neptune.toml`), every `MUN_`
 variable is also published, with the same value, under its `NEPTUNE_` name,
 which games on those cards were built against. A card with `mun.toml` gets
 `MUN_*` only ([game-cards.md](game-cards.md#naming-generations)).
+
+## Display
+
+The resolution the player chooses (Settings › Picture and sound ›
+Resolution) is the console's, not only the shell's: it applies at once, no
+restart, and the display stays in it when a game starts.
+
+- **`linux-arm64-gl-v0`.** The game starts with the display already in the
+  console's mode, one of the display's own modes: a game that asks for the
+  current mode (SDL's desktop mode, a fullscreen-desktop window) gets it,
+  and `MUN_DISPLAY_MODE` says it too. The launcher reads the mode while
+  the shell shows it and, once the shell has stopped, sets it again with a
+  black picture, so the display is not left to the kernel's console mode in
+  between; nobody is the display's master when the game opens the card, so
+  the game is. A game may set another of the display's modes itself.
+- **`linux-arm64-v0`.** The game draws on the kernel console's framebuffer,
+  whose size the kernel sets at boot from the display's preferred mode: it
+  gets that size (query it), not a resolution chosen afterwards.
 
 ## Content during play
 

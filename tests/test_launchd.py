@@ -900,3 +900,154 @@ class CardRecordsCliTests(unittest.TestCase):
         self.assertEqual(code, 1); self.assertFalse(reply["ok"]); self.assertEqual(reply["error"]["code"], "no_snapshot")
         code, reply = self.run_cli(Path("/tmp/npt-no-such-cardd.sock"))
         self.assertEqual(code, 1); self.assertEqual(reply["error"]["code"], "cardd_unavailable")
+
+
+class FakeDRM:
+    """A card as far as DisplayHold can tell: one connected connector on one
+    CRTC showing `mode`; its master, if any, by descriptor ("shell" for the
+    shell); the calls in order. As the kernel does, whoever opens the card
+    while nobody is master becomes master."""
+
+    def __init__(self, mode=None, connected=True, master="shell"):
+        self.mode = mode or self.modeinfo(2560, 1440)
+        self.connected, self.master, self.calls, self.fail = connected, master, [], set()
+        self.crtc_fb, self.next_fd, self.closed = 40, 9, []
+
+    @staticmethod
+    def modeinfo(width, height):
+        return launchd.struct.pack("<IHHHHHHHHHHIII32s", 241500, width, width + 48, width + 80, width + 160, 0,
+                                   height, height + 3, height + 8, height + 41, 0, 60, 0x9, 0x40, f"{width}x{height}".encode())
+
+    def open(self, path, flags):
+        fd, self.next_fd = self.next_fd, self.next_fd + 1
+        self.calls.append(f"open {fd}")
+        if self.master is None:
+            self.master = fd
+        return fd
+
+    def close(self, fd):
+        self.closed.append(fd)
+        if self.master == fd:
+            self.master = None
+
+    def __call__(self, fd, request, buffer=None, mutate=False):
+        name = {v: k for k, v in vars(launchd).items() if k.startswith("DRM_") and isinstance(v, int)}[request]
+        self.calls.append(name)
+        if name in self.fail:
+            raise OSError(22, "Invalid argument")
+        if name == "DRM_DROP_MASTER":
+            if self.master != fd:
+                raise OSError(22, "Invalid argument")
+            self.master = None
+            return 0
+        fmt = {"DRM_GETRESOURCES": launchd.DRM_RES, "DRM_GETCONNECTOR": launchd.DRM_CONNECTOR,
+               "DRM_GETENCODER": launchd.DRM_ENCODER, "DRM_GETCRTC": launchd.DRM_CRTC, "DRM_SETCRTC": launchd.DRM_CRTC,
+               "DRM_CREATE_DUMB": launchd.DRM_DUMB, "DRM_ADDFB": launchd.DRM_FB, "DRM_RMFB": "<I",
+               "DRM_DESTROY_DUMB": "<I"}[name]
+        values = list(launchd.struct.unpack(fmt, bytes(buffer)))
+        if name == "DRM_GETRESOURCES":
+            values[6] = 1
+            if values[2]:
+                launchd.ctypes.c_uint32.from_address(values[2]).value = 37
+        elif name == "DRM_GETCONNECTOR":
+            values[7], values[11] = 31, 1 if self.connected else 2
+        elif name == "DRM_GETENCODER":
+            values[2] = 36
+        elif name == "DRM_GETCRTC":
+            values[3], values[7], values[8] = self.crtc_fb, 1, self.mode
+        elif name == "DRM_SETCRTC":
+            if self.master != fd:
+                raise OSError(13, "Permission denied")     # only the master sets a mode
+            self.crtc_fb, self.mode = values[3], values[8]
+        elif name == "DRM_CREATE_DUMB":
+            values[4], values[5] = 7, values[1] * 4
+        elif name == "DRM_ADDFB":
+            values[0] = 50
+        buffer[:] = launchd.struct.pack(fmt, *values)
+        return 0
+
+
+class DisplayHoldTests(unittest.TestCase):
+    def display(self, drm):
+        return launchd.DisplayHold(ioctl=drm, opener=drm.open, closer=drm.close)
+
+    def test_the_mode_the_shell_shows_is_put_back_exactly_and_master_given_up(self):
+        drm = FakeDRM()
+        display = self.display(drm)
+        shown = display.current()
+        self.assertEqual(shown, (37, 36, drm.mode))
+        self.assertEqual(drm.master, "shell", "reading takes nothing from the shell")
+        drm.master = None                                            # the shell has stopped,
+        drm.mode, drm.crtc_fb = FakeDRM.modeinfo(1920, 1080), 41     # and the kernel's console took the display back
+        self.assertEqual(display.hold(shown), "2560x1440")
+        self.assertEqual(drm.mode, shown[2], "the exact mode, as the display listed it")
+        self.assertEqual(drm.crtc_fb, 50)
+        self.assertIsNone(drm.master, "the game must be able to become master")
+        self.assertEqual(drm.calls[-5:], ["open 10", "DRM_CREATE_DUMB", "DRM_ADDFB", "DRM_SETCRTC", "DRM_DROP_MASTER"])
+        display.release()
+        self.assertEqual(drm.calls[-2:], ["DRM_RMFB", "DRM_DESTROY_DUMB"])
+        self.assertEqual(drm.closed, [10], "the reader stays open, the holder goes")
+        self.assertIsNone(display.fb)
+
+    def test_a_failure_never_keeps_master_or_blocks_the_game(self):
+        drm = FakeDRM()
+        display = self.display(drm)
+        shown = display.current()
+        drm.master = None
+        drm.fail = {"DRM_SETCRTC"}
+        self.assertIsNone(display.hold(shown))
+        self.assertIsNone(drm.master)
+        self.assertEqual(drm.calls[-2:], ["DRM_RMFB", "DRM_DESTROY_DUMB"], "the buffer is freed")
+        without = launchd.DisplayHold(opener=lambda path, flags: (_ for _ in ()).throw(OSError(2, "No such file")))
+        self.assertIsNone(without.current())
+
+    def test_someone_else_mastering_the_display_is_left_alone(self):
+        drm = FakeDRM()
+        display = self.display(drm)
+        shown = display.current()                # the shell has not let go
+        self.assertIsNone(display.hold(shown))
+        self.assertEqual(drm.master, "shell")
+        self.assertEqual(drm.mode, shown[2])
+
+    def test_nothing_is_held_without_a_connected_display(self):
+        self.assertIsNone(self.display(FakeDRM(connected=False)).current())
+
+
+class DisplayLaunchTests(unittest.TestCase):
+    def launch(self, profile):
+        card = game_card()
+        card["info"]["profile"] = profile
+        h = Harness(card)
+        h.drm = FakeDRM()
+        h.m.display = launchd.DisplayHold(ioctl=h.drm, opener=h.drm.open, closer=h.drm.close)
+
+        def stop():
+            h.shell.log.append("stop")
+            h.drm.calls.append("shell stopped")
+            h.drm.master = None
+        h.shell.stop = stop
+        reply = h.m.launch({"slot": "c1", "serial": "NPT-game", "version": "0.1.0"})
+        h.pump()
+        return h, reply["session"]
+
+    def test_a_gl_game_finds_the_consoles_mode_and_is_told_it(self):
+        h, sid = self.launch(launchd.GL_PROFILE)
+        calls = h.drm.calls
+        self.assertLess(calls.index("DRM_GETCRTC"), calls.index("shell stopped"), "read while the shell shows it")
+        self.assertLess(calls.index("shell stopped"), calls.index("DRM_SETCRTC"), "put back once the shell is gone")
+        self.assertIsNone(h.drm.master, "left for the game")
+        self.assertEqual(h.runner.started, [sid])
+        self.assertEqual(h.m.session["display"], "2560x1440")
+        env = launchd.unit_environment(launchd.GL_PROFILE, sid, h.m.session, Path("/x") / sid)
+        self.assertEqual(env["MUN_DISPLAY_MODE"], "2560x1440")
+        h.advance(0.5)
+        h.runner.finish(sid, code=0)
+        h.advance(0.5)
+        self.assertIn("DRM_RMFB", h.drm.calls, "the black buffer goes with the session")
+        self.assertEqual(h.shell.log, ["stop", "start"])
+
+    def test_a_framebuffer_game_is_left_the_kernels_console(self):
+        h, sid = self.launch(launchd.FRAMEBUFFER_PROFILE)
+        self.assertNotIn("DRM_SETCRTC", h.drm.calls)
+        self.assertNotIn("display", h.m.session)
+        self.assertEqual(h.runner.started, [sid])

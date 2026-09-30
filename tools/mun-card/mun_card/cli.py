@@ -46,7 +46,8 @@ def cmd_create(args: argparse.Namespace) -> int:
         image.populate(staging, args.variant, args.title, Path(args.game) if args.game else None,
                        Path(args.content) if args.content else None, args.access,
                        Path(args.cover) if args.cover else None, args.accent, args.background, saves,
-                       naming="earlier" if args.earlier_names else "mun")
+                       naming="earlier" if args.earlier_names else "mun", card_id=args.card_id,
+                       version=args.version)
         info = image.create_image(destination, staging, args.size, label=f"{image.CARD_LABEL_PREFIX}")
         if args.variant == "full":
             added = image.fill_to_capacity(destination)
@@ -146,6 +147,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("name", help="card name (becomes <name>.img) or an explicit .img path")
     p.add_argument("--variant", default="valid", choices=sorted(image.VARIANTS), help="valid or a deliberate defect")
     p.add_argument("--title", default="MUN Test Card")
+    p.add_argument("--id", dest="card_id", metavar="ID", help="card.id instead of the variant's (3-64 lowercase letters, digits, '.', '-', '_'); keep it for every edition of the same game")
+    p.add_argument("--version", metavar="VERSION", help="content.version instead of 0.1.0, e.g. 1.2.0")
     p.add_argument("--game", metavar="EXECUTABLE", help="executable to embed for --variant game / game-gl")
     p.add_argument("--content", metavar="DIR", help="game-gl: data tree copied into content/ and read by the game during play (content.access = mount)")
     p.add_argument("--access", choices=("copy", "mount"), default=None, help="game-gl: content.access; --content implies mount")

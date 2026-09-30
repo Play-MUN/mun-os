@@ -32,6 +32,8 @@ TITLE_MAX_CHARS = 120
 
 _ID = re.compile(r"[a-z0-9][a-z0-9._-]{2,63}")
 _VERSION = re.compile(r"[0-9]+(\.[0-9]+){0,3}([-+][0-9A-Za-z.-]{1,32})?")
+# The same rules, for the tool that writes manifests (image.populate).
+ID_PATTERN, VERSION_PATTERN = _ID, _VERSION
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 _SEGMENT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 # [presentation] colours: the shell tints its accent and glow with them while

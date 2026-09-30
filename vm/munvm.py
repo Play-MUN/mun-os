@@ -58,9 +58,10 @@ INSTANCE = DEFAULT_INSTANCE
 # Guest sizing; development settings, not console specifications.
 VCPUS = int(os.environ.get("MUN_VM_VCPUS", "4"))
 MEMORY = os.environ.get("MUN_VM_MEMORY", "8G")
-# The display's preferred mode: fbcon and the shell's Automatic resolution use
-# it, and the shell's Resolution setting can ask virtio-gpu for another
-# (services/mun-shell/README.md, "Resolution").
+# virtio-gpu's own size, the window's before the guest sets a mode. The modes
+# the console sees come from the EDID the development image gives the virtual
+# display (os/builder/lab_edid.py), 1920x1080 preferred; an image without it
+# prefers this size.
 DISPLAY_WIDTH = int(os.environ.get("MUN_VM_DISPLAY_WIDTH", "1920"))
 DISPLAY_HEIGHT = int(os.environ.get("MUN_VM_DISPLAY_HEIGHT", "1080"))
 GUEST_HOSTNAME = f"mun-{INSTANCE}"
@@ -684,7 +685,10 @@ def cmd_start(args: argparse.Namespace) -> None:
         print(f"{HOST.label}: the guest's ARM64 processor is emulated (TCG); it runs, more slowly than with "
               "hardware acceleration")
     if args.display == "none":
-        if HOST.daemonizes:
+        # -daemonize forks QEMU after its audio backend is set up; CoreAudio
+        # (Objective-C) refuses to run in the forked child and QEMU dies. With
+        # it, QEMU starts detached instead, as on Windows.
+        if HOST.daemonizes and audio != "coreaudio":
             cmd.append("-daemonize")
             run(cmd)
         else:
@@ -713,8 +717,9 @@ def card_backend(path: Path) -> Dict[str, Any]:
 
 
 def start_in_background(cmd: List[str]) -> None:
-    """Where QEMU cannot daemonize (Windows): start it detached, then give it
-    a moment to fail on its arguments, as -daemonize would have reported."""
+    """Where QEMU cannot daemonize (Windows, or CoreAudio on macOS): start it
+    detached, then give it a moment to fail on its arguments, as -daemonize
+    would have reported."""
     process = host.start_detached(cmd, PATHS["qemu_log"])
     deadline = time.monotonic() + 3
     while time.monotonic() < deadline:

@@ -10,7 +10,8 @@ A bundle is a directory, or the same files under one URL:
                                 against it again whenever a guest is made
     card-<name>.img.xz          ready Game Cards (xz), so that playing needs
                                 no card tool
-    LICENSE, *-OFL.txt          MUN OS's licence and those of the typefaces
+    LICENSE, NOTICE, *.txt      MUN OS's licence and notice, the terms of the MUN name
+                                and logo, and the typefaces' licences
                                 compiled into MUN Shell
 
 All files sit side by side, as a release's assets do.
@@ -150,7 +151,7 @@ def check_manifest(data: Any) -> Dict[str, Any]:
             raise BundleError(f"manifest file {name}: no SHA-256")
         if kind == "image" and not name.endswith(".qcow2"):
             raise BundleError(f"manifest image {name} is not a qcow2 file")
-        if kind == "licence" and not (name == "LICENSE" or name.endswith(".txt")):
+        if kind == "licence" and not (name in ("LICENSE", "NOTICE") or name.endswith(".txt")):
             raise BundleError(f"manifest licence {name} is not a text file")
         if kind == "card":
             if not isinstance(entry.get("card"), str) or not CARD_NAME.fullmatch(entry["card"]) \

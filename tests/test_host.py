@@ -389,6 +389,26 @@ class StartTests(Fixture):
         self.assertIn("virtio-sound-pci: not found", str(failed.exception))
         self.assertIn("status 1:", str(failed.exception))
 
+    def test_coreaudio_in_the_background_starts_detached_not_daemonized(self):
+        # -daemonize forks after CoreAudio is set up and the child dies in the
+        # Objective-C runtime; seen when testing the menus' sounds.
+        started = []
+        with patch.object(vm, "HOST", MAC), patch.object(vm.host, "qemu_offers", return_value=["none", "cocoa", "coreaudio"]), \
+                patch.object(vm.host, "start_detached", side_effect=lambda cmd, log: started.append(cmd) or Started()), \
+                patch.object(vm, "run") as daemonized, patch.object(vm, "pid_alive", return_value=True), \
+                patch.object(vm.time, "sleep"), patch.object(vm.time, "monotonic", side_effect=itertools.count(0, 5)):
+            vm.cmd_start(argparse.Namespace(display="none", print_command=False, wait=0, audio="coreaudio"))
+            self.assertEqual(len(started), 1)
+            self.assertNotIn("-daemonize", started[0])
+            daemonized.assert_not_called()
+        started.clear()
+        for key in ("pidfile", "qmp", "qga"):
+            self.paths[key].unlink(missing_ok=True)
+        with patch.object(vm, "HOST", MAC), patch.object(vm.host, "qemu_offers", return_value=["none", "cocoa", "coreaudio"]), \
+                patch.object(vm, "run") as daemonized:
+            vm.cmd_start(argparse.Namespace(display="none", print_command=False, wait=0, audio="none"))
+        self.assertIn("-daemonize", daemonized.call_args[0][0], "without CoreAudio it still daemonizes")
+
     def test_a_silent_crash_is_reported_by_its_windows_status(self):
         # Windows ARM64 in CI: QEMU ended at once and wrote nothing; its
         # NTSTATUS is the only clue (0xC0000135: a library is missing).

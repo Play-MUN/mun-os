@@ -1,6 +1,9 @@
 # mun-launchd: game session supervisor. Root because it starts transient
-# systemd units as another user and stops/starts the shell; it needs no device
-# access, no mounts and no network, and touches only /run/mun.
+# systemd units as another user and stops/starts the shell; it needs no mounts
+# and no network, touches only /run/mun, and opens one device: the display's
+# card, to keep the console's mode from the shell to a game (DisplayHold in
+# launchd.py). No capability comes with it: the first to open a card nobody
+# is master of becomes master.
 [Unit]
 Description=MUN game launcher (Game Card session supervisor)
 Documentation=file:///opt/mun/launchd/README.md
@@ -25,7 +28,10 @@ NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
-PrivateDevices=yes
+# Every device closed but the display's card (in place of PrivateDevices=, which
+# would hide it).
+DevicePolicy=closed
+DeviceAllow=/dev/dri/card0 rw
 PrivateNetwork=yes
 ReadWritePaths=/run/mun
 RestrictAddressFamilies=AF_UNIX

@@ -13,8 +13,8 @@ Report it privately, not in a public issue:
 
 Say what is affected (a commit or a preview release, and `BUILD-INFO.json`'s
 `build_id` if an image is involved), how to reproduce it, and what it lets
-someone do. The maintainer answers and keeps you informed; a fix is made on
-`main` and in the next preview release. Please give that time before telling
+someone do. The maintainer answers and keeps you informed; a fix lands on
+`dev`, then on `main` and in the next preview release. Please give that time before telling
 anyone else, and say whether you want to be credited.
 
 ## What is in scope
@@ -39,4 +39,4 @@ to insert.
 
 ## Supported versions
 
-Only the latest preview release and `main`. Earlier previews get no fixes.
+Only the latest preview release, `main` and `dev`. Earlier previews get no fixes.

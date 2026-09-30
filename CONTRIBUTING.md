@@ -10,10 +10,11 @@ must keep are in [docs/](docs/README.md).
 ## Who decides
 
 MUN OS is founded and maintained by Iván Moreno Mendoza (Play MUN). The
-maintainer reviews pull requests and decides what goes into the official
-version, `main` and its releases; a fork may of course go its own way
-([licensing](docs/licensing.md#the-mun-and-play-mun-names-and-logos) says how it may name
-itself).
+maintainer reviews pull requests and decides what goes into `dev` and, from
+it, into the official version, `main` and its releases; a fork may of
+course go its own way
+([licensing](docs/licensing.md#the-mun-and-play-mun-names-and-logos) says
+how it may name itself).
 
 ## Before you start
 
@@ -74,16 +75,21 @@ is described in the pull request with the commands used.
 
 ## Branches, commits and pull requests
 
-- Fork the repository, or, with write access, work on a short-lived branch
-  from `main`: `feat/…`, `fix/…`, `docs/…`, `chore/…`. There is no long-lived
-  development branch; releases are tags on tested commits of `main`.
+- `dev` is where the work lands first. Fork the repository, or, with write
+  access, work on a short-lived branch from `dev`: `feat/…`, `fix/…`,
+  `docs/…`, `chore/…`.
+- `main` holds what is released: it receives `dev` through a pull request,
+  merged with a merge commit so that both keep one history, when a preview
+  is prepared, and releases are tags on tested commits of `main`. Changes
+  reach either branch only through pull requests with the checks green.
 - Use [Conventional Commits](https://www.conventionalcommits.org/) and your
   own name and e-mail in Git: your contribution stays yours.
 - Sign off every commit (`git commit -s`, below).
 - Inspect `git diff --cached` before committing, and do not rewrite history
   others have.
-- Open the pull request against `main`, fill in its template and keep it
-  focused; ordinary pull requests are squashed when merged.
+- Open the pull request against `dev` (GitHub proposes `main`, the branch
+  players get: change the base), fill in its template and keep it focused;
+  pull requests into `dev` are squashed when merged.
 
 ## Rights and sign-off
 

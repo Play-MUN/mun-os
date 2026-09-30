@@ -12,8 +12,9 @@ hardware and a release that is not a preview.
 
 ## 1. The commit
 
-On `main`, with the pull-request checks green and `make check` passing
-locally. Note its full hash; the tag goes on it at the end.
+`dev` merged into `main` through a pull request (a merge commit), with its
+checks green and `make check` passing locally. Note the full hash of the
+resulting commit on `main`; the tag goes on it at the end.
 
 ## 2. The image, from that commit
 

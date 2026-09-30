@@ -639,6 +639,14 @@ def qemu_command(display: str, audio: Optional[str] = None, ports: Optional[Dict
     return cmd
 
 
+def check_qemu() -> None:
+    """What this QEMU cannot do here, said before starting it."""
+    try:
+        host.check_qemu_build(HOST, which("qemu-system-aarch64"))
+    except host.HostError as exc:
+        raise LabError(str(exc)) from exc
+
+
 def check_sound_device(audio: Optional[str]) -> None:
     if audio in (None, "off"):
         return
@@ -663,6 +671,7 @@ def cmd_start(args: argparse.Namespace) -> None:
     if args.print_command:
         print(" ".join(repr(part) if " " in part or "{" in part else part for part in cmd))
         return
+    check_qemu()
     check_sound_device(audio)
     for stale in (PATHS["qmp"], PATHS["qga"], PATHS["pidfile"], PATHS["control"]):
         if stale.exists():

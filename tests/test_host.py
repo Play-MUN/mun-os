@@ -206,6 +206,48 @@ class ProgramTests(Fixture):
             with self.assertRaises(host.HostError):
                 host.find_program(LINUX_PC, "qemu-img", {"ProgramFiles": str(root)})
 
+    def test_windows_arm64_also_looks_where_msys2_puts_its_arm64_qemu(self):
+        drive = self.temporary()
+        msys2 = drive / "msys64" / "clangarm64" / "bin"
+        msys2.mkdir(parents=True)
+        (msys2 / "qemu-system-aarch64.exe").touch()
+        with patch.object(host.shutil, "which", return_value=None):
+            self.assertEqual(host.find_program(WINDOWS_ARM, "qemu-system-aarch64", {"SystemDrive": str(drive)}),
+                             str(msys2 / "qemu-system-aarch64.exe"))
+            with self.assertRaises(host.HostError, msg="an x86_64 computer keeps QEMU for Windows"):
+                host.find_program(WINDOWS, "qemu-system-aarch64", {"SystemDrive": str(drive)})
+
+    @staticmethod
+    def program(path, machine):
+        # The smallest PE header: "MZ", the offset of "PE\0\0" at 0x3C, then
+        # the Machine field.
+        head = bytearray(0x80)
+        head[:2] = b"MZ"
+        head[0x3C:0x40] = (0x40).to_bytes(4, "little")
+        head[0x40:0x44] = b"PE\0\0"
+        head[0x44:0x46] = machine.to_bytes(2, "little")
+        path.write_bytes(bytes(head))
+        return str(path)
+
+    def test_a_windows_program_says_which_processor_it_is_built_for(self):
+        root = self.temporary()
+        self.assertEqual(host.program_machine(self.program(root / "x64.exe", 0x8664)), "x86_64")
+        self.assertEqual(host.program_machine(self.program(root / "arm.exe", 0xAA64)), "arm64")
+        (root / "script").write_text("#!/bin/sh\n")
+        self.assertIsNone(host.program_machine(str(root / "script")))
+        self.assertIsNone(host.program_machine(str(root / "missing.exe")))
+
+    def test_the_x86_64_qemu_is_refused_on_windows_arm64_with_what_to_install(self):
+        # The second CI run: that build ended at once with 0xC00000FF there.
+        root = self.temporary()
+        intel, arm = self.program(root / "intel.exe", 0x8664), self.program(root / "arm.exe", 0xAA64)
+        with self.assertRaises(host.HostError) as refused:
+            host.check_qemu_build(WINDOWS_ARM, intel)
+        self.assertIn("mingw-w64-clang-aarch64-qemu", str(refused.exception))
+        host.check_qemu_build(WINDOWS_ARM, arm)
+        host.check_qemu_build(WINDOWS, intel)
+        host.check_qemu_build(MAC, "/opt/homebrew/bin/qemu-system-aarch64")
+
 
 class ProcessAndLockTests(Fixture):
     @unittest.skipIf(sys.platform == "win32", "POSIX liveness")

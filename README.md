@@ -51,7 +51,8 @@ processor (QEMU's TCG): the same console, slower.
 | macOS, Apple Silicon | Virtualized (HVF) | Tested on macOS 27 |
 | Linux, ARM64 with KVM | Virtualized (KVM) | Not yet tested |
 | Linux, ARM64 without KVM, or x86_64 | Emulated | Tested only in Ubuntu 24.04 virtual machines, not on a Linux computer |
-| Windows 11, x86_64 or ARM64 | Emulated | Not yet tested |
+| Windows, x86_64 | Emulated | Tested only in GitHub's Windows Server 2025 virtual machines, not on a Windows computer |
+| Windows 11, ARM64 | Emulated | Not yet tested (needs MSYS2's ARM64 build of QEMU) |
 
 ## Requirements
 
@@ -66,9 +67,15 @@ compiler or card tool: a downloaded image comes with its Game Cards.
   qemu-efi-aarch64 python3`, and `qemu-system-gui` for the window. Other
   distributions package the same programs; the firmware is usually called
   AAVMF or edk2-aarch64.
-- Windows: QEMU for Windows (its installer puts the firmware next to
-  `qemu-system-aarch64.exe`; the tools also look in `C:\Program Files\qemu`)
-  and Python from python.org; run the tools as `py mun …`.
+- Windows on an x86_64 computer: QEMU for Windows (its installer puts the
+  firmware next to `qemu-system-aarch64.exe`; the tools also look in
+  `C:\Program Files\qemu`) and Python from python.org; run the tools as
+  `py mun …`.
+- Windows on an ARM64 computer: QEMU for Windows is built for x86_64 and
+  cannot run the console there; use MSYS2's ARM64 build (`pacman -S
+  mingw-w64-clang-aarch64-qemu mingw-w64-clang-aarch64-qemu-image-util` in
+  its CLANGARM64 environment; the tools also look in
+  `C:\msys64\clangarm64\bin`), and Python from python.org.
 
 ### To build an image
 

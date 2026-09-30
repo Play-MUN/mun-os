@@ -148,19 +148,55 @@ def machine_arguments(accel: str) -> List[str]:
 
 def find_program(host: Host, name: str, environ: Optional[Dict[str, str]] = None) -> str:
     """A QEMU program (or any tool) on PATH; on Windows also QEMU's default
-    installation directory, which its installer does not add to PATH."""
+    installation directory, which its installer does not add to PATH, and on
+    an ARM64 computer MSYS2's CLANGARM64 one (the ARM64 build, check_qemu_build)."""
     environ = os.environ if environ is None else environ
     found = shutil.which(name)
     if found:
         return found
     if host.system == "windows":
         directories = [Path(environ["MUN_QEMU_DIR"])] if environ.get("MUN_QEMU_DIR") else []
+        if host.machine == "arm64":
+            directories.append(Path(environ.get("SystemDrive", "C:") + "/") / "msys64" / "clangarm64" / "bin")
         directories += [Path(environ[key]) / "qemu" for key in ("ProgramFiles", "ProgramW6432") if environ.get(key)]
         for directory in directories:
             candidate = directory / f"{name}.exe"
             if candidate.is_file():
                 return str(candidate)
     raise HostError(f"required program not found: {name}")
+
+
+# The processor a Windows program is built for, by its PE header's Machine.
+PE_MACHINES = {0x8664: "x86_64", 0xAA64: "arm64", 0x014C: "x86"}
+
+
+def program_machine(path: str) -> Optional[str]:
+    """The processor the Windows program `path` is built for, from its PE
+    header; None for anything else or a file that cannot be read."""
+    try:
+        with open(path, "rb") as program:
+            head = program.read(4096)
+    except OSError:
+        return None
+    if len(head) < 0x40 or head[:2] != b"MZ":
+        return None
+    offset = int.from_bytes(head[0x3C:0x40], "little")
+    if offset + 6 > len(head) or head[offset:offset + 4] != b"PE\0\0":
+        return None
+    return PE_MACHINES.get(int.from_bytes(head[offset + 4:offset + 6], "little"))
+
+
+def check_qemu_build(host: Host, qemu: str) -> None:
+    """On an ARM64 Windows computer, QEMU's x86_64 build (the QEMU for
+    Windows installer's) runs under Windows' emulation only as far as
+    --version: a guest ends at once with 0xC00000FF (STATUS_BAD_FUNCTION_TABLE),
+    the code QEMU generates at run time being x86_64 code the emulation cannot
+    unwind. Say so before trying, and what to install instead."""
+    if host.system == "windows" and host.machine == "arm64" and program_machine(qemu) == "x86_64":
+        raise HostError(f"{qemu} is QEMU's x86_64 build, which cannot run the console on an ARM64 computer "
+                        "(under Windows' emulation it ends with 0xC00000FF); install the ARM64 build from MSYS2 "
+                        "(CLANGARM64: mingw-w64-clang-aarch64-qemu and mingw-w64-clang-aarch64-qemu-image-util) "
+                        "and put its clangarm64\\bin first on PATH")
 
 
 def qemu_version(qemu: str) -> Tuple[int, int, int]:

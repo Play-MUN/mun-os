@@ -289,23 +289,33 @@ layers, then still, then colours only), never at the expense of navigation.
 
 In a virtual machine, not on a console's hardware: MUN OS's development
 image under QEMU with HVF on an ARM64 Mac, 4 vCPUs, 8 GiB, the software
-renderer. Each value covers one shell, the same sample world (the `sea`
-package; a second, private package with a world of the same size gave the
-same figures within 2 points), navigated with one key every 300 ms for 30 s.
+renderer. Each value covers one shell and the same sample world (the `sea`
+package; a second, private package with a world of the same size gave
+figures within 8 points), navigated with one key every 300 ms for 30 s; at
+1440p, two runs.
 
 | | 1080p, no card | 1080p, world | 1440p, no card | 1440p, world |
 | --- | --- | --- | --- | --- |
-| CPU, one core's share, at rest on Home | 8.5 % | 37 % | 16.5 % | 54 % |
-| CPU while navigating | 48 % | 69 % | 80 % | 117 % |
-| Key to frame on screen, median / 95th percentile | 21 / 40 ms | 23 / 37 ms | 28 / 48 ms | 32 / 52 ms |
-| The interface's frames while navigating, 95th percentile | 14 ms | 14 ms | 17 ms | 20 ms |
-| The world's frames per second (rate 20) / paint time, median | – | 17.5–19.4 / 9–14 ms | – | 17.6–19.4 / 13–18 ms |
-| A transition's frames, 95th percentile | – | 20–25 ms | – | 21–34 ms |
-| Memory the world adds, peak (the shell's, over its own without a card) | – | 68–78 MB | – | 115–150 MB (the higher after a second card, whose predecessor's freed memory the process keeps) |
+| CPU, one core's share, at rest on Home | 7.5 % | 35 % | 14–15 % | 57–58 % |
+| CPU while navigating | 51 % | 72 % | 81–84 % | 120–121 % |
+| Key to frame on screen, median / 95th percentile | 20 / 39 ms | 22 / 37 ms | 28 / 47–49 ms | 33 / 50 ms |
+| The interface's frames while navigating, 95th percentile | 14 ms | 13 ms | 17 ms | 20 ms |
+| The world's frames per second (rate 20) / paint time, median | – | 18.5–19.5 / 9–13 ms | – | 18.5–19.6 / 15–18 ms |
+| A transition's frames, 95th percentile | – | 19–24 ms | – | 18–52 ms |
+| Memory the world adds, peak (the shell's, over its own without a card) | – | 73 MB | – | 111 MB (154–163 MB after a second card, whose predecessor's freed memory the process keeps) |
 
-The full level of detail holds at both sizes: navigation stays within 10 ms
-of the console without a card, and memory within the budget. The estimate
-before decoding was 82–84 MiB at 1080p and 133–135 MiB at 1440p.
+At 1080p the full level of detail holds: navigation stays within 10 ms of
+the console without a card, and memory within the budget. At 1440p the
+virtual machine is at the watchdog's edge: in one of the two runs the world
+stepped down once while navigating with the private package, to the level
+without light textures, after two windows whose slowest frames took up to
+34 ms (the card object's layers repainting on the interface thread; even
+without a card, one window reached 30 ms); in the other run it held the
+full level. Light textures are most of a world's paint time: without them,
+about 1.5 ms instead of 13 ms at 1440p. The estimate before decoding was
+81–83 MiB at 1080p and 137–139 MiB at 1440p; the behaviour regressions
+measure the shell's own peak against the estimate, for the samples and for
+worlds that keep every limit but scale large.
 
 ## When something is wrong
 

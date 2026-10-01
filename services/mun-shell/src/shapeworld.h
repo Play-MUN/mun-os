@@ -17,15 +17,23 @@
 // from its header first and Qt's allocation limit in force, and scaled once
 // to the display's device pixels (the backdrop to cover the canvas, a layer
 // to the canvas's height, a light texture over the canvas, a sprite by its
-// emitter's scale); the decoded source is freed at once. What a world would
-// take is estimated from the headers before anything is decoded, and the
-// richest detail level that fits the display's budget is chosen:
+// emitter's scale); only what can show is made (the backdrop's part the
+// canvas shows, a layer's band of rows that show, a light texture's part that
+// shows), and the decoded source is freed at once. What a world would take at
+// its peak is estimated from the headers before anything is decoded (the
+// frames and a frame's worth of Qt's copies, the export, what the level keeps,
+// and the one image being prepared, decoded and converted), and the richest
+// detail level that fits the display's budget is chosen:
 //   0 full; 1 without light textures; 2 the backdrop and the nearest layer
-//   at 10 frames per second; 3 still (composed once); 4 none (the palette
-//   alone, over MUN's world).
-// stepDown() lowers the level for the rest of the world (the watchdog). An
-// image that fails to decode drops the whole world (docs/shape.md: a block is
-// taken or dropped whole), and `failed` says so.
+//   at 10 frames per second; 3 still: the backdrop and the nearest layer,
+//   composed once onto the backdrop; 4 none (the palette alone, over MUN's
+//   world).
+// Each image is then checked against what the level has left before its
+// memory is taken; a level that would go over is given up first, and the next
+// one tried. stepDown() lowers the level for the rest of the world (the
+// watchdog); it only frees memory. An image that fails to decode drops the
+// whole world (docs/shape.md: a block is taken or dropped whole), and
+// `failed` says so.
 //
 // Thread contract: properties on the GUI thread; the painter's thread owns the
 // prepared images; the two frames are handed over under a mutex, and a frame

@@ -261,17 +261,24 @@ code (`src/shape.*`, `src/shapeworld.*`, `src/shapefront.h`):
   checker's algorithm). A lent or read accent becomes the focus only if it
   keeps 3:1 on MUN's plate. These only tint MUN, at once.
 - **The world, navigation first**:
-  - It is decoded and scaled once to the display's device pixels, and
-    painted on a thread of its own into two frames that take turns. The
-    GUI thread only shows the finished one; a frame never waits for
-    another.
+  - It is decoded and scaled once to the display's device pixels, only
+    what can show (the backdrop's part the canvas shows, a layer's band of
+    rows that show, a light texture's part that shows), and painted on a
+    thread of its own into two frames that take turns. The GUI thread only
+    shows the finished one; a frame never waits for another.
   - It moves at the package's rate (10 or 20 frames per second), its
     transitions' front at 30. A still world (*Reduce motion*) or one at rest
     draws nothing more.
   - Its detail level is chosen from the images' headers against the
-    display's budget (136 MiB at 1080p, 200 MiB at 1440p): full; without
-    light textures; the backdrop and the nearest layer at 10 frames per
-    second; still; none.
+    display's budget (136 MiB at 1080p, 200 MiB at 1440p), counting its
+    peak: the frames and one frame more for a copy Qt may make of one, the
+    export, what the level keeps, and the largest image being prepared,
+    decoded in the format its header gives and converted. Levels: full;
+    without light textures; the backdrop and the nearest layer at 10 frames
+    per second; still (those two, composed once onto the backdrop); none.
+    Each image is checked against what the level has left before its memory
+    is taken; a level that would go over is given up for the next one first.
+    `tests/behaviour.py` measures the shell's own peak against the estimate.
   - `FrameWatch` (`src/framewatch.*`) steps it down one level when
     navigation suffers for two 2-second windows in a row (95th percentile of
     the interface's frames over 25 ms, or keys taking over 50 ms to show);
@@ -313,6 +320,11 @@ code (`src/shape.*`, `src/shapeworld.*`, `src/shapefront.h`):
     another card, a changed choice, a result that waits;
   - the world alone: its detail, its frames in motion, still and at rest,
     its steps down, a world that does not decode;
+  - the world's memory at 1080p and 1440p, the shell's own peak measured
+    against the estimate: layers and a backdrop that scale large, 16-bit
+    and palette images, a sample stepped down to still (composed in place);
+    and how the extreme ones look (covered to the edges, the backdrop's
+    middle);
   - the shell's own `Main.qml` against the stand-ins: an arrival's tide, a
     dialog that makes it wait, a return under a dialog, a removal mid-tide,
     *Eject safely* confirmed and refused, another card, Reduce motion,

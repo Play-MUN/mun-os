@@ -5,6 +5,7 @@
 
 #include <QElapsedTimer>
 #include <QFile>
+#include <QHash>
 #include <QImageReader>
 #include <QLinearGradient>
 #include <QMutexLocker>
@@ -21,6 +22,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <numeric>
 #include <random>
 #include <vector>
 
@@ -30,7 +32,6 @@ constexpr qreal kTau = 6.283185307179586;
 constexpr int kLayerMaxSide = 2048;   // backdrop, layer, light texture (docs/shape.md, "Files")
 constexpr int kSpriteMaxSide = 256;
 constexpr qint64 kMiB = 1024 * 1024;
-constexpr qint64 kDecodeScratch = 16 * kMiB;   // one image decoded at a time, at most this
 const QRegularExpression kPackagePath(QStringLiteral("^[A-Za-z0-9][A-Za-z0-9._-]{0,127}(/[A-Za-z0-9][A-Za-z0-9._-]{0,127})*$"));
 
 // The display's budget for everything a world adds (docs/shape.md,
@@ -51,31 +52,112 @@ QString packagePath(const QString &root, const QVariant &value)
     return !root.isEmpty() && kPackagePath.match(relative).hasMatch() ? root + QLatin1Char('/') + relative : QString();
 }
 
-QSize headerSize(const QString &path)
+// What a PNG's header says: its size and the format Qt decodes it to.
+struct Header {
+    QSize size;
+    QImage::Format format = QImage::Format_Invalid;
+};
+
+Header headerOf(const QString &path)
 {
     QImageReader reader(path, "png");
-    return reader.size();
+    return {reader.size(), reader.imageFormat()};
 }
 
-// Decodes a package image, its dimensions checked from its header first and
-// Qt's allocation limit in force (set once by Shape); null on any failure.
-QImage decodeImage(const QString &path, int maxSide, QString *why)
+// The bytes a QImage of `size` takes in `format` (its lines padded to 32 bits).
+qint64 imageBytes(const QSize &size, QImage::Format format)
 {
-    QFile file(path);
-    if (path.isEmpty() || !file.open(QIODevice::ReadOnly)) {
-        *why = QStringLiteral("cannot be read");
-        return {};
-    }
-    QImageReader reader(&file, "png");
-    const QSize size = reader.size();
-    if (!size.isValid() || size.width() < 1 || size.height() < 1 || size.width() > maxSide || size.height() > maxSide) {
-        *why = QStringLiteral("is not a PNG within %1x%1").arg(maxSide);
-        return {};
-    }
-    QImage image = reader.read();
-    if (image.isNull())
-        *why = QStringLiteral("could not be decoded (%1)").arg(reader.errorString());
-    return image;
+    const qint64 bits = QImage::toPixelFormat(format).bitsPerPixel();
+    return (qint64(size.width()) * bits + 31) / 32 * 4 * size.height();
+}
+
+// What decoding an image takes while it is used: its decoded pixels, and the
+// copy made of them for the premultiplied (or, for a backdrop, opaque) form
+// it is scaled from, unless that conversion can be done in place (formats of
+// 32 bits per pixel). A format the header does not tell is counted as the
+// largest, 64 bits per pixel, and its copy.
+qint64 scratchFor(const Header &header)
+{
+    if (!header.size.isValid())
+        return 0;
+    if (header.format == QImage::Format_Invalid)
+        return imageBytes(header.size, QImage::Format_RGBA64) + imageBytes(header.size, QImage::Format_ARGB32);
+    const qint64 decoded = imageBytes(header.size, header.format);
+    const bool inPlace = QImage::toPixelFormat(header.format).bitsPerPixel() == 32;
+    return decoded + (inPlace ? 0 : imageBytes(header.size, QImage::Format_ARGB32_Premultiplied));
+}
+
+// `image` in `format`, converted in place where Qt can (the same depth), the
+// decoded copy dropped at once where it cannot.
+QImage converted(QImage &&image, QImage::Format format)
+{
+    if (image.format() == format)
+        return std::move(image);
+    QImage result = std::move(image).convertToFormat(format);
+    image = QImage();
+    return result;
+}
+
+// What a sprite takes once prepared, in its three sizes and their mirrors
+// (as WorldPainter::load makes them).
+qint64 spriteBytes(const QSize &size, qreal scale)
+{
+    qint64 total = 0;
+    for (const qreal s : {0.8, 1.0, 1.2})
+        total += 2 * imageBytes(QSize(std::max(1, int(std::lround(size.width() * scale * s))),
+                                      std::max(1, int(std::lround(size.height() * scale * s)))),
+                                QImage::Format_ARGB32_Premultiplied);
+    return total;
+}
+
+// A layer's width once scaled to the device's height, keeping its proportions.
+int layerWidth(const QSize &size, int height)
+{
+    return std::max(1, int(std::lround(size.width() * qreal(height) / size.height())));
+}
+
+// A light texture's size: over the canvas, 6 % larger when it sways (so its
+// edges never show as it moves).
+QSize lightSize(const QSize &device, const QString &motion)
+{
+    const qreal grow = motion == QLatin1String("sway") ? 1.06 : 1.0;
+    return QSize(int(std::lround(device.width() * grow)), int(std::lround(device.height() * grow)));
+}
+
+// The span [from, to) of `extent` source pixels to scale, from the part that
+// shows ([first, last]) with one pixel more either side (scaling reads a
+// pixel's neighbours), widened to whole multiples of `extent / gcd(extent,
+// scaled)`: there the part scales to exactly the pixels the whole image would
+// (a whole number of output pixels, sampled from the same source positions),
+// so preparing only what shows changes nothing that is drawn.
+std::pair<int, int> spanToScale(int first, int last, int extent, int scaled)
+{
+    const int step = extent / std::gcd(extent, scaled);
+    const int from = std::max(0, first - 1) / step * step;
+    const int to = std::min(extent, (std::min(extent, last + 2) + step - 1) / step * step);
+    return {from, to};
+}
+
+// The leftward offset, in canvas pixels, of a layer moving by `motion` at
+// world time `t`, leaning with navigation by `parallax` times its depth.
+qreal layerOffset(const QString &motion, qreal speed, qreal depth, qreal t, qreal parallax)
+{
+    qreal offset = parallax * depth;
+    if (motion == QLatin1String("drift"))
+        offset -= t * speed;
+    else if (motion == QLatin1String("sway"))
+        offset += std::sin(t * kTau / 14) * std::max<qreal>(16, speed);
+    return offset;
+}
+
+// The device column where the repeats of a layer `width` wide start: at or
+// left of 0, so that repeats every `width` cover the canvas.
+int firstRepeat(qreal offset, qreal scale, int width)
+{
+    int x = int(std::lround(offset * scale) % width);
+    if (x > 0)
+        x -= width;
+    return x;
 }
 
 // The rows [first, last] of `image` that show anything; an empty pair when none.
@@ -121,8 +203,9 @@ QRect shownRect(const QImage &image)
 }
 
 struct Layer {
-    QImage image;   // premultiplied, at the device's height, only the rows that show
+    QImage image;   // premultiplied, at the device's height, the band of rows that show
     int top = 0;    // device row of its first row
+    QRect shown;    // its part that shows anything: all that is painted
     QString motion;
     qreal speed = 0;   // canvas px/s
     qreal depth = 0.5;
@@ -130,8 +213,9 @@ struct Layer {
 };
 
 struct Light {
-    QImage image;   // premultiplied, over the canvas (a little larger, for sway), cropped
-    QPoint at;      // where the crop goes, device pixels, relative to the canvas's corner
+    QImage image;   // premultiplied, its part of the texture over the canvas (a little larger, for sway)
+    QPoint at;      // where the image's corner goes, device pixels, relative to the canvas's corner
+    QRect shown;    // its part that shows anything: all that is painted
     QPainter::CompositionMode mode = QPainter::CompositionMode_Screen;
     QString motion;
     qreal opacity = 0.5;
@@ -173,9 +257,16 @@ private:
     void tick();
     void schedule();
     bool moving(const ShapeWorld::Params &p) const;
-    qint64 estimateFor(int detail) const;
-    bool load(int detail, QString *why);
+    Header header(const QVariant &name);
+    qint64 frameBytes() const { return imageBytes(m_device, QImage::Format_RGB32); }
+    qint64 fixedBytes() const;
+    qint64 estimateFor(int detail);
+    bool take(qint64 bytes, const QString &what, QString *why, bool *over);
+    QImage decode(const QVariant &name, int maxSide, const QString &what, qint64 *scratch, QString *why, bool *over);
+    bool load(int detail, QString *why, bool *over);
+    void clearPrepared();
     void freeAbove(int detail);
+    void paintStillLayer(const QVariantMap &spec, QImage source);
     void composeStill();
     void paintContent(QImage &target, qreal t, qreal parallax) const;
     void paintLayers(QPainter &painter, qreal t, qreal parallax) const;
@@ -192,6 +283,9 @@ private:
     qreal m_scale = 1;   // device pixels per canvas pixel
     int m_detail = 4;
     int m_rate = 10;
+    qint64 m_budget = 0;
+    QHash<QString, Header> m_headers;   // this world's, read once
+    qint64 m_left = 0;   // while preparing: what the level may still take
 
     QImage m_backdrop;   // RGB32, the device's size
     std::vector<Layer> m_layers;
@@ -213,37 +307,126 @@ private:
     QElapsedTimer m_tickStart;   // when the tick being painted began: the next is due a period after it
 };
 
-qint64 WorldPainter::estimateFor(int detail) const
+qint64 WorldPainter::fixedBytes() const
 {
-    // From the headers only: what the level holds once prepared, plus two
-    // frames, the transition's content, one decode and the export.
-    const qint64 full = qint64(m_device.width()) * m_device.height() * 4;
-    qint64 total = 3 * full + kDecodeScratch + m_world.value(QStringLiteral("bytes")).toLongLong();
+    // The two frames, the transition's content and one frame more for a copy
+    // Qt may make of a frame (one made again in the other format as the world
+    // turns opaque or not, or a texture that keeps a copy of its own); and
+    // the export, held in the runtime directory's memory.
+    return 4 * frameBytes() + m_world.value(QStringLiteral("bytes")).toLongLong();
+}
+
+Header WorldPainter::header(const QVariant &name)
+{
+    const QString path = packagePath(m_root, name);
+    if (path.isEmpty())
+        return {};
+    auto it = m_headers.constFind(path);
+    if (it == m_headers.constEnd())
+        it = m_headers.insert(path, headerOf(path));
+    return *it;
+}
+
+// A level at its peak, from the headers only (docs/shape.md, "Fits the
+// display"), counted as load() takes it: the fixed part; what the level keeps
+// (the backdrop at the device's size; each layer at the device's height, as
+// wide as it scales to and at most that tall; each sprite in its three sizes
+// and their mirrors; each light texture over the canvas); and, on top of all
+// of it, the largest one image's decoding while it is prepared (scratchFor).
+// Still (3) keeps the backdrop alone: the nearest layer is painted onto it
+// straight from its decoded image.
+qint64 WorldPainter::estimateFor(int detail)
+{
     if (detail >= 4)
         return 0;
-    total += full;   // the backdrop (the composed world, when still)
-    if (detail == 3)
-        return total;
+    const int height = m_device.height();
+    qint64 kept = fixedBytes() + frameBytes();
+    qint64 scratch = 0;
+    const QVariantMap backdrop = m_world.value(QStringLiteral("backdrop")).toMap();
+    if (backdrop.contains(QStringLiteral("image")))
+        scratch = scratchFor(header(backdrop.value(QStringLiteral("image"))));
     const QVariantList layers = m_world.value(QStringLiteral("layers")).toList();
     for (int i = 0; i < layers.size(); ++i) {
-        if (detail == 2 && i != layers.size() - 1)
+        if (detail >= 2 && i != layers.size() - 1)
             continue;
-        const QSize size = headerSize(packagePath(m_root, layers[i].toMap().value(QStringLiteral("image"))));
-        if (size.isValid() && size.height() > 0)
-            total += qint64(std::ceil(size.width() * qreal(m_device.height()) / size.height())) * m_device.height() * 4;
+        const Header h = header(layers[i].toMap().value(QStringLiteral("image")));
+        scratch = std::max(scratch, scratchFor(h));
+        if (detail <= 2 && h.size.isValid() && h.size.height() > 0)
+            kept += imageBytes(QSize(layerWidth(h.size, height), height), QImage::Format_ARGB32_Premultiplied);
     }
     if (detail <= 1) {
         for (const QVariant &e : m_world.value(QStringLiteral("emitters")).toList()) {
             const QVariantMap emitter = e.toMap();
-            const QSize size = headerSize(packagePath(m_root, emitter.value(QStringLiteral("sprite"))));
-            const qreal s = emitter.value(QStringLiteral("scale"), 1).toDouble() * m_scale;
-            if (size.isValid())
-                total += qint64(2 * 3.3 * size.width() * size.height() * s * s * 4);
+            const Header h = header(emitter.value(QStringLiteral("sprite")));
+            scratch = std::max(scratch, scratchFor(h));
+            if (h.size.isValid())
+                kept += spriteBytes(h.size, emitter.value(QStringLiteral("scale"), 1).toDouble() * m_scale);
         }
     }
-    if (detail == 0)
-        total += qint64(m_world.value(QStringLiteral("light")).toList().size() * full * 1.13);
-    return total;
+    if (detail == 0) {
+        for (const QVariant &l : m_world.value(QStringLiteral("light")).toList()) {
+            const QVariantMap light = l.toMap();
+            scratch = std::max(scratch, scratchFor(header(light.value(QStringLiteral("texture")))));
+            kept += imageBytes(lightSize(m_device, light.value(QStringLiteral("motion")).toString()),
+                               QImage::Format_ARGB32_Premultiplied);
+        }
+    }
+    return kept + scratch;
+}
+
+bool WorldPainter::take(qint64 bytes, const QString &what, QString *why, bool *over)
+{
+    if (bytes <= m_left) {
+        m_left -= bytes;
+        return true;
+    }
+    *over = true;
+    *why = QStringLiteral("%1 would take %2 MiB more than the level has left")
+               .arg(what)
+               .arg((bytes - m_left + kMiB - 1) / kMiB);
+    return false;
+}
+
+// Decodes one of the package's images (`what` names it in the journal) once
+// its header says it may be: within `maxSide`, and its decoding within what
+// the level has left, which is taken (*scratch) for the caller to give back
+// once the image is used. Qt's allocation limit (set once by Shape) holds too.
+QImage WorldPainter::decode(const QVariant &name, int maxSide, const QString &what, qint64 *scratch, QString *why,
+                            bool *over)
+{
+    *scratch = 0;
+    const QString path = packagePath(m_root, name);
+    QFile file(path);
+    if (path.isEmpty() || !file.open(QIODevice::ReadOnly)) {
+        *why = QStringLiteral("%1 cannot be read").arg(what);
+        return {};
+    }
+    QImageReader reader(&file, "png");
+    const QSize size = reader.size();
+    if (!size.isValid() || size.width() < 1 || size.height() < 1 || size.width() > maxSide || size.height() > maxSide) {
+        *why = QStringLiteral("%1 is not a PNG within %2x%2").arg(what).arg(maxSide);
+        return {};
+    }
+    const qint64 needs = scratchFor({size, reader.imageFormat()});
+    if (!take(needs, what, why, over))
+        return {};
+    *scratch = needs;
+    QImage image = reader.read();
+    if (image.isNull())
+        *why = QStringLiteral("%1 could not be decoded (%2)").arg(what, reader.errorString());
+    return image;
+}
+
+void WorldPainter::clearPrepared()
+{
+    m_backdrop = {};
+    m_layers.clear();
+    m_emitters.clear();
+    m_lights.clear();
+    m_content = {};
+    m_contentTime = -1;
+    m_stillComposed = false;
+    m_paintedVersion = ~0ULL;
 }
 
 void WorldPainter::prepare(quint64 generation, const QVariantMap &world, const QString &root, const QSize &device,
@@ -260,14 +443,9 @@ void WorldPainter::prepare(quint64 generation, const QVariantMap &world, const Q
     m_root = root;
     m_device = device;
     m_scale = device.height() / shapefront::kCanvasHeight;
-    m_backdrop = {};
-    m_layers.clear();
-    m_emitters.clear();
-    m_lights.clear();
-    m_content = {};
-    m_contentTime = -1;
-    m_stillComposed = false;
-    m_paintedVersion = ~0ULL;
+    m_budget = budget;
+    m_headers.clear();
+    clearPrepared();
     m_rate = world.value(QStringLiteral("rate")).toInt() == 20 ? 20 : 10;
     Q_UNUSED(scale);   // the device's size says it: m_scale is per canvas pixel
 
@@ -277,50 +455,77 @@ void WorldPainter::prepare(quint64 generation, const QVariantMap &world, const Q
         wake();
         return;
     }
+    // The richest level the headers say fits. A level whose images would then
+    // take more than that (a format the header did not foretell) is given up
+    // before the memory is taken, and the next one is tried.
     int detail = 0;
     while (detail < 4 && estimateFor(detail) > budget)
         ++detail;
-    const qint64 estimate = estimateFor(detail);
     QString why;
+    bool over = false, ok = false;
     QElapsedTimer took;
     took.start();
-    const bool ok = detail < 4 && load(detail, &why);
+    for (; detail < 4; ++detail) {
+        clearPrepared();
+        over = false;
+        ok = load(detail, &why, &over);
+        if (ok || !over)
+            break;
+    }
     if (!ok) {
-        m_backdrop = {};
-        m_layers.clear();
-        m_emitters.clear();
-        m_lights.clear();
+        clearPrepared();
         m_detail = 4;
-        emit prepared(generation, false, 4, estimate,
+        emit prepared(generation, false, 4, estimateFor(std::min(detail, 3)),
                       detail >= 4 ? QStringLiteral("over the display's budget at every level") : why);
         wake();
         return;
     }
     m_detail = detail;
-    if (detail == 3)
-        composeStill();
-    emit prepared(generation, true, detail, estimate,
-                  QStringLiteral("prepared in %1 ms").arg(took.elapsed()));
+    emit prepared(generation, true, detail, estimateFor(detail), QStringLiteral("prepared in %1 ms").arg(took.elapsed()));
     wake();
 }
 
-bool WorldPainter::load(int detail, QString *why)
+// Prepares `detail`'s images within what it has left of the budget (m_left),
+// one image at a time: each taken before its memory is, given back (its
+// decoding) once used. Everything is scaled once to the device's pixels, and
+// only what can show is made: the backdrop's part the canvas shows, a layer's
+// band of rows that show (the whole width, which moves across the canvas and
+// repeats), a light texture's part that shows. On failure *why says what,
+// and *over whether it was only the budget.
+bool WorldPainter::load(int detail, QString *why, bool *over)
 {
     const QSize device = m_device;
-    // The backdrop: an image covering the canvas, or a gradient top to bottom.
+    m_left = m_budget - fixedBytes();
+    // The backdrop: an image covering the canvas, scaled keeping its
+    // proportions and centred, or a gradient top to bottom.
+    if (!take(frameBytes(), QStringLiteral("the backdrop"), why, over))
+        return false;
     const QVariantMap backdrop = m_world.value(QStringLiteral("backdrop")).toMap();
     if (backdrop.contains(QStringLiteral("image"))) {
-        QString error;
-        const QImage image = decodeImage(packagePath(m_root, backdrop.value(QStringLiteral("image"))), kLayerMaxSide, &error);
-        if (image.isNull()) {
-            *why = QStringLiteral("the backdrop %1").arg(error);
+        qint64 scratch = 0;
+        QImage source = decode(backdrop.value(QStringLiteral("image")), kLayerMaxSide, QStringLiteral("the backdrop"),
+                               &scratch, why, over);
+        if (source.isNull())
             return false;
+        source = converted(std::move(source), QImage::Format_RGB32);
+        const QSize cover = source.size().scaled(device, Qt::KeepAspectRatioByExpanding);
+        if (cover == device) {
+            // All of it shows: scaled whole.
+            m_backdrop = source.scaled(device, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+        } else {
+            // Only its middle shows: that part is drawn, scaled, straight into
+            // the backdrop; the image at the cover's size is never made.
+            const qreal sx = qreal(cover.width()) / source.width(), sy = qreal(cover.height()) / source.height();
+            m_backdrop = QImage(device, QImage::Format_RGB32);
+            m_backdrop.fill(Qt::black);
+            QPainter painter(&m_backdrop);
+            painter.setRenderHint(QPainter::SmoothPixmapTransform);
+            painter.drawImage(QRectF(QPointF(0, 0), QSizeF(device)), source,
+                              QRectF((cover.width() - device.width()) / 2 / sx, (cover.height() - device.height()) / 2 / sy,
+                                     device.width() / sx, device.height() / sy));
         }
-        const QSize cover = image.size().scaled(device, Qt::KeepAspectRatioByExpanding);
-        const QImage scaled = image.scaled(cover, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-        m_backdrop = scaled.copy((cover.width() - device.width()) / 2, (cover.height() - device.height()) / 2,
-                                 device.width(), device.height())
-                         .convertToFormat(QImage::Format_RGB32);
+        source = QImage();
+        m_left += scratch;
     } else {
         const QVariantList stops = backdrop.value(QStringLiteral("gradient")).toList();
         m_backdrop = QImage(device, QImage::Format_RGB32);
@@ -332,25 +537,57 @@ bool WorldPainter::load(int detail, QString *why)
     }
 
     const QVariantList layers = m_world.value(QStringLiteral("layers")).toList();
+    if (detail == 3) {
+        // Still: the nearest layer painted onto the backdrop once, from its
+        // decoded image, as it stands now; no layer is kept.
+        if (!layers.isEmpty()) {
+            const int i = int(layers.size()) - 1;
+            qint64 scratch = 0;
+            QImage source = decode(layers[i].toMap().value(QStringLiteral("image")), kLayerMaxSide,
+                                   QStringLiteral("layer %1").arg(i + 1), &scratch, why, over);
+            if (source.isNull())
+                return false;
+            paintStillLayer(layers[i].toMap(), converted(std::move(source), QImage::Format_ARGB32_Premultiplied));
+            m_left += scratch;
+        }
+        m_stillComposed = true;
+        return true;
+    }
     for (int i = 0; i < layers.size(); ++i) {
         if (detail == 2 && i != layers.size() - 1)
             continue;
         const QVariantMap spec = layers[i].toMap();
-        QString error;
-        const QImage image = decodeImage(packagePath(m_root, spec.value(QStringLiteral("image"))), kLayerMaxSide, &error);
-        if (image.isNull()) {
-            *why = QStringLiteral("layer %1 %2").arg(i + 1).arg(error);
+        const QString what = QStringLiteral("layer %1").arg(i + 1);
+        qint64 scratch = 0;
+        QImage source = decode(spec.value(QStringLiteral("image")), kLayerMaxSide, what, &scratch, why, over);
+        if (source.isNull())
             return false;
-        }
-        const int width = std::max(1, int(std::lround(image.width() * qreal(device.height()) / image.height())));
-        const QImage scaled = image.scaled(width, device.height(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation)
-                                  .convertToFormat(QImage::Format_ARGB32_Premultiplied);
-        const auto [first, last] = shownRows(scaled);
+        source = converted(std::move(source), QImage::Format_ARGB32_Premultiplied);
         Layer layer;
+        const auto [first, last] = shownRows(source);
         if (first >= 0) {
-            layer.image = scaled.copy(0, first, scaled.width(), last - first + 1);
-            layer.top = first;
+            // Scaled to the device's height, keeping its proportions.
+            const int height = device.height();
+            const int width = layerWidth(source.size(), height);
+            const auto [top, bottom] = spanToScale(first, last, source.height(), height);
+            const int rows = (bottom - top) * height / source.height();
+            if (!take(imageBytes(QSize(width, rows), QImage::Format_ARGB32_Premultiplied), what, why, over))
+                return false;
+            if (width == source.width() && rows == bottom - top) {
+                layer.image = top == 0 && bottom == source.height() ? source : source.copy(0, top, width, rows);
+            } else {
+                // A view of the band, not a copy, scaled.
+                const QImage band(source.constScanLine(top), source.width(), bottom - top, source.bytesPerLine(),
+                                  source.format());
+                layer.image = band.scaled(width, rows, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+            }
+            layer.top = top * height / source.height();
+            const auto [shownFirst, shownLast] = shownRows(layer.image);
+            if (shownFirst >= 0)
+                layer.shown = QRect(0, shownFirst, layer.image.width(), shownLast - shownFirst + 1);
         }
+        source = QImage();
+        m_left += scratch;
         layer.motion = spec.value(QStringLiteral("motion"), QStringLiteral("still")).toString();
         layer.speed = spec.value(QStringLiteral("speed"), 0).toDouble();
         layer.depth = spec.value(QStringLiteral("depth"), 0.5).toDouble();
@@ -363,15 +600,16 @@ bool WorldPainter::load(int detail, QString *why)
     const QVariantList emitters = m_world.value(QStringLiteral("emitters")).toList();
     for (int i = 0; i < emitters.size(); ++i) {
         const QVariantMap spec = emitters[i].toMap();
-        QString error;
-        const QImage image = decodeImage(packagePath(m_root, spec.value(QStringLiteral("sprite"))), kSpriteMaxSide, &error);
-        if (image.isNull()) {
-            *why = QStringLiteral("emitter %1's sprite %2").arg(i + 1).arg(error);
+        const QString what = QStringLiteral("emitter %1's sprite").arg(i + 1);
+        qint64 scratch = 0;
+        QImage decoded = decode(spec.value(QStringLiteral("sprite")), kSpriteMaxSide, what, &scratch, why, over);
+        if (decoded.isNull())
             return false;
-        }
-        Emitter emitter;
+        const QImage source = converted(std::move(decoded), QImage::Format_ARGB32_Premultiplied);
         const qreal scale = spec.value(QStringLiteral("scale"), 1).toDouble() * m_scale;
-        const QImage source = image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+        if (!take(spriteBytes(source.size(), scale), what, why, over))
+            return false;
+        Emitter emitter;
         const qreal sizes[3] = {0.8, 1.0, 1.2};
         for (int s = 0; s < 3; ++s) {
             const QSize size(std::max(1, int(std::lround(source.width() * scale * sizes[s]))),
@@ -379,6 +617,7 @@ bool WorldPainter::load(int detail, QString *why)
             emitter.images[s] = source.scaled(size, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
             emitter.mirrored[s] = emitter.images[s].mirrored(true, false);
         }
+        m_left += scratch;
         emitter.path = spec.value(QStringLiteral("path")).toString();
         emitter.speed = spec.value(QStringLiteral("speed"), 40).toDouble();
         const QVariantList band = spec.value(QStringLiteral("band")).toList();
@@ -401,25 +640,38 @@ bool WorldPainter::load(int detail, QString *why)
     const QVariantList lights = m_world.value(QStringLiteral("light")).toList();
     for (int i = 0; i < lights.size(); ++i) {
         const QVariantMap spec = lights[i].toMap();
-        QString error;
-        const QImage image = decodeImage(packagePath(m_root, spec.value(QStringLiteral("texture"))), kLayerMaxSide, &error);
-        if (image.isNull()) {
-            *why = QStringLiteral("light texture %1 %2").arg(i + 1).arg(error);
+        const QString what = QStringLiteral("light texture %1").arg(i + 1);
+        qint64 scratch = 0;
+        QImage source = decode(spec.value(QStringLiteral("texture")), kLayerMaxSide, what, &scratch, why, over);
+        if (source.isNull())
             return false;
-        }
+        source = converted(std::move(source), QImage::Format_ARGB32_Premultiplied);
         Light light;
         light.motion = spec.value(QStringLiteral("motion"), QStringLiteral("still")).toString();
-        // A swaying texture is a little larger than the canvas, so its edges
-        // never show as it moves.
-        const qreal grow = light.motion == QLatin1String("sway") ? 1.06 : 1.0;
-        const QSize size(int(std::lround(device.width() * grow)), int(std::lround(device.height() * grow)));
-        const QImage scaled = image.convertToFormat(QImage::Format_ARGB32_Premultiplied)
-                                  .scaled(size, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-        const QRect shown = shownRect(scaled);
-        if (!shown.isEmpty()) {
-            light.image = scaled.copy(shown);
-            light.at = shown.topLeft() - QPoint((size.width() - device.width()) / 2, (size.height() - device.height()) / 2);
+        // Stretched over the canvas (a sway a little larger, so its edges
+        // never show as it moves).
+        const QSize size = lightSize(device, light.motion);
+        const QRect content = shownRect(source);
+        if (!content.isEmpty()) {
+            const auto [left, right] = spanToScale(content.left(), content.right(), source.width(), size.width());
+            const auto [top, bottom] = spanToScale(content.top(), content.bottom(), source.height(), size.height());
+            const QSize part((right - left) * size.width() / source.width(), (bottom - top) * size.height() / source.height());
+            if (!take(imageBytes(part, QImage::Format_ARGB32_Premultiplied), what, why, over))
+                return false;
+            if (part == QSize(right - left, bottom - top)) {
+                light.image = part == source.size() ? source : source.copy(left, top, part.width(), part.height());
+            } else {
+                // A view of that part, not a copy, scaled.
+                const QImage view(source.constScanLine(top) + qsizetype(left) * 4, right - left, bottom - top,
+                                  source.bytesPerLine(), source.format());
+                light.image = view.scaled(part, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+            }
+            light.shown = shownRect(light.image);
+            light.at = QPoint(left * size.width() / source.width(), top * size.height() / source.height())
+                       - QPoint((size.width() - device.width()) / 2, (size.height() - device.height()) / 2);
         }
+        source = QImage();
+        m_left += scratch;
         light.mode = spec.value(QStringLiteral("blend")).toString() == QLatin1String("add") ? QPainter::CompositionMode_Plus
                                                                                             : QPainter::CompositionMode_Screen;
         light.opacity = spec.value(QStringLiteral("opacity"), 0.5).toDouble();
@@ -439,12 +691,40 @@ void WorldPainter::freeAbove(int detail)
     }
 }
 
+// Still, from the start: a layer painted once onto the backdrop as it stands
+// at the world's time, straight from its decoded image; each repeat across the
+// canvas draws only the part of the image that falls on the canvas.
+void WorldPainter::paintStillLayer(const QVariantMap &spec, QImage source)
+{
+    const int width = layerWidth(source.size(), m_device.height());
+    const qreal offset = layerOffset(spec.value(QStringLiteral("motion"), QStringLiteral("still")).toString(),
+                                     spec.value(QStringLiteral("speed"), 0).toDouble(),
+                                     spec.value(QStringLiteral("depth"), 0.5).toDouble(), m_time, 0);
+    const qreal toSource = qreal(source.width()) / width;
+    QPainter painter(&m_backdrop);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform);
+    painter.setOpacity(std::clamp(spec.value(QStringLiteral("opacity"), 1).toDouble(), 0.0, 1.0));
+    for (int x = firstRepeat(offset, m_scale, width); x < m_device.width(); x += width) {
+        const int left = std::max(0, x), right = std::min(m_device.width(), x + width);
+        painter.drawImage(QRectF(left, 0, right - left, m_device.height()), source,
+                          QRectF((left - x) * toSource, 0, (right - left) * toSource, source.height()));
+    }
+}
+
+// Still, stepped down to: what is left of the world (the backdrop and the
+// nearest layer) composed once onto the backdrop itself, then the layer freed.
+// Nothing shares the backdrop (a frame is filled from it by copying, never
+// shares it), so painting on it makes no copy of it; the journal says so.
 void WorldPainter::composeStill()
 {
-    // The whole world once, at this moment, into the backdrop; the rest is freed.
-    QImage composed(m_device, QImage::Format_RGB32);
-    paintContent(composed, m_time, 0);
-    m_backdrop = composed;
+    const uchar *before = m_backdrop.constBits();
+    {
+        QPainter painter(&m_backdrop);
+        paintLayers(painter, m_time, 0);
+        paintEmitters(painter, m_time);
+        paintLights(painter, m_time);
+    }
+    qInfo("mun-shell: shape: still world composed %s", m_backdrop.constBits() == before ? "in place" : "on a copy of the backdrop");
     m_layers.clear();
     m_emitters.clear();
     m_lights.clear();
@@ -611,22 +891,15 @@ void WorldPainter::paintLayers(QPainter &painter, qreal t, qreal parallax) const
 {
     const int width = m_device.width();
     for (const Layer &layer : m_layers) {
-        if (layer.image.isNull())
+        if (layer.image.isNull() || layer.shown.isEmpty())
             continue;
         // Canvas pixels: a drift moves steadily, a sway comes and goes, every
         // layer follows navigation by its depth.
-        qreal offset = parallax * layer.depth;
-        if (layer.motion == QLatin1String("drift"))
-            offset -= t * layer.speed;
-        else if (layer.motion == QLatin1String("sway"))
-            offset += std::sin(t * kTau / 14) * std::max<qreal>(16, layer.speed);
+        const qreal offset = layerOffset(layer.motion, layer.speed, layer.depth, t, parallax);
         const int w = layer.image.width();
-        int x = int(std::lround(offset * m_scale)) % w;
-        if (x > 0)
-            x -= w;
         painter.setOpacity(std::clamp(layer.opacity, 0.0, 1.0));
-        for (; x < width; x += w)
-            painter.drawImage(x, layer.top, layer.image);
+        for (int x = firstRepeat(offset, m_scale, w); x < width; x += w)
+            painter.drawImage(QPoint(x, layer.top + layer.shown.top()), layer.image, layer.shown);
     }
     painter.setOpacity(1);
 }
@@ -681,8 +954,9 @@ void WorldPainter::paintEmitters(QPainter &painter, qreal t) const
 void WorldPainter::paintLights(QPainter &painter, qreal t) const
 {
     for (const Light &light : m_lights) {
-        if (light.image.isNull())
+        if (light.image.isNull() || light.shown.isEmpty())
             continue;
+        const QRect &shown = light.shown;
         qreal opacity = std::clamp(light.opacity, 0.0, 1.0);
         QPoint at = light.at;
         painter.setCompositionMode(light.mode);
@@ -695,14 +969,14 @@ void WorldPainter::paintLights(QPainter &painter, qreal t) const
         if (light.motion == QLatin1String("ripple")) {
             // Bands of rows, each shifted by two slow waves: light through water.
             const int step = std::max(4, int(std::lround(8 * m_scale)));
-            for (int y = 0; y < light.image.height(); y += step) {
+            for (int y = shown.top(); y <= shown.bottom(); y += step) {
                 const qreal row = (light.at.y() + y) / m_scale;
                 const qreal dx = (std::sin(row * 0.018 + t * 1.2) * 5 + std::sin(row * 0.041 - t * 0.8) * 3) * m_scale;
-                painter.drawImage(QPointF(at.x() + dx, at.y() + y), light.image,
-                                  QRectF(0, y, light.image.width(), std::min(step, light.image.height() - y)));
+                painter.drawImage(QPointF(at.x() + shown.left() + dx, at.y() + y), light.image,
+                                  QRectF(shown.left(), y, shown.width(), std::min(step, shown.bottom() + 1 - y)));
             }
         } else {
-            painter.drawImage(at, light.image);
+            painter.drawImage(at + shown.topLeft(), light.image, shown);
         }
     }
     painter.setOpacity(1);

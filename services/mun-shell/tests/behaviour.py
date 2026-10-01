@@ -28,7 +28,20 @@ come from CardClient. The cases:
   the panel's options focused and back on Home: text on every dressed plate
   keeps 4.5:1, the focused option's frame 3:1 and its text 4.5:1, measured
   on the grabbed frames; the arc then shows no chosen bar, so the panel's
-  option is the only focus.
+  option is the only focus. Also mid-transition, at points of every plan.
+- presence: Shape's phases and the reasons it leaves, a result held while
+  it leaves, lent colours (controller.qml).
+- world: ShapeWorld alone (world.qml): its detail within the budget, its
+  frames in motion, still and at rest, its steps down, a layer that does
+  not decode.
+- memory: what a world takes at its peak, the shell's own resident memory
+  measured (wait4) against the engine's estimate at 1080p and 1440p, for
+  worlds that keep every limit but scale large or decode larger, and a
+  sample stepped down to still; how the extreme ones look.
+- home: the shell's own Main.qml (home.qml) against stand-ins for the card
+  service and the launcher: an arrival, dialogs, a return, removal, Eject
+  safely confirmed and refused, another card, the player's choices, a
+  defective world, Settings.
 
 Linux, with the shell's run-time libraries (the image's). The image build
 runs this after compiling the shell (os/mkosi/mkosi.build.chroot); exit
@@ -85,6 +98,17 @@ def short_png() -> bytes:
     return b"\x89PNG\r\n\x1a\n" + _chunk(b"IHDR", header) + _chunk(b"IDAT", b"\x78\x9c") + _chunk(b"IEND", b"")
 
 
+def png(width: int, height: int, rows: list, depth: int = 8, colour: int = 2, palette: list = None) -> bytes:
+    """A PNG of any depth and colour type the checker takes: `rows` are each
+    row's bytes (unfiltered), `palette` the colours of type 3."""
+    header = struct.pack(">IIBBBBB", width, height, depth, colour, 0, 0, 0)
+    body = _chunk(b"IHDR", header)
+    if palette:
+        body += _chunk(b"PLTE", b"".join(bytes(c) for c in palette))
+    data = zlib.compress(b"".join(b"\x00" + row for row in rows), 9)
+    return b"\x89PNG\r\n\x1a\n" + body + _chunk(b"IDAT", data) + _chunk(b"IEND", b"")
+
+
 def tone(seconds: float) -> bytes:
     frames = []
     for i in range(int(48000 * seconds)):
@@ -135,9 +159,13 @@ def insertion(number: int) -> str:
 class Shell:
     def __init__(self, binary: Path, work: Path):
         self.binary, self.work = binary, work
+        self.peak_kib = {}   # each run's peak resident memory (the kernel's ru_maxrss), by name
 
     def run(self, name: str, scene: str, config: dict, runtime: Path = None, socket_path: Path = None,
-            exports: Path = None, timeout: float = 90, launcher: Path = None, settings: str = "") -> str:
+            exports: Path = None, timeout: float = 90, launcher: Path = None, settings: str = "",
+            scale: float = 1) -> str:
+        """Runs the shell with `scene` and returns its output. `scale` is the
+        display's device pixels per canvas pixel (4/3: 2560x1440)."""
         case = self.work / name
         qml = case / "qml"
         qml.mkdir(parents=True, exist_ok=True)
@@ -148,7 +176,7 @@ class Shell:
         state = case / "state"
         state.mkdir(parents=True, exist_ok=True)
         (state / "settings.ini").write_text(settings, encoding="utf-8")
-        env = dict(os.environ, QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software", QT_SCALE_FACTOR="1",
+        env = dict(os.environ, QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software", QT_SCALE_FACTOR=repr(scale),
                    QT_FORCE_STDERR_LOGGING="1", LANG="C.UTF-8", HOME=str(case / "home"),
                    XDG_CONFIG_HOME=str(case / "config"), XDG_RUNTIME_DIR=str(runtime),
                    MUN_SHELL_QML_DIR=str(qml), MUN_SHAPE_ROOT=str(exports or self.work / "exports"),
@@ -156,15 +184,29 @@ class Shell:
                    MUN_LAUNCHD_SOCKET=str(launcher or case / "no-launcher.sock"), STATE_DIRECTORY=str(state))
         for key in ("QT_QPA_KMS_CONFIG", "QT_QPA_EGLFS_KMS_CONFIG", "WAYLAND_DISPLAY", "DISPLAY", "MUN_SHELL_TIMING"):
             env.pop(key, None)
-        try:
-            done = subprocess.run([str(self.binary)], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                  timeout=timeout, cwd=case)
-            output = done.stdout.decode("utf-8", "replace")
-            if done.returncode:
-                output += f"\n(exit status {done.returncode})"
-        except subprocess.TimeoutExpired as exc:
-            output = (exc.stdout or b"").decode("utf-8", "replace") + "\n(timed out)"
-        (case / "output.log").write_text(output, encoding="utf-8")
+        # Reaped with wait4, which also gives this process's own peak memory.
+        log = case / "output.log"
+        with open(log, "wb") as sink:
+            process = subprocess.Popen([str(self.binary)], env=env, stdout=sink, stderr=subprocess.STDOUT, cwd=case)
+            deadline, timed_out = time.monotonic() + timeout, False
+            while True:
+                pid, status, usage = os.wait4(process.pid, os.WNOHANG)
+                if pid:
+                    break
+                if time.monotonic() > deadline:
+                    process.kill()
+                    pid, status, usage = os.wait4(process.pid, 0)
+                    timed_out = True
+                    break
+                time.sleep(0.05)
+            process.returncode = os.waitstatus_to_exitcode(status)
+        self.peak_kib[name] = usage.ru_maxrss
+        output = log.read_text(encoding="utf-8", errors="replace")
+        if timed_out:
+            output += "\n(timed out)"
+        elif process.returncode:
+            output += f"\n(exit status {process.returncode})"
+        log.write_text(output, encoding="utf-8")
         return output
 
 
@@ -757,6 +799,126 @@ def world_cases(shell: Shell, checks: Checks, exports: Path, packages: Path):
     checks.expect("world-broken", "the journal says why", "layer 1 could not be decoded" in out)
 
 
+def memory_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, report: dict):
+    """What a world takes at its peak, the shell's own memory measured, at
+    1080p and 1440p: worlds whose images keep every limit but scale large (a
+    layer 512x16 and one 2048x1, a backdrop 512x16), decode to 16 bits or to a
+    palette (converted on a copy), and a sample stepped down to still. Each
+    world's rise over the shell without one stays within the engine's
+    estimate, and the estimate within the display's budget; stepping down
+    makes nothing more (the still world composed onto the backdrop in place).
+    The extreme worlds are also grabbed: the canvas covered, no empty edge,
+    the backdrop's middle where it should be."""
+    counter = iter(range(0x700, 0x800))
+    out_dir = shell.work / "memory-grabs"
+    out_dir.mkdir(exist_ok=True)
+    mib = 1024 * 1024
+
+    def world_of(folder):
+        shape_record = export(exports, insertion(next(counter)), folder)
+        document = json.loads((Path(shape_record["path"]) / shape.MANIFEST).read_text(encoding="utf-8"))
+        assert "world" in document, (folder, shape_record)
+        return dict(document["world"], bytes=0), shape_record["path"]
+
+    def package(name, world, files):
+        return world_of(write_package(packages / name, {"format": "mun-shape/1", "world": world}, files))
+
+    def solid(width, height, rgb):
+        return png(width, height, [bytes(rgb) * width] * height)
+
+    gradient = {"gradient": ["#001020", "#203040"]}
+    # Red rising and green falling across its 512 columns: where the canvas
+    # is cut from it shows.
+    ramp = png(512, 16, [bytes(v for c in range(512) for v in (c // 2, 255 - c // 2, 128))] * 16)
+    worlds = {
+        "wide-layer": (3, package("memory-wide-layer", {"backdrop": gradient, "layers": [
+            {"image": "wide.png", "motion": "drift", "speed": 30}]}, {"wide.png": solid(512, 16, (50, 100, 130))})),
+        "thin-layer": (3, package("memory-thin-layer", {"backdrop": gradient, "layers": [{"image": "thin.png"}]},
+                                  {"thin.png": solid(2048, 1, (50, 100, 130))})),
+        "wide-backdrop": (0, package("memory-wide-backdrop", {"backdrop": {"image": "ramp.png"}}, {"ramp.png": ramp})),
+        "deep-lights": (0, package("memory-deep-lights", {"backdrop": gradient, "light": [
+            {"texture": "deep.png", "motion": "sway"}, {"texture": "stripes.png", "motion": "ripple"}]}, {
+            "deep.png": png(1024, 1024, [bytes([255, 255, 255, 255, 255, 255, 64, 0]) * 1024] * 1024, depth=16, colour=6),
+            "stripes.png": png(2048, 1, [bytes(i % 2 for i in range(2048))], colour=3, palette=[(0, 0, 0), (255, 255, 255)])})),
+        "palette-layers": (0, package("memory-palette-layers", {"backdrop": gradient, "layers": [
+            {"image": "indexed.png", "motion": "drift", "speed": 20}, {"image": "grey16.png", "motion": "parallax"}]}, {
+            "indexed.png": png(2048, 512, [bytes([r % 2]) * 2048 for r in range(512)], colour=3,
+                               palette=[(20, 40, 60), (200, 210, 220)]),
+            "grey16.png": png(1024, 256, [bytes([0x80, 0x00]) * 1024] * 256, depth=16, colour=0)})),
+        "sea": (0, world_of(SAMPLES / "sea")),
+    }
+
+    def run(name, steps, scale, end=3000):
+        output = shell.run(name, "world.qml", {"steps": steps + [{"at": end, "quit": True}], "out": str(out_dir)},
+                           exports=exports, scale=scale)
+        return output, {w["label"]: w for w in lines(output, "WORLD")}, {g["name"]: g for g in lines(output, "GRAB")}
+
+    # The shell's own variation between two runs (its allocator, Qt's caches).
+    slack = 6 * mib
+    for size, scale in (("1080p", 1), ("1440p", 4 / 3)):
+        run(f"memory-none-{size}", [{"at": 2500, "probe": "end"}], scale)
+        none = shell.peak_kib[f"memory-none-{size}"] * 1024
+        for key, (detail, (world, root)) in worlds.items():
+            case = f"memory-{key}-{size}"
+            # Brought in by a transition, so the transition's content is made too.
+            out, probes, _ = run(case, [{"at": 0, "root": root, "world": world, "transition": "fade"},
+                                        {"at": 400, "progress": 0.5}, {"at": 900, "progress": 1},
+                                        {"at": 2500, "probe": "end"}], scale)
+            end = probes.get("end", {})
+            rise = shell.peak_kib[case] * 1024 - none
+            report.setdefault("memory", {})[case] = {
+                "detail": end.get("detail"), "estimate_mib": round(end.get("estimate", 0) / mib, 1),
+                "budget_mib": round(end.get("budget", 0) / mib, 1), "rise_mib": round(rise / mib, 1)}
+            checks.expect(case, f"drawn at detail {detail}", end.get("drawn") and end.get("detail") == detail, end)
+            checks.expect(case, "its estimate within the display's budget",
+                          0 < end.get("estimate", 0) <= end.get("budget", 0), end)
+            checks.expect(case, "the memory it adds, at its peak, within its estimate",
+                          rise <= end.get("estimate", 0) + slack,
+                          (round(rise / mib, 1), round(end.get("estimate", 0) / mib, 1)))
+        world, root = worlds["sea"][1]
+        case = f"memory-sea-steps-{size}"
+        out, probes, _ = run(case, [{"at": 0, "root": root, "world": world, "transition": "fade"},
+                                    {"at": 400, "progress": 0.5}, {"at": 900, "progress": 1},
+                                    {"at": 1300, "stepDown": "test"}, {"at": 1600, "stepDown": "test"},
+                                    {"at": 1900, "stepDown": "test"}, {"at": 2500, "probe": "end"}], scale)
+        stepped = shell.peak_kib[case] * 1024 - shell.peak_kib[f"memory-sea-{size}"] * 1024
+        report["memory"][case] = {"detail": probes.get("end", {}).get("detail"), "over_unstepped_mib": round(stepped / mib, 1)}
+        checks.expect(case, "stepped down to still", probes.get("end", {}).get("detail") == 3, probes.get("end"))
+        checks.expect(case, "the still world composed onto the backdrop in place (no copy of it)",
+                      "still world composed in place" in out, "")
+        checks.expect(case, "stepping down raises no peak", stepped <= 3 * mib, round(stepped / mib, 1))
+
+    # How the extreme worlds look (at 1080p): the canvas covered to its
+    # edges, the backdrop cut from its middle.
+    def pixel(image, x, y):
+        i = (y * image[0] + x) * 3
+        return tuple(image[2][i:i + 3])
+
+    for key in ("wide-layer", "thin-layer", "wide-backdrop"):
+        world, root = worlds[key][1]
+        out, _, grabs = run(f"look-{key}", [{"at": 0, "root": root, "world": world, "transition": "fade", "progress": 0.999,
+                                             "still": True}, {"at": 1300, "progress": 1}, {"at": 1800, "grab": key}],
+                            1, end=2300)
+        grab = grabs.get(key, {})
+        if not grab.get("path"):
+            checks.expect(f"look-{key}", "grabbed", False, grab)
+            continue
+        image = read_ppm(Path(grab["path"]))
+        points = [(x, y) for x in (0, 1, 480, 960, 1440, 1918, 1919) for y in (0, 1, 540, 1078, 1079)]
+        if key != "wide-backdrop":
+            off = [(p, pixel(image, *p)) for p in points if max(abs(a - b) for a, b in zip(pixel(image, *p), (50, 100, 130))) > 2]
+            checks.expect(f"look-{key}", "the layer covers the canvas to its edges", not off, off[:4])
+        else:
+            # Cover: 512x16 to 34560x1080, its middle 1920 columns shown:
+            # source columns 241.8 to 270.2, red (column / 2) 121 to 135.
+            reds = {x: pixel(image, x, 540)[0] for x in (0, 960, 1919)}
+            edges = [pixel(image, x, y) for x in (0, 1919) for y in (0, 540, 1079)]
+            checks.expect("look-wide-backdrop", "its middle is shown: red 119-123 at the left, 126-129 in the "
+                          "middle, 133-137 at the right", 119 <= reds[0] <= 123 and 126 <= reds[960] <= 129
+                          and 133 <= reds[1919] <= 137, reds)
+            checks.expect("look-wide-backdrop", "no empty edge", all(p[2] >= 120 for p in edges), edges)
+
+
 def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, report: dict):
     """The shell's own Main.qml, against stand-ins for the card service and
     the launcher: the moments of docs/shape.md, "How the console uses a
@@ -967,7 +1129,7 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("binary", type=Path)
     parser.add_argument("--work", type=Path, help="keep the scenes, logs, grabs and report here")
-    parser.add_argument("--only", choices=("card", "cue", "surfaces", "presence", "world", "home"), action="append")
+    parser.add_argument("--only", choices=("card", "cue", "surfaces", "presence", "world", "memory", "home"), action="append")
     args = parser.parse_args(argv)
     binary = args.binary.resolve()
     if not os.access(binary, os.X_OK):
@@ -982,7 +1144,7 @@ def main(argv=None) -> int:
     exports.mkdir()
     packages.mkdir()
     shell, checks, report = Shell(binary, work), Checks(), {}
-    only = set(args.only or ("card", "cue", "surfaces", "presence", "world", "home"))
+    only = set(args.only or ("card", "cue", "surfaces", "presence", "world", "memory", "home"))
     try:
         if "card" in only:
             print("MUN Shell behaviour: the card object")
@@ -999,6 +1161,9 @@ def main(argv=None) -> int:
         if "world" in only:
             print("MUN Shell behaviour: the world")
             world_cases(shell, checks, exports, packages)
+        if "memory" in only:
+            print("MUN Shell behaviour: the world's memory at 1080p and 1440p")
+            memory_cases(shell, checks, exports, packages, report)
         if "home" in only:
             print("MUN Shell behaviour: Home, as a player meets it")
             home_cases(shell, checks, exports, packages, report)

@@ -170,16 +170,28 @@ contract, so that a publisher sees on the console what it designed.
   front at 30. A world at rest (three minutes without input) slows to a stop
   and draws nothing more, as MUN's own does.
 - **Fits the display**: before anything decodes, the console estimates what
-  the world will take at the display's size from the images' headers and
-  draws it at the richest level that fits the budget (136 MiB at 1080p,
-  200 MiB at 1440p, with the frames, one decode and the export): full; without
-  light textures; the backdrop and the nearest layer at 10 frames per
-  second; still (composed once); none (the palette over MUN's world). While
+  the world will take at its peak at the display's size from the images'
+  headers, and draws it at the richest level that fits the budget (136 MiB at
+  1080p, 200 MiB at 1440p): full; without light textures; the backdrop and
+  the nearest layer at 10 frames per second; still (the backdrop and the
+  nearest layer, composed once); none (the palette over MUN's world). The
+  estimate counts the two frames, the transition's content and one frame
+  more for a copy of a frame, the export, everything the level keeps (a
+  layer as wide as it scales to at the display's height), and the largest
+  image being prepared: its decoded pixels in the format its header gives
+  (16-bit and palette images decode larger, or to a copy) and its converted
+  copy. Only what can show is made: the backdrop's part the canvas shows,
+  the band of a layer's rows that show (all its width, which moves across
+  and repeats), a light texture's part that shows; still draws its layer
+  straight from the decoded image. Each image is checked against what the
+  level has left before its memory is taken, and a level that would go over
+  is given up for the next one first. While
   navigating, if the interface's own frames fall behind (95th percentile over
   25 ms) or keys take over 50 ms to show, for two 2-second windows in a row,
-  the world steps down one level for the rest of the insertion. A
-  transition's own frames are timed, not judged. An image that fails to
-  decode drops the whole world, as the checker would.
+  the world steps down one level for the rest of the insertion, which only
+  frees memory (still is composed onto the backdrop itself). A transition's
+  own frames are timed, not judged. An image that fails to decode drops the
+  whole world, as the checker would.
 
 ### `surfaces`
 

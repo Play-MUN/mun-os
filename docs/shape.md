@@ -216,14 +216,21 @@ line, the path and the hints sit on a band of MUN's glass.
   changes as it passes over it.
 - `fade`: everything at once.
 - When: a card inserted while the console is on Home comes in with `in` over
-  `seconds`, once Home is on screen with no dialog open (a card inserted in
-  Settings waits for Home). Back from a game, or after a changed choice, the
+  `seconds`, once Home is wholly on screen: no dialog, Settings or start-up
+  layer over it or still fading away (a card inserted in Settings waits for
+  Home). Back from a game, or after a changed choice, the
   identity comes back with a 0.6 s fade, under any dialog. *Eject safely*
   confirmed: `out`, over three quarters of `seconds` (0.8–2.4 s); the card
   stays dressed until the console has confirmed its release. Removed,
   replaced or with Shape turned off: 0.5 s back to MUN, the way it came if it
   had not finished coming in. With *Reduce motion* every transition is a
   fade (0.8 s for an arrival).
+- A surface is MUN's or the game's on each frame, never under an opacity
+  between: from the first frame the front reaches it, its plate and text
+  are drawn whole, blended by the surface's plan, also while the game's
+  options have the focus (MUN's own entries fade then; dressed ones do not).
+  Likewise the sockets of the status line's lights are whole on the first
+  frame a band is the game's.
 
 ### `sounds`
 
@@ -459,9 +466,10 @@ The algorithm, exact so that the console and the checker agree:
   - the world behind Home;
   - the main arc's entries, the game's panel and the bands of the status
     line, the path and the hints: plates in their material at their
-    computed opacity, with the text and focus colours. While the game's
-    options have the focus, the arc's entries keep their plate and text as
-    proven and only their ornaments fade;
+    computed opacity, with the text and focus colours, whole from their
+    first dressed frame. While the game's options have the focus, the arc's
+    entries keep their plate and text as proven and only their ornaments
+    fade;
   - the card object: its window image or the cover, its outline, its
     light, all of it or MUN's object when that image does not decode;
   - outside the world, the ambient light and a tint of MUN's world in the
@@ -480,9 +488,9 @@ The algorithm, exact so that the console and the checker agree:
   shows without waiting for them, at the detail level the display's budget
   allows. It steps down when navigation suffers, and it is still at rest
   or with *Reduce motion*.
-- The transitions follow the card's state: in when Home is on screen, back
-  after a game with a short fade and without the cue, out only once
-  *Eject safely* is confirmed, quickly on removal or replacement.
+- The transitions follow the card's state: in when Home is wholly on
+  screen, back after a game with a short fade and without the cue, out only
+  once *Eject safely* is confirmed, quickly on removal or replacement.
 - *Play* never waits: the game's deep colour grows from the card object
   while the launcher takes the screen.
 - Settings: *MUN Shape* Full, Colours only or Off; *Game sounds on the

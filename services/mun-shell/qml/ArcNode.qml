@@ -25,9 +25,11 @@ import MUN.Shell
 // `dimmed` (while the panel's options have the focus): MUN's entry fades as
 // a whole to 0.4. A dressed one never fades its plate or its text, whose
 // contrast is proven only as they are drawn, not under a further opacity:
-// its knob and wire fade instead, and its chosen bar turns back into a
-// plate, marked only by its place 4 px out and a faded focus edge, so the
-// panel's option is the only focus on screen.
+// they are whole from the first frame it is dressed (it never eases out of
+// MUN's fade into its identity), its knob and wire fade instead, and its
+// chosen bar turns back into a plate, marked only by its place 4 px out and
+// a faded focus edge, so the panel's option is the only focus on screen.
+// Turned back into MUN's while dimmed, it eases from whole to MUN's fade.
 //
 // The entry is laid out flat and shown through its part of the arcs'
 // perspective (ProjectedLayer), projected again only while it changes.
@@ -70,7 +72,10 @@ ProjectedLayer {
     onLabelChanged: refresh()
     onDetailChanged: refresh()
     onCompactChanged: refresh()
-    onDimmedChanged: transition.restart()
+    onDimmedChanged: {
+        transition.restart()
+        settleFade(true)
+    }
 
     // How far the transition has reached the entry's bar (canvas coordinates),
     // and what it shows there: MUN's look at 0, a plate from just past it.
@@ -98,7 +103,10 @@ ProjectedLayer {
                                                 : (on ? Theme.inkOnMoon : Theme.moon)
     readonly property color detailColour: shaped ? labelColour : (on ? Theme.ashOnMoon : Theme.ash)
     onAccentChanged: transition.restart()
-    onShapedChanged: transition.restart()
+    onShapedChanged: {
+        transition.restart()
+        settleFade(!shaped)
+    }
     Connections {
         target: Shape
         enabled: root.dressed
@@ -120,8 +128,29 @@ ProjectedLayer {
 
     width: knobSize + wireWidth + bar.width + 4
     height: barHeight
-    opacity: dimmed && !shaped ? 0.4 : 1
-    Behavior on opacity { NumberAnimation { duration: 400; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.ease } }
+    // MUN's fade (see `dimmed`): eased while the entry is MUN's, held at 1
+    // while it is dressed, so a dressed entry's opacity is 1 on every frame.
+    property real fade: 1
+    opacity: shaped ? 1 : fade
+    NumberAnimation {
+        id: fading
+        target: root
+        property: "fade"
+        duration: 400
+        easing.type: Easing.BezierSpline
+        easing.bezierCurve: Theme.ease
+    }
+    function settleFade(eased) {
+        fading.stop()
+        const to = dimmed && !shaped ? 0.4 : 1
+        if (eased && to !== fade) {
+            fading.to = to
+            fading.start()
+        } else {
+            fade = to
+        }
+    }
+    Component.onCompleted: settleFade(false)
 
     component Fade: NumberAnimation { duration: 300; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.ease }
     component Tint: ColorAnimation { duration: 300; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.ease }

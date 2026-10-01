@@ -41,7 +41,10 @@ come from CardClient. The cases:
 - home: the shell's own Main.qml (home.qml) against stand-ins for the card
   service and the launcher: an arrival, dialogs, a return, removal, Eject
   safely confirmed and refused, another card, the player's choices, a
-  defective world, Settings.
+  defective world, Settings; and, with the options focused, a package that
+  arrives late, Eject safely, a changed choice and another card, frame by
+  frame (a dressed entry whole on every frame); an arrival after Settings
+  or a dialog only once Home is wholly on screen.
 
 Linux, with the shell's run-time libraries (the image's). The image build
 runs this after compiling the shell (os/mkosi/mkosi.build.chroot); exit
@@ -935,7 +938,7 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
         return Service(shell.work / f"{name}.sock", scripts), \
                Service(shell.work / f"{name}-launch.sock", launcher or [[(0, {"type": "snapshot", "state": "idle"})]], answer)
 
-    def run(name, cardd, launchd, steps, grabs=(), settings="", end=9000):
+    def run(name, cardd, launchd, steps, grabs=(), settings="", end=9000, trace=False):
         out_dir = shell.work / name / "grabs"
         out_dir.mkdir(parents=True, exist_ok=True)
         runtime = shell.work / name / "runtime"
@@ -943,7 +946,7 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
         (runtime / "started").write_text("")   # after a game: no start-up
         try:
             output = shell.run(name, "home.qml", {"steps": list(steps) + [{"at": end, "quit": True}], "grabs": list(grabs),
-                                                  "out": str(out_dir)},
+                                                  "out": str(out_dir), "trace": trace},
                                runtime=runtime, socket_path=cardd.path, launcher=launchd.path, exports=exports,
                                settings=settings, timeout=end / 1000 + 60)
         finally:
@@ -960,7 +963,9 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
                 return p
         return None
 
-    def surfaces_hold(case, grab, name):
+    def surfaces_hold(case, grab, name, dressed_only=False):
+        # dressed_only: MUN's entries, dimmed while the options have the
+        # focus, are MUN's own look, not measured here.
         if not grab or not grab.get("path"):
             checks.expect(case, f"{name}: grabbed", False, grab)
             return
@@ -968,6 +973,11 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
         where = grab["regions"]
         low = {}
         for e in where["entries"]:
+            if dressed_only and not e["shaped"]:
+                continue
+            if e["shaped"] and e["effective"] < 0.999:
+                low[e["label"]] = ("opacity", e["effective"])
+                continue
             measured = text_contrast(image, e["box"])
             if measured["ratio"] < TEXT_RATIO:
                 low[e["label"]] = (measured["ratio"], round(e["reached"], 2))
@@ -975,9 +985,37 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
             measured = text_contrast(image, where["panel"]["text"])
             if measured["ratio"] < TEXT_RATIO:
                 low["panel"] = (measured["ratio"], round(where["panel"]["reached"], 2))
-        report.setdefault("home", {})[f"{case} {name}"] = {"progress": round(grab["progress"], 3), "low": low}
+        # A point of the world clear of every surface: what the grab shows of it.
+        i = (960 * image[0] + 1150) * 3
+        report.setdefault("home", {})[f"{case} {name}"] = {"progress": round(grab["progress"], 3), "low": low,
+                                                          "world_at_1150_960": tuple(image[2][i:i + 3])}
         checks.expect(case, f"{name} (progress {grab['progress']:.2f}): every entry's and the panel's text keeps 4.5:1",
                       not low, low)
+
+    def whole_when_dressed(case, out):
+        # On every frame an entry is dressed, its opacity on screen is 1.
+        samples = lines(out, "TRACE")
+        low = [(t["t"], e["label"], e["effective"]) for t in samples for e in t["entries"]
+               if e["shaped"] and e["effective"] < 0.999]
+        checks.expect(case, "a dressed entry is whole (opacity 1 on screen) on every frame it is dressed",
+                      bool(samples) and any(e["shaped"] for t in samples for e in t["entries"]) and not low, low[:6])
+
+    def eases_to_mun(case, out):
+        # An entry turning back into MUN's eases into MUN's look: no step.
+        steps, last = [], {}
+        for t in lines(out, "TRACE"):
+            for e in t["entries"]:
+                before = last.get(e["label"])
+                if before and not e["shaped"] and abs(e["opacity"] - before["opacity"]) > 0.35:
+                    steps.append((t["t"], e["label"], before["opacity"], e["opacity"]))
+                last[e["label"]] = e
+        checks.expect(case, "MUN's entries change their opacity smoothly, never in one step", not steps, steps[:6])
+
+    def first_dressed(out):
+        for t in lines(out, "TRACE"):
+            if any(e["shaped"] for e in t["entries"]):
+                return t
+        return None
 
     # An arrival: the tide, the cue, the surfaces as the front reaches them.
     x, rx = card(SAMPLES / "sea")
@@ -1123,6 +1161,114 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
     settings = first(phases, label="settings")
     checks.expect("home-settings", "in Settings the world is under MUN's scrim",
                   settings is not None and settings["level"] == 1 and settings["dim"] > 0.7, settings)
+
+    # The options focused when the identity comes, goes or changes: a dressed
+    # entry whole from its first frame (never easing out of MUN's fade),
+    # measured frame by frame and on grabs from the first dressed frame on.
+    edge = sample_copy(packages, "home-edge", "paper", change=lambda d: d.update(
+        palette=EDGE["palette"], world={"backdrop": {"gradient": ["#FFFFFF", "#FFFFFF"]}},
+        transition={"in": "fade", "out": "fade", "seconds": 4}))
+    for name, package, grab_points in (
+            ("home-late-options", edge, [("fade-02", 0.02), ("fade-10", 0.1), ("fade-50", 0.5)]),
+            ("home-late-options-tide", SAMPLES / "sea", [("tide-20", 0.2), ("tide-45", 0.45), ("tide-70", 0.7)])):
+        x, rx = card(package)
+        preparing = dict(rx, shape={"state": "preparing", "insertion": x})
+        cardd, launchd = serve(name, [[(0, snapshot()), (0.3, {"type": "card", "card": preparing}),
+                                       (1.6, {"type": "card", "card": rx})]])
+        grabs_asked = [{"name": "first", "first": "shaped"}] + [{"name": g, "phase": "entering", "at": a} for g, a in grab_points] \
+            + [{"name": "present", "phase": "present"}]
+        out, phases, grabs = run(name, cardd, launchd, [{"at": 1100, "call": "enter"}, {"at": 1300, "probe": "focused"}],
+                                 grabs=grabs_asked, end=7500, trace=True)
+        focused, entering = first(phases, label="focused"), first(phases, phase="entering")
+        checks.expect(name, "the options focused before the package was ready; then it comes in",
+                      focused is not None and focused["level"] == 2 and focused["phase"] == "none"
+                      and entering is not None and entering["level"] == 2, (focused, entering))
+        whole_when_dressed(name, out)
+        for g in ["first"] + [g for g, _ in grab_points] + ["present"]:
+            surfaces_hold(name, grabs.get(g), g, dressed_only=True)
+
+    # Leaving with the options focused: Eject safely, confirmed.
+    x, rx = card(SAMPLES / "sea")
+    cardd = Service(shell.work / "home-leave-options.sock", [[(0, snapshot()), (0.6, {"type": "card", "card": rx})]])
+
+    def release(service, message):
+        if message.get("type") == "release":
+            time.sleep(0.3)
+            cardd.push({"type": "card", "card": dict(rx, state="released", info=None)})
+            service.push({"type": "released", "ok": True, "slot": "c1", "serial": rx["serial"]})
+    launchd = Service(shell.work / "home-leave-options-launch.sock", [[(0, {"type": "snapshot", "state": "idle"})]], release)
+    out, phases, grabs = run("home-leave-options", cardd, launchd,
+                             [{"at": 5000, "call": "enter"}, {"at": 5400, "probe": "focused"}, {"at": 5600, "call": "eject"}],
+                             grabs=[{"name": f"leaving-{int(a * 100)}", "phase": "leaving", "at": a} for a in (0.8, 0.5, 0.2)],
+                             end=9500, trace=True)
+    leaving = first(phases, phase="leaving")
+    checks.expect("home-leave-options", "Eject safely from the options: it leaves (release)",
+                  (first(phases, label="focused") or {}).get("level") == 2 and leaving is not None
+                  and leaving["exit"] == "release",
+                  (first(phases, label="focused"), leaving))
+    whole_when_dressed("home-leave-options", out)
+    eases_to_mun("home-leave-options", out)
+    for a in (80, 50, 20):
+        surfaces_hold("home-leave-options", grabs.get(f"leaving-{a}"), f"leaving-{a}", dressed_only=True)
+
+    # A changed choice with the options focused: colours only, off, full again.
+    x, rx = card(SAMPLES / "sea")
+    cardd, launchd = serve("home-mode-options", [[(0, snapshot()), (0.6, {"type": "card", "card": rx})]])
+    out, phases, grabs = run("home-mode-options", cardd, launchd, [
+        {"at": 5000, "call": "enter"}, {"at": 5600, "settings": {"shapeMode": "colours"}}, {"at": 7600, "probe": "colours"},
+        {"at": 7700, "settings": {"shapeMode": "off"}}, {"at": 9200, "probe": "off"},
+        {"at": 9300, "settings": {"shapeMode": "full"}}, {"at": 11300, "probe": "full"}],
+        grabs=[{"name": "leaving", "phase": "leaving", "at": 0.5, "after": 5600},
+               {"name": "colours-in", "phase": "entering", "at": 0.3, "after": 5600},
+               {"name": "full-in", "phase": "entering", "at": 0.5, "after": 9300}], end=11800, trace=True)
+    probes = {k: first(phases, label=k) for k in ("colours", "off", "full")}
+    checks.expect("home-mode-options", "colours only, off and full again, the options focused throughout",
+                  all(probes.values()) and [probes[k]["level"] for k in probes] == [2, 2, 2]
+                  and probes["colours"]["phase"] == "present" and not probes["colours"]["world"]
+                  and probes["off"]["source"] == "none" and probes["full"]["phase"] == "present" and probes["full"]["world"],
+                  probes)
+    whole_when_dressed("home-mode-options", out)
+    eases_to_mun("home-mode-options", out)
+    for g in ("leaving", "colours-in", "full-in"):
+        surfaces_hold("home-mode-options", grabs.get(g), g, dressed_only=True)
+
+    # Another card with the options focused: the first leaves, the second comes.
+    x, rx = card(SAMPLES / "sea")
+    y, ry = card(SAMPLES / "paper")
+    cardd, launchd = serve("home-change-options", [[(0, snapshot()), (0.6, {"type": "card", "card": rx}),
+                                                    (5.6, {"type": "removed", "slot": "c1", "insertion": x}),
+                                                    (5.7, {"type": "card", "card": ry})]])
+    out, phases, grabs = run("home-change-options", cardd, launchd, [{"at": 5000, "call": "enter"}, {"at": 5400, "probe": "focused"}],
+                             grabs=[{"name": f"b-{int(a * 100)}", "phase": "entering", "at": a, "after": 5700} for a in (0.3, 0.6)]
+                             + [{"name": "b-present", "phase": "present", "after": 7000}], end=9500, trace=True)
+    second = [p for p in phases if p["insertion"] == y and p["phase"] == "entering"]
+    checks.expect("home-change-options", "from the options: A leaves, B comes in",
+                  (first(phases, label="focused") or {}).get("level") == 2 and bool(second),
+                  (first(phases, label="focused"), second[:1]))
+    whole_when_dressed("home-change-options", out)
+    eases_to_mun("home-change-options", out)
+    for g in ("b-30", "b-60", "b-present"):
+        surfaces_hold("home-change-options", grabs.get(g), g, dressed_only=True)
+
+    # An arrival waits for Home wholly on screen: back from Settings (its arc
+    # fading in), a dialog closed (its layer fading out).
+    x, rx = card(SAMPLES / "sea")
+    cardd, launchd = serve("home-from-settings", [[(0, snapshot()), (1.5, {"type": "card", "card": rx})]])
+    out, phases, _ = run("home-from-settings", cardd, launchd, [
+        {"at": 800, "set": {"mainIndex": 2}}, {"at": 900, "call": "enter"}, {"at": 3000, "call": "back"}],
+        end=7000, trace=True)
+    entering, dressed = first(phases, phase="entering"), first_dressed(out)
+    checks.expect("home-from-settings", "inserted in Settings: it comes in once Home's arc is whole (0.45 s after)",
+                  entering is not None and entering["t"] >= 3400 and entering["entry"] == "arrival", entering)
+    whole_when_dressed("home-from-settings", out)
+    x, rx = card(SAMPLES / "sea")
+    cardd, launchd = serve("home-dialog-closed", [[(0, snapshot()), (0.6, {"type": "card", "card": rx})]], [[(0, result)]])
+    out, phases, _ = run("home-dialog-closed", cardd, launchd, [{"at": 4000, "call": "dismissResult"}], end=7500, trace=True)
+    entering, dressed = first(phases, phase="entering"), first_dressed(out)
+    checks.expect("home-dialog-closed", "the dialog closed: it comes in once its layer has faded (0.5 s after)",
+                  entering is not None and entering["t"] >= 4400 and dressed is not None and not dressed["modalShown"],
+                  (entering, dressed))
+    whole_when_dressed("home-dialog-closed", out)
 
 
 def main(argv=None) -> int:

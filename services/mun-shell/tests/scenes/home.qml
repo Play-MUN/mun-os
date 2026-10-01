@@ -7,8 +7,13 @@ import MUN.Shell
 // player would do comes from CONFIG's steps (a call of one of Main's own
 // functions, at a time). It prints a PHASE line whenever Shape's phase
 // changes, and grabs the canvas to PPM files at the moments CONFIG.grabs
-// names (a phase and the progress it must reach), with a GRAB line saying
-// where each surface's text lies and how far the transition has reached it.
+// names (a phase and the progress it must reach, after a time if `after` is
+// given; or `first: "shaped"`, the first frame an entry is dressed), with a
+// GRAB line saying where each surface's text lies, how far the transition
+// has reached it and each entry's opacity, its own and on screen (`effective`:
+// with every item above it). With CONFIG.trace it prints a TRACE line on each
+// frame anything of the entries' changed: whether each is dressed, dimmed,
+// its opacities, and whether a dialog's layer is shown.
 Item {
     id: scene
     readonly property var config: CONFIG
@@ -16,6 +21,7 @@ Item {
     property var main: null
     property var canvas: null
     property var world: null
+    property var modalLayer: null
     property int next: 0
     property var pendingGrabs: (config.grabs || []).slice()
 
@@ -60,6 +66,20 @@ Item {
                 Math.ceil(Math.max(b.x, d.x)), Math.ceil(Math.max(c.y, d.y))]
     }
 
+    // An item's opacity on screen: its own times every item's above it.
+    function effective(item) {
+        let o = 1
+        for (let it = item; it; it = it.parent) {
+            o *= it.opacity
+            if (it === canvas)
+                break
+        }
+        return o
+    }
+    function mainEntries() {
+        return findAll(canvas, it => it.knobSize !== undefined && it.reached !== undefined && it.dressed, [])
+    }
+
     function regions() {
         const entries = []
         for (const node of findAll(canvas, it => it.knobSize !== undefined && it.reached !== undefined, [])) {
@@ -68,6 +88,7 @@ Item {
             const left = node.knobSize + node.wireWidth + (node.on ? 4 : 0)
             const width = node.width - node.knobSize - node.wireWidth - 4
             entries.push({ label: node.label, chosen: node.on, reached: node.reached, shaped: node.shaped,
+                           opacity: node.opacity, effective: effective(node),
                            box: projected(node, left + 14, 9, left + width - 34, node.barHeight - 9, true) })
         }
         const panel = find(canvas, it => it.plating !== undefined)
@@ -107,6 +128,9 @@ Item {
         if (step.set)
             for (const key in step.set)
                 main[key] = step.set[key]
+        if (step.settings)
+            for (const key in step.settings)
+                ShellSettings[key] = step.settings[key]
         if (step.probe)
             report(step.probe)
         if (step.grab)
@@ -134,7 +158,9 @@ Item {
         onTriggered: {
             const rest = []
             for (const g of scene.pendingGrabs) {
-                const passed = g.phase === "present" ? Shape.phase === "present"
+                const passed = g.after !== undefined && scene.now() < g.after ? false
+                             : g.first === "shaped" ? scene.mainEntries().some(n => n.shaped)
+                             : g.phase === "present" ? Shape.phase === "present"
                              : Shape.phase === g.phase && (g.phase === "leaving" ? Shape.progress <= g.at : Shape.progress >= g.at)
                 if (passed)
                     scene.grab(g.name)
@@ -142,6 +168,25 @@ Item {
                     rest.push(g)
             }
             scene.pendingGrabs = rest
+        }
+    }
+
+    // The entries frame by frame (CONFIG.trace).
+    property string lastTrace: ""
+    Timer {
+        interval: 16
+        repeat: true
+        running: !!scene.config.trace && scene.canvas !== null
+        onTriggered: {
+            const entries = scene.mainEntries().filter(n => n.label).map(n => ({
+                label: n.label, shaped: n.shaped, dimmed: n.dimmed,
+                opacity: Math.round(n.opacity * 1000) / 1000, effective: Math.round(scene.effective(n) * 1000) / 1000 }))
+            const state = { phase: Shape.phase, modalShown: !!scene.modalLayer && scene.modalLayer.visible, entries: entries }
+            const key = JSON.stringify(state)
+            if (key === scene.lastTrace)
+                return
+            scene.lastTrace = key
+            console.log("TRACE " + JSON.stringify(Object.assign({ t: scene.now(), progress: Shape.progress }, state)))
         }
     }
 
@@ -165,6 +210,7 @@ Item {
         main = component.createObject(null)
         canvas = find(main.contentItem, it => it.width === Theme.canvasWidth && it.height === Theme.canvasHeight && it.focus === true)
         world = find(canvas, it => it.covering !== undefined && it.transition !== undefined)
+        modalLayer = find(canvas, it => it.shownContent !== undefined)
         report("start")
         run()
     }

@@ -43,9 +43,14 @@ Row {
             Behavior on opacity { NumberAnimation { duration: 400; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.ease } }
         }
     }
-    // MUN's own ground under a light, over whatever band is beneath.
+    // MUN's own ground under a light, over whatever band is beneath: whole
+    // from the first frame the band is the game's, so a light is never shown
+    // on it without its ground; it eases away once the band is MUN's again
+    // (`away` is held at 1 meanwhile).
     component Socket: Rectangle {
+        id: socket
         property int size
+        property real away: 0
         z: -2
         anchors.centerIn: parent
         width: size
@@ -54,9 +59,28 @@ Row {
         color: Theme.dialog
         border.width: 1
         border.color: Theme.rgba(218, 215, 209, 0.22)
-        opacity: root.socketed ? 1 : 0
+        opacity: root.socketed ? 1 : away
         visible: opacity > 0
-        Behavior on opacity { NumberAnimation { duration: 400; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.ease } }
+        Component.onCompleted: away = root.socketed ? 1 : 0
+        NumberAnimation {
+            id: easingAway
+            target: socket
+            property: "away"
+            to: 0
+            duration: 400
+            easing.type: Easing.BezierSpline
+            easing.bezierCurve: Theme.ease
+        }
+        Connections {
+            target: root
+            function onSocketedChanged() {
+                easingAway.stop()
+                if (root.socketed)
+                    socket.away = 1
+                else
+                    easingAway.start()
+            }
+        }
     }
     component Status: UiText {
         anchors.verticalCenter: parent.verticalCenter

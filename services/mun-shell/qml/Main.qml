@@ -122,8 +122,10 @@ Window {
 
     // An identity from a package comes in with a transition and leaves with
     // one (src/shape.h, "Presence"); this runs them. It comes in once Home
-    // is on screen without a dialog (a return from a game or a changed
-    // choice comes in at once, under any dialog), its world prepared: an
+    // is wholly on screen: no dialog, Settings or start-up layer over it or
+    // still fading away, so that the first frame it dresses shows its plates
+    // and text whole (a return from a game or a changed choice comes in at
+    // once, under any dialog), its world prepared: an
     // arrival with the package's transition and its seconds, anything else
     // with a short fade; Reduce motion makes every transition a fade. A card
     // that arrived while the shell watched is greeted then by its cue, once.
@@ -140,7 +142,8 @@ Window {
                 window.shapeLeave()
         }
     }
-    readonly property bool homeOnScreen: powered && !inSettings && !modal && !starting && !boot.playing
+    readonly property bool homeOnScreen: powered && !inSettings && !modal && !starting && !boot.playing && !boot.visible
+                                         && mainArc.opacity === 1 && !modalLayer.visible && !startCover.visible
     readonly property bool shapeMayBegin: Shape.phase === "ready" && world.ready
                                           && (Shape.entry === "arrival" ? homeOnScreen : powered)
     onShapeMayBeginChanged: if (shapeMayBegin) Qt.callLater(shapeBegin)
@@ -690,6 +693,7 @@ Window {
             Item {
                 anchors.fill: parent
                 ArcMenu {
+                    id: mainArc
                     anchors.fill: parent
                     entries: window.mainEntries
                     current: window.mainIndex
@@ -799,6 +803,7 @@ Window {
             Behavior on scale { NumberAnimation { duration: 520; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.ease } }
         }
         Rectangle {
+            id: startCover
             anchors.fill: parent
             color: canvas.diving ? Shape.veil : Theme.layer
             opacity: window.starting ? 1 : 0
@@ -817,6 +822,7 @@ Window {
         }
 
         ModalLayer {
+            id: modalLayer
             content: window.modal
             selected: window.modalIndex
             onChosen: (index) => {

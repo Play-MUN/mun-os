@@ -192,16 +192,19 @@ code (`src/shape.*`, `src/shapeworld.*`, `src/shapefront.h`):
   - The main arc's entries: the game's plate under each label, in its
     material and at the opacity its text needs over any world; its text
     colour; a chosen bar of that colour with the plate's colour as label;
-    its focus on the knob, wire and edge. While the game's options have the
-    focus, the entries keep that plate and text as they are drawn, only the
-    knobs and wires fade, and the chosen bar turns back into a plate, so the
-    panel's option is the only focus.
+    its focus on the knob, wire and edge, all whole from the first frame the
+    entry is dressed. While the game's options have the focus, the entries
+    keep that plate and text as they are drawn (MUN's own entries fade; a
+    dressed one never eases out of that fade), only the knobs and wires
+    fade, and the chosen bar turns back into a plate, so the panel's option
+    is the only focus.
   - The game's panel (the Game Card entry's): plate, text, focus on its
     options.
   - Bands of MUN's glass in the plate's colour under the status line, the
     path and the hints, whose words take the text colour. The status
     line's lights keep MUN's colours, each on a socket of MUN's own (a dark
-    disc with a fine rim), so they show as MUN draws them on any band.
+    disc with a fine rim, whole from the band's first dressed frame), so
+    they show as MUN draws them on any band.
   - The card object: its screen shows the package's window image or the
     card's cover in place of the crescent, with an organic outline if the
     package asks (reached during the transition, then still) and its light
@@ -223,7 +226,8 @@ code (`src/shape.*`, `src/shapeworld.*`, `src/shapefront.h`):
   reaches it.
   - A card inserted on Home comes in with the package's transition (`tide`,
     `sweep` or `fade`) over its seconds. With Settings or a dialog open, it
-    waits for Home.
+    waits for Home wholly on screen (the arc's fade in, the dialog's fade out
+    finished).
   - Back from a game, or after a changed choice, it returns with a 0.6 s
     fade, under any dialog, without the cue.
   - *Eject safely*: the identity stays until the card service has released
@@ -329,6 +333,11 @@ code (`src/shape.*`, `src/shapeworld.*`, `src/shapefront.h`):
     dialog that makes it wait, a return under a dialog, a removal mid-tide,
     *Eject safely* confirmed and refused, another card, Reduce motion,
     Colours only, Off, a defective world, Settings over the world;
+  - with the options focused, frame by frame: a package ready after the
+    options took the focus (a fade and a tide), *Eject safely*, a changed
+    choice (Colours only, Off, Full), another card; the dressed entries are
+    whole on every frame and MUN's ease; an arrival waits for Home's arc to
+    be whole after Settings, and for a dialog's layer to fade;
   - the dressed arc's and panel's contrast measured on grabbed frames: the
     two samples and a palette at the rule's limit, over a white and a black
     world, on Home, with the options focused, and mid-transition; and on

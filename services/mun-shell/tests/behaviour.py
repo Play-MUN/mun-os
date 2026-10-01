@@ -32,7 +32,8 @@ come from CardClient. The cases:
 - presence: Shape's phases and the reasons it leaves, a result held while
   it leaves, lent colours (controller.qml).
 - world: ShapeWorld alone (world.qml): its detail within the budget, its
-  frames in motion, still and at rest, its steps down, a layer that does
+  frames in motion, still and at rest, a still world set whole at once
+  (shown, not the empty frame before it), its steps down, a layer that does
   not decode.
 - memory: what a world takes at its peak, the shell's own resident memory
   measured (wait4) against the engine's estimate at 1080p and 1440p, for
@@ -785,6 +786,22 @@ def world_cases(shell: Shell, checks: Checks, exports: Path, packages: Path):
                       sum(inside) > 60 and tuple(outside) == (0, 0, 0), (tuple(inside), tuple(outside)))
     else:
         checks.expect("world-sea", "mid-tide frame grabbed", False, tide)
+
+    # Whole and still from the start (Reduce motion, no transition): if the
+    # world is prepared while an empty frame waits to be shown, its own frame
+    # still comes once that one is taken (three times: a race when it fails).
+    for attempt in range(3):
+        case = f"world-still-at-once-{attempt}"
+        out, probes, grabs = run(case, [{"at": 0, "root": sea_root, "world": sea_world, "progress": 1, "still": True},
+                                        {"at": 1500, "grab": case}, {"at": 1600, "probe": "end"}, {"at": 1700, "quit": True}])
+        grab = grabs.get(case, {})
+        shown = None
+        if grab.get("path"):
+            image = read_ppm(Path(grab["path"]))
+            i = (540 * image[0] + 1500) * 3
+            shown = tuple(image[2][i:i + 3])
+        checks.expect(case, "a still world set whole at once is shown, not the empty frame before it",
+                      shown is not None and sum(shown) > 60, (shown, probes.get("end")))
 
     out, probes, _ = run("world-steps", base + [
         {"at": 1200, "probe": "d0"}, {"at": 1300, "stepDown": "test"}, {"at": 1600, "probe": "d1"},

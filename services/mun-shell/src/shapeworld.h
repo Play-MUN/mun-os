@@ -8,7 +8,8 @@
 // painted on a thread of its own, never on the GUI thread, into two frames
 // that take turns. The GUI thread only shows the last finished frame; a
 // frame the GUI has not taken yet is never painted over, and a tick that
-// finds no free frame is skipped, never waited for. The world moves at the
+// finds no free frame is skipped, never waited for (and tried again once the
+// GUI takes the frame, when no later tick is due). The world moves at the
 // package's rate (10 or 20 frames per second); its transitions at
 // kTransitionRate. A still world, or one at rest, is painted once and costs
 // nothing more.
@@ -159,6 +160,7 @@ public:
         QImage images[2];
         int shown = -1;   // held by the scene graph
         int ready = -1;   // painted, not taken yet
+        bool wanted = false;   // a tick was skipped for want of a free frame
         Params params;
     };
 

@@ -24,6 +24,7 @@
 #include <cstring>
 #include <numeric>
 #include <random>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -805,7 +806,10 @@ void WorldPainter::tick()
         p = m_frames->params;
         target = m_frames->shown == 0 ? 1 : 0;
         if (m_frames->ready == target) {
-            // The last frame is not on screen yet: this one is skipped, never waited for.
+            // The last frame is not on screen yet: this one is skipped, never
+            // waited for. The GUI wakes the painter when it takes that frame;
+            // a moving world's next tick is due anyway, a still one's not.
+            m_frames->wanted = true;
             lock.unlock();
             schedule();
             return;
@@ -1164,14 +1168,18 @@ QSGNode *ShapeWorld::updatePaintNode(QSGNode *old, UpdatePaintNodeData *)
     }
     QImage image;
     int index = -1;
+    bool wanted = false;
     {
         QMutexLocker lock(&m_frames->mutex);
         if (m_frames->ready >= 0) {
             index = m_frames->ready;
             image = m_frames->images[index];
             m_frames->ready = -1;
+            wanted = std::exchange(m_frames->wanted, false);
         }
     }
+    if (wanted)
+        emit wakeRequested();   // the tick that found this frame waiting
     if (index >= 0 && !image.isNull()) {
         if (!node) {
             node = window()->createImageNode();

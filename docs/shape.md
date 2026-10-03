@@ -317,7 +317,10 @@ full level. Light textures are most of a world's paint time: without them,
 about 1.5 ms instead of 13 ms at 1440p. The estimate before decoding was
 81–83 MiB at 1080p and 137–139 MiB at 1440p; the behaviour regressions
 measure the shell's own peak against the estimate, for the samples and for
-worlds that keep every limit but scale large.
+worlds that keep every limit but scale large. A world at 10 frames per
+second without light textures, as the `paper` sample's, costs far less: at
+rest 8 % of a core at 1080p and 18 % at 1440p, about MUN's own, and
+navigation as without a card.
 
 ## When something is wrong
 

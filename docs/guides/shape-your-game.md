@@ -263,9 +263,10 @@ one small defective package per case, to see them in the console.
 - **What was measured.** In the laboratory's virtual console (no GPU), a
   world like the `sea` sample's holds the full level at 1080p; at 1440p the
   console is at the edge and may step down once, to the level without light
-  textures, which are most of a world's cost
-  ([measured](../shape.md#measured)). No console hardware is chosen yet:
-  give light textures only what they are worth.
+  textures, which are most of a world's cost. A world like `paper`'s, at 10
+  frames per second without light textures, costs about what MUN costs
+  alone ([measured](../shape.md#measured)). No console hardware is chosen
+  yet: give light textures only what they are worth.
 
 ## Going further
 

@@ -59,6 +59,7 @@ CARD_TOOL = vm.REPO_ROOT / "tools" / "mun-card" / "mun-card"
 PREVIEW_ID = "mun.shapepreview"
 POLL_SECONDS = 1.0
 SETTLE_SECONDS = 1.0     # a change is taken once the folder has been still this long
+SHELL_GRACE_SECONDS = 3.0   # the shell's connection to the card service, once it is running
 
 # In the guest, through qemu-ga: the launcher's state from its first message
 # (a snapshot): "idle" when no game is being played.
@@ -211,9 +212,17 @@ class Preview:
         return True
 
     def wait_for_console(self, stop: threading.Event) -> bool:
+        """Until the console is up and its shell is running: a card inserted
+        before the shell watches is one it finds at start, without the
+        arrival a player sees (its transition and cue)."""
         while not stop.is_set():
             if vm.read_pid() is not None and vm.guest_ready():
-                return True
+                break
+            stop.wait(2)
+        while not stop.is_set():
+            if vm.guest_command("systemctl is-active mun-shell", timeout=30).stdout.strip() == "active":
+                stop.wait(SHELL_GRACE_SECONDS)
+                return not stop.is_set()
             stop.wait(2)
         return False
 

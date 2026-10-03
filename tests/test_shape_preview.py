@@ -49,6 +49,7 @@ class Console:
         self.cards = {name: {"slot": "card-slot-1"} for name in cards}
         self.playing = playing
         self.refuse = refuse           # releases to refuse before one succeeds
+        self.shell_up = True
         self.calls = []
 
     def attach(self, args):
@@ -63,6 +64,9 @@ class Console:
         del self.cards[name]
 
     def command(self, script, timeout=120.0, **_):
+        if script.startswith("systemctl is-active"):
+            self.calls.append(("shell?",))
+            return SimpleNamespace(stdout="active\n" if self.shell_up else "activating\n", stderr="", returncode=0)
         return SimpleNamespace(stdout="running\n" if self.playing else "idle\n", stderr="", returncode=0)
 
     def patches(self, card_root: Path):
@@ -122,16 +126,34 @@ class PreviewTests(unittest.TestCase):
 
     def test_the_first_card_is_made_from_the_folder_and_inserted(self):
         console = Console()
-        self.run_with(console, lambda: self.preview().run(threading.Event(), watch=False, follow=False))
-        self.assertEqual(console.calls, [("attach", "pv0-shape")])
+        with patch.object(shapepreview, "SHELL_GRACE_SECONDS", 0):
+            self.run_with(console, lambda: self.preview().run(threading.Event(), watch=False, follow=False))
+        self.assertEqual([call for call in console.calls if call[0] != "shell?"], [("attach", "pv0-shape")])
         self.assertTrue((self.cards / "pv0-shape.img").is_file())
         self.assertIn("LISTO", self.out.getvalue())
+
+    def test_the_first_card_waits_for_the_shell_so_that_it_arrives(self):
+        console = Console()
+        console.shell_up = False
+        stop = threading.Event()
+        with contextlib.ExitStack() as stack:
+            for item in console.patches(self.cards):
+                stack.enter_context(item)
+            stack.enter_context(patch.object(shapepreview, "SHELL_GRACE_SECONDS", 0))
+            worker = threading.Thread(target=self.preview().run, args=(stop, False, False))
+            worker.start()
+            time.sleep(2.5)
+            self.assertNotIn(("attach", "pv0-shape"), console.calls, "nothing inserted before the shell runs")
+            console.shell_up = True
+            worker.join(15)
+        self.assertIn(("attach", "pv0-shape"), console.calls)
 
     def test_it_does_not_start_beside_another_card_and_touches_none(self):
         (self.cards / "mine.img").write_bytes(b"a player's card")
         console = Console(cards=["mine"])
-        self.run_with(console, lambda: self.preview().run(threading.Event(), watch=False, follow=False))
-        self.assertEqual(console.calls, [])
+        with patch.object(shapepreview, "SHELL_GRACE_SECONDS", 0):
+            self.run_with(console, lambda: self.preview().run(threading.Event(), watch=False, follow=False))
+        self.assertEqual([call for call in console.calls if call[0] != "shell?"], [])
         self.assertEqual((self.cards / "mine.img").read_bytes(), b"a player's card")
         self.assertIn("no other card", self.out.getvalue())
 
@@ -174,6 +196,7 @@ class PreviewTests(unittest.TestCase):
                 stack.enter_context(item)
             stack.enter_context(patch.object(shapepreview, "POLL_SECONDS", 0.05))
             stack.enter_context(patch.object(shapepreview, "SETTLE_SECONDS", 0.1))
+            stack.enter_context(patch.object(shapepreview, "SHELL_GRACE_SECONDS", 0))
             worker = threading.Thread(target=preview.run, args=(stop, True, True))
             worker.start()
             deadline = time.monotonic() + 30
@@ -185,8 +208,8 @@ class PreviewTests(unittest.TestCase):
                 time.sleep(0.05)
             stop.set()
             worker.join(10)
-        self.assertEqual(console.calls, [("attach", "pv0-shape"), ("detach", "pv0-shape", False),
-                                         ("attach", "pv1-shape")])
+        self.assertEqual([call for call in console.calls if call[0] != "shell?"],
+                         [("attach", "pv0-shape"), ("detach", "pv0-shape", False), ("attach", "pv1-shape")])
 
     def test_a_base_card_is_copied_and_never_written(self):
         with contextlib.redirect_stdout(io.StringIO()):
@@ -194,10 +217,11 @@ class PreviewTests(unittest.TestCase):
         self.assertEqual(code, 0)
         before = sha256(self.cards / "mygame.img")
         console = Console()
-        self.run_with(console, lambda: self.preview(base=self.cards / "mygame.img")
-                      .run(threading.Event(), watch=False, follow=False))
+        with patch.object(shapepreview, "SHELL_GRACE_SECONDS", 0):
+            self.run_with(console, lambda: self.preview(base=self.cards / "mygame.img")
+                          .run(threading.Event(), watch=False, follow=False))
         self.assertEqual(sha256(self.cards / "mygame.img"), before)
-        self.assertEqual(console.calls, [("attach", "pv0-shape")])
+        self.assertEqual([call for call in console.calls if call[0] != "shell?"], [("attach", "pv0-shape")])
         from mun_card import shape
         from mun_card.source import DebugfsSource
         source = DebugfsSource(self.cards / "pv0-shape.img", image.find_tool("debugfs"))

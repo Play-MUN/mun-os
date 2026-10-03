@@ -739,3 +739,88 @@ def write_fixture(folder: Path, name: str) -> Path:
             path.write_bytes(content)
     (target / shape.MANIFEST).write_bytes(raw)
     return target
+
+
+# ------------------------------------------------------- a package on a card
+
+def named_files(document: Dict[str, object]) -> List[str]:
+    """Every file a package's document names, whether the checker keeps its
+    block or not: the card's window, the sounds and the world's images."""
+    names: List[str] = []
+
+    def take(value) -> None:
+        if isinstance(value, str):
+            names.append(value)
+
+    def items(value) -> List[dict]:
+        return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+
+    card = document.get("card")
+    if isinstance(card, dict):
+        take(card.get("window"))
+    sounds = document.get("sounds")
+    if isinstance(sounds, dict):
+        for name in ("move", "enter", "back", "insert"):
+            take(sounds.get(name))
+    world = document.get("world")
+    if isinstance(world, dict):
+        backdrop = world.get("backdrop")
+        if isinstance(backdrop, dict):
+            take(backdrop.get("image"))
+        for layer in items(world.get("layers")):
+            take(layer.get("image"))
+        for emitter in items(world.get("emitters")):
+            take(emitter.get("sprite"))
+        for light in items(world.get("light")):
+            take(light.get("texture"))
+    return sorted(set(names))
+
+
+def stage_package(folder: Path, into: Path):
+    """Copy the package in `folder` to `into` (a staged card's
+    content/mun-shape/) as a console would find it, and return the checker's
+    result for the folder.
+
+    Only shape.json and the files it names are copied, whatever their block's
+    verdict, so the card says what the publisher declared and the console
+    keeps or drops exactly what the folder's check says; anything else in the
+    folder (a README, source art) stays out. Only regular files are copied,
+    never through a link, under the contract's path rules, and none larger
+    than the whole package may be; a name that breaks those rules is left out
+    and the checker's notes say why."""
+    from .source import DirectorySource    # a card source over a folder; never follows links
+    from .validate import safe_path
+
+    folder = Path(folder)
+    info = os.lstat(folder) if os.path.lexists(folder) else None
+    if info is None or not stat.S_ISDIR(info.st_mode):
+        raise CardError("shape_folder_missing", f"No existe la carpeta {folder}")
+    source = DirectorySource(folder)
+    result = shape.check_package(source)
+    into = Path(into)
+    if os.path.lexists(into):
+        raise CardError("shape_conflict", f"El contenido de la tarjeta ya tiene {shape.PACKAGE_DIR}/",
+                        "quítalo del directorio de contenido o no uses --shape")
+    into.mkdir(parents=True)
+    manifest = source.stat(shape.MANIFEST)
+    if manifest is None or manifest.kind != "file":
+        return result
+    raw = source.read(shape.MANIFEST, shape.MANIFEST_MAX_BYTES + 1)
+    (into / shape.MANIFEST).write_bytes(raw)
+    try:
+        document = shape.parse_manifest(raw)
+    except Exception:          # the checker has reported it; nothing else is named
+        return result
+    for name in named_files(document):
+        try:
+            safe_path(name, name)
+        except CardError:
+            continue
+        entry = source.stat(name)
+        if entry is None or entry.kind != "file" or entry.size > shape.PACKAGE_MAX_BYTES:
+            continue
+        target = into / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(source.read(name, entry.size))
+    return result
+

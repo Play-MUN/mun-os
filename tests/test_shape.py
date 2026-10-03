@@ -602,6 +602,146 @@ def chunk(kind, body):
     return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body) & 0xFFFFFFFF)
 
 
+@unittest.skipUnless(have_e2fsprogs(), "e2fsprogs (mke2fs, debugfs) not installed")
+class CardPackagingTests(unittest.TestCase):
+    """A package on a card through the card tool: create --shape copies what
+    the console would read (and nothing it would not), inspect summarises it,
+    shape check reads it from the image; names of either generation and a
+    conversion keep it."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="shape-card-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    def run_cli(self, *argv):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = cli.main(list(argv))
+        return code, out.getvalue(), err.getvalue()
+
+    def card_files(self, img):
+        source = DebugfsSource(img, image.find_tool("debugfs"))
+        prefix = "content/mun-shape/"
+        return sorted(path[len(prefix):] for path, _ in source.walk() if path.startswith(prefix))
+
+    def package(self, name, sample="sea"):
+        folder = self.tmp / name
+        shutil.copytree(SAMPLES / sample, folder)
+        return folder
+
+    def test_create_with_shape_copies_the_manifest_and_the_files_it_names_only(self):
+        folder = self.package("sea")
+        (folder / "notes.txt").write_text("not named\n")
+        (folder / "world" / "draft.png").write_bytes((folder / "world" / "backdrop.png").read_bytes())
+        code, out, err = self.run_cli("create", str(self.tmp / "sea.img"), "--shape", str(folder))
+        self.assertEqual(code, 0, err)
+        document = json.loads((folder / "shape.json").read_text())
+        self.assertEqual(self.card_files(self.tmp / "sea.img"), sorted(["shape.json"] + shapetools.named_files(document)))
+        self.assertIn("MUN Shape en la tarjeta: LISTO", out)
+        source = DebugfsSource(self.tmp / "sea.img", image.find_tool("debugfs"))
+        on_card = shape.check_card(source, validate_card(source).root)
+        self.assertEqual((on_card.state, on_card.shape), ("ready", shape.check_package(DirectorySource(folder)).shape))
+
+    def test_create_refuses_a_package_the_console_would_not_use_whole_unless_partial(self):
+        shapetools.write_fixture(self.tmp / "fx", "png-bomb")
+        code, out, err = self.run_cli("create", str(self.tmp / "bomb.img"), "--shape", str(self.tmp / "fx" / "png-bomb"))
+        self.assertEqual(code, 1)
+        self.assertIn("shape_not_ready", err)
+        self.assertIn("shape_png_dimensions", err)
+        self.assertFalse((self.tmp / "bomb.img").exists(), "no card is written when it is refused")
+        code, out, err = self.run_cli("create", str(self.tmp / "bomb.img"), "--shape", str(self.tmp / "fx" / "png-bomb"),
+                                      "--shape-partial")
+        self.assertEqual(code, 0, err)
+        self.assertIn("MUN Shape en la tarjeta: PARCIAL", out)
+
+    def test_a_package_that_is_not_used_at_all_needs_partial_and_keeps_the_card_valid(self):
+        shapetools.write_fixture(self.tmp / "fx", "not-json")
+        self.assertEqual(self.run_cli("create", str(self.tmp / "nj.img"), "--shape", str(self.tmp / "fx" / "not-json"))[0], 1)
+        code, out, err = self.run_cli("create", str(self.tmp / "nj.img"), "--shape", str(self.tmp / "fx" / "not-json"),
+                                      "--shape-partial")
+        self.assertEqual(code, 0, err)
+        code, out, _ = self.run_cli("inspect", str(self.tmp / "nj.img"), "--json")
+        report = json.loads(out)
+        self.assertTrue(report["valid"])
+        self.assertEqual(report["shape"]["state"], "unused")
+        self.assertEqual([note["code"] for note in report["shape"]["notes"]], ["shape_syntax"])
+
+    def test_create_with_shape_never_follows_a_link(self):
+        folder = self.package("linked")
+        outside = self.tmp / "outside.png"
+        outside.write_bytes((folder / "world" / "fish.png").read_bytes())
+        (folder / "world" / "fish.png").unlink()
+        os.symlink(outside, folder / "world" / "fish.png")
+        code, _, err = self.run_cli("create", str(self.tmp / "linked.img"), "--shape", str(folder), "--shape-partial")
+        self.assertEqual(code, 0, err)
+        self.assertNotIn("world/fish.png", self.card_files(self.tmp / "linked.img"))
+
+    def test_create_with_shape_refuses_a_content_tree_that_has_its_own_package(self):
+        game = self.tmp / "game"
+        game.write_bytes(b"\x7fELF stand-in")
+        content = self.tmp / "data"
+        shutil.copytree(SAMPLES / "paper", content / "mun-shape")
+        code, _, err = self.run_cli("create", str(self.tmp / "gl.img"), "--variant", "game-gl", "--game", str(game),
+                                    "--content", str(content), "--shape", str(SAMPLES / "sea"))
+        self.assertEqual(code, 1)
+        self.assertIn("shape_conflict", err)
+        # Without --shape the tree's own package is the card's (docs/shape.md).
+        code, _, err = self.run_cli("create", str(self.tmp / "gl.img"), "--variant", "game-gl", "--game", str(game),
+                                    "--content", str(content))
+        self.assertEqual(code, 0, err)
+        code, out, _ = self.run_cli("inspect", str(self.tmp / "gl.img"), "--json")
+        self.assertEqual(json.loads(out)["shape"]["state"], "ready")
+
+    def test_inspect_summarises_the_contract_version_and_each_block(self):
+        self.assertEqual(self.run_cli("create", str(self.tmp / "sea.img"), "--shape", str(SAMPLES / "sea"))[0], 0)
+        shapetools.write_fixture(self.tmp / "fx", "png-bomb")
+        self.assertEqual(self.run_cli("create", str(self.tmp / "bomb.img"), "--shape", str(self.tmp / "fx" / "png-bomb"),
+                                      "--shape-partial")[0], 0)
+        self.assertEqual(self.run_cli("create", str(self.tmp / "plain.img"))[0], 0)
+        summaries = {}
+        for name in ("sea", "bomb", "plain"):
+            code, out, _ = self.run_cli("inspect", str(self.tmp / f"{name}.img"), "--json")
+            self.assertEqual(code, 0)
+            summaries[name] = json.loads(out)["shape"]
+        self.assertEqual((summaries["sea"]["state"], summaries["sea"]["format"]), ("ready", "mun-shape/1"))
+        self.assertEqual({name: block["state"] for name, block in summaries["sea"]["blocks"].items()},
+                         {name: "used" for name in shape.BLOCKS})
+        world = summaries["bomb"]["blocks"]["world"]
+        self.assertEqual((summaries["bomb"]["state"], world["state"], world["code"]),
+                         ("partial", "dropped", "shape_png_dimensions"))
+        self.assertEqual(summaries["plain"], {"state": "none"})
+        code, out, _ = self.run_cli("inspect", str(self.tmp / "bomb.img"))
+        self.assertIn("MUN Shape: mun-shape/1 · PARCIAL", out)
+        self.assertIn("descartado mundo [shape_png_dimensions]", out)
+
+    def test_shape_check_reads_the_package_on_a_card_and_its_cover(self):
+        self.assertEqual(self.run_cli("create", str(self.tmp / "sea.img"), "--shape", str(SAMPLES / "sea"))[0], 0)
+        code, out, _ = self.run_cli("shape", "check", str(self.tmp / "sea.img"), "--json")
+        self.assertEqual(code, 0)
+        report = json.loads(out)
+        self.assertEqual((report["state"], report["card"]["root"]), ("ready", "content"))
+        self.assertEqual(report["shape"], shape.check_package(DirectorySource(SAMPLES / "sea")).shape)
+        self.assertEqual(self.run_cli("create", str(self.tmp / "plain.img"))[0], 0)
+        code, out, _ = self.run_cli("shape", "check", str(self.tmp / "plain.img"))
+        self.assertEqual(code, 2)
+        self.assertIn("sin paquete", out)
+        self.assertIn("nivel de lectura de la portada", out)
+        code, _, err = self.run_cli("shape", "check", str(self.tmp / "sea.img"), "--cover", str(self.tmp / "x.png"))
+        self.assertEqual(code, 1)
+        self.assertIn("shape_cover_with_card", err)
+        self.assertEqual(self.run_cli("shape", "check", str(self.tmp / "missing.img"))[0], 1)
+
+    def test_cards_of_either_generation_and_a_conversion_keep_the_package(self):
+        from mun_card import convert
+        self.assertEqual(self.run_cli("create", str(self.tmp / "old.img"), "--earlier-names", "--shape",
+                                      str(SAMPLES / "paper"))[0], 0)
+        convert.convert(self.tmp / "old.img", self.tmp / "new.img", self.tmp, True, report=lambda line: None)
+        for name, naming in (("old", "earlier"), ("new", "mun")):
+            source = DebugfsSource(self.tmp / f"{name}.img", image.find_tool("debugfs"))
+            info = validate_card(source)
+            self.assertEqual((info.naming, shape.check_card(source, info.root).state), (naming, "ready"), name)
+
+
 class InitDestinationTests(unittest.TestCase):
     """init writes nothing unless the whole destination is safe, never
     follows a link, and --force only replaces its own names' regular files."""

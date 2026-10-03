@@ -12,7 +12,7 @@ from typing import Optional
 from . import convert, ext4, image, shape, shapetools
 from .errors import CardError
 from .source import DebugfsSource, DirectorySource
-from .validate import validate_card
+from .validate import COVER_MAX_BYTES, validate_card
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CARD_ROOT = REPO_ROOT / ".local" / "gamecards"
@@ -50,6 +50,8 @@ def cmd_create(args: argparse.Namespace) -> int:
                        Path(args.cover) if args.cover else None, args.accent, args.background, saves,
                        naming="earlier" if args.earlier_names else "mun", card_id=args.card_id,
                        version=args.version)
+        if args.shape:
+            _stage_shape(staging, Path(args.shape), args.shape_partial)
         info = image.create_image(destination, staging, args.size, label=f"{image.CARD_LABEL_PREFIX}")
         if args.variant == "full":
             added = image.fill_to_capacity(destination)
@@ -59,7 +61,33 @@ def cmd_create(args: argparse.Namespace) -> int:
           f"{'earlier names: neptune.toml' if args.earlier_names else 'MUN names: mun.toml'})")
     print(f"  mke2fs: {info['version']} at {info['tool']}")
     print(f"  sha256: {info['sha256']}")
+    if args.shape:
+        # What the console will find on the card itself, read back from the image.
+        source = DebugfsSource(destination, image.find_tool("debugfs"))
+        try:
+            card = validate_card(source)
+        except CardError as exc:
+            print(f"  MUN Shape en la tarjeta: sin comprobar, la tarjeta no es válida [{exc.code}]")
+        else:
+            result = shape.check_card(source, card.root)
+            print(f"  MUN Shape en la tarjeta: {_STATE_WORDS[result.state]}")
     return 0
+
+
+def _stage_shape(staging: Path, folder: Path, partial: bool) -> None:
+    """Put the package in `folder` into the staged card's content/mun-shape/,
+    refusing one the console would not use whole unless `partial`."""
+    content = staging / "content"
+    if content.is_symlink() or not content.is_dir():
+        raise CardError("shape_no_content", "Esta variante no tiene una carpeta de contenido donde poner el paquete")
+    result = shapetools.stage_package(folder, content / shape.PACKAGE_DIR)
+    print(f"  MUN Shape de {folder}: {_STATE_WORDS[result.state]}")
+    if result.state != "ready" and not partial:
+        reasons = "; ".join(f"[{note.code}] {note.message}" + (f" ({note.where})" if note.where else "")
+                            for note in result.notes if note.level in ("unused", "dropped", "fallback"))
+        raise CardError("shape_not_ready",
+                        "El paquete no se usaría entero: revísalo con ./mun card shape check, "
+                        "o crea la tarjeta igualmente con --shape-partial", reasons)
 
 
 def cmd_inspect(args: argparse.Namespace) -> int:
@@ -74,6 +102,7 @@ def cmd_inspect(args: argparse.Namespace) -> int:
         info = validate_card(source)
         report["valid"] = True
         report["card"] = info.to_dict()
+        report["shape"] = shape_summary(shape.check_card(source, info.root))
     except CardError as exc:
         report["valid"] = False
         report["error"] = exc.to_dict()
@@ -94,6 +123,7 @@ def cmd_inspect(args: argparse.Namespace) -> int:
                 units = ", ".join(f"{u} ({c})" for u, c in zip(card["saves_units"], card["saves_checks"]))
                 print(f"  partidas de carpeta: ~/{card['saves_directory']} · {units} · "
                       f"máximo {card['saves_max_bytes']} bytes")
+            _print_shape_summary(report["shape"])
         else:
             err = report["error"]
             print(f"  INVÁLIDA  [{err['code']}] {err['message']}" + (f" — {err['detail']}" if err["detail"] else ""))
@@ -156,6 +186,52 @@ _BLOCK_WORDS = {"palette": "paleta", "card": "objeto", "world": "mundo", "surfac
                 "transition": "transición", "sounds": "sonidos"}
 
 
+def shape_summary(result) -> dict:
+    """The package of a card in brief: its state, the contract version it
+    declares, what happens to each block and the notes, for `inspect`."""
+    summary = {"state": result.state}
+    if result.state == "none":
+        return summary
+    dropped = {note.block: note for note in result.notes if note.level == "dropped" and note.block}
+    summary["format"] = result.shape["declared_format"] if result.shape else None
+    blocks = {}
+    for name in shape.BLOCKS:
+        if name in dropped:
+            note = dropped[name]
+            blocks[name] = {"state": "dropped", "code": note.code, "message": note.message, "detail": note.detail,
+                            "where": note.where}
+        elif result.shape is not None and name in result.shape and name != "surfaces":
+            blocks[name] = {"state": "used"}
+    if result.shape is not None:
+        colours = result.shape["surfaces"]["colours"]
+        blocks["surfaces"] = blocks.get("surfaces") or {
+            "state": "used" if colours["source"] == "shape" else "mun",
+            "materials": {surface: result.shape["surfaces"][surface]["material"] for surface in ("entries", "panel")}}
+    summary["blocks"] = blocks
+    summary["notes"] = [note.to_dict() for note in result.notes if note.level != "dropped" or not note.block]
+    return summary
+
+
+def _print_shape_summary(summary: dict) -> None:
+    if summary["state"] == "none":
+        print(f"  MUN Shape: {_STATE_WORDS['none']}")
+        return
+    print(f"  MUN Shape: {summary.get('format') or 'formato no leído'} · {_STATE_WORDS[summary['state']]}")
+    blocks = summary.get("blocks", {})
+    used = [_BLOCK_WORDS[name] for name, block in blocks.items() if block["state"] == "used"]
+    if used:
+        print(f"    usados: {', '.join(used)}")
+    if blocks.get("surfaces", {}).get("state") == "mun":
+        print("    superficies con los colores de MUN (los del juego no mantienen el contraste)")
+    for name, block in blocks.items():
+        if block["state"] == "dropped":
+            print(f"    descartado {_BLOCK_WORDS[name]} [{block['code']}] {block['message']}"
+                  + (f" — {block['detail']}" if block["detail"] else "") + (f" ({block['where']})" if block["where"] else ""))
+    for note in summary.get("notes", []):
+        print(f"    nota [{note['code']}] {note['message']}" + (f" — {note['detail']}" if note.get("detail") else "")
+              + (f" ({note['where']})" if note.get("where") else ""))
+
+
 def _undeclared_files(folder: Path, result) -> list:
     """Files in the folder that the package does not name: never exported."""
     named = set(result.files) | {shape.MANIFEST, "README.md"}
@@ -195,8 +271,8 @@ def _describe_block(name: str, block: dict, files: dict) -> str:
     return ""
 
 
-def _print_shape(folder: Path, result, report: bool, read_level) -> None:
-    print(f"{folder / shape.MANIFEST}")
+def _print_shape(label: str, result, report: bool, read_level) -> None:
+    print(label)
     print(f"  {_STATE_WORDS[result.state]}")
     notes_by_block = {}
     for note in result.notes:
@@ -253,20 +329,43 @@ def _print_shape(folder: Path, result, report: bool, read_level) -> None:
 def _read_level(cover: Optional[str]):
     if not cover:
         return None
-    palette = shapetools.read_palette(shapetools.read_cover(Path(cover)))
+    return _read_level_of(shapetools.read_cover(Path(cover)))
+
+
+def _read_level_of(data: bytes):
+    palette = shapetools.read_palette(data)
     palette["focus"], palette["plate_opacity"] = shape.lent_focus(palette["accent"])
     return palette
 
 
 def cmd_shape_check(args: argparse.Namespace) -> int:
-    folder = Path(args.folder)
-    if not folder.is_dir():
-        raise CardError("shape_folder_missing", f"No existe la carpeta {folder}")
-    result = shape.check_package(DirectorySource(folder))
-    read_level = _read_level(args.cover)
-    extra = _undeclared_files(folder, result)
+    folder = Path(args.target)
+    card = None
+    if folder.is_dir() and not folder.is_symlink():
+        result = shape.check_package(DirectorySource(folder))
+        read_level = _read_level(args.cover)
+        extra = _undeclared_files(folder, result)
+        label = str(folder / shape.MANIFEST)
+    else:
+        # A card image: the card first, as the console checks it, then its
+        # package from the card's own content root, and the cover's palette.
+        path = card_path(args.target)
+        if not path.is_file():
+            raise CardError("shape_target_missing", f"No existe la carpeta ni la tarjeta {args.target}")
+        if args.cover:
+            raise CardError("shape_cover_with_card", "--cover es para una carpeta: con una tarjeta se usa su portada")
+        source = DebugfsSource(path, image.find_tool("debugfs"))
+        info = validate_card(source)
+        result = shape.check_card(source, info.root)
+        cover = source.read(info.cover, COVER_MAX_BYTES) if info.cover else None
+        read_level = _read_level_of(cover) if cover else None
+        extra = []
+        label = f"{path}: {info.root.strip('/')}/{shape.PACKAGE_DIR}/{shape.MANIFEST}"
+        card = {"image": str(path), "root": info.root, "title": info.title, "id": info.id}
     if args.json:
         report = result.to_dict()
+        if card is not None:
+            report["card"] = card
         report["undeclared_files"] = extra
         report["world_class"] = shape.world_class(result.shape)
         if result.shape is not None:
@@ -276,7 +375,7 @@ def cmd_shape_check(args: argparse.Namespace) -> int:
         # Strict JSON: a value that is not finite is a bug here, not output.
         print(json.dumps(report, indent=2, ensure_ascii=False, allow_nan=False))
     else:
-        _print_shape(folder, result, args.report, read_level)
+        _print_shape(label, result, args.report, read_level)
         if extra:
             print(f"  no se copiarían (shape.json no los nombra o su bloque se descarta): {', '.join(extra)}")
     return shape.exit_status(result)
@@ -331,6 +430,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="a file name pattern that is one complete save, with its check (zlib-xml, zlib, xml, any); repeatable")
     p.add_argument("--saves-max-bytes", type=int, metavar="BYTES", help="bound on the sum of the saved files")
     p.add_argument("--size", type=int, default=image.DEFAULT_SIZE_MIB, metavar="MIB")
+    p.add_argument("--shape", metavar="DIR", help="a MUN Shape package folder, copied to content/mun-shape/ "
+                   "(shape.json and the files it names); refused unless the console would use it whole")
+    p.add_argument("--shape-partial", action="store_true",
+                   help="with --shape: make the card even if the console would drop part of the package, or all of it")
     p.add_argument("--earlier-names", action="store_true",
                    help="make a card of the earlier naming generation (neptune.toml, neptune-save/1), for compatibility tests")
     p.add_argument("--force", action="store_true")
@@ -364,9 +467,11 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--force", action="store_true",
                    help="replace existing regular files at the names written (never links or folders; nothing else is touched)")
     s.set_defaults(func=cmd_shape_init)
-    s = shape_sub.add_parser("check", help="check a package folder as a console would; exit 0 all used, 2 otherwise")
-    s.add_argument("folder")
-    s.add_argument("--cover", metavar="PNG", help="also show the palette the console would read from this cover")
+    s = shape_sub.add_parser("check", help="check a package folder, or the package on a card image, as a console "
+                             "would; exit 0 all used, 2 otherwise")
+    s.add_argument("target", help="a package folder, or a card: a name in .local/gamecards/ or an .img path")
+    s.add_argument("--cover", metavar="PNG", help="for a folder: also show the palette the console would read "
+                   "from this cover (a card's own cover is read)")
     s.add_argument("--report", action="store_true", help="add contrast ratios and the memory estimate")
     s.add_argument("--json", action="store_true", help="the normalised package, files, notes and estimates as JSON")
     s.set_defaults(func=cmd_shape_check)

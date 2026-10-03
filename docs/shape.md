@@ -517,7 +517,10 @@ The algorithm, exact so that the console and the checker agree:
 ./mun card shape init DIR [--cover cover.png]   # a template; the palette read from the cover
 ./mun card shape init DIR --example sea         # or a copy of a sample package (sea, paper)
 ./mun card shape check DIR [--report] [--json] [--cover cover.png]
+./mun card shape check CARD [--report] [--json] # the package on a card image, from its content root
 ./mun card shape variants [OUT]                 # the defective packages below
+./mun card create NAME … --shape DIR [--shape-partial]   # a card that carries the package
+./mun card inspect CARD                         # the card, and its package in brief
 ```
 
 `check` prints what a console would use, block by block, each surface's
@@ -549,9 +552,25 @@ left as it was. The template declares a palette, the
 card object, the surfaces and a transition, which need no file, and a README
 explains how to add the world and sounds.
 
-On a card, the package is the folder `content/mun-shape/`. For a
-`game-gl` card made with `mun-card create --variant game-gl --content DIR`,
-place it in `DIR` as `mun-shape/`; the tool copies the tree into `content/`.
+On a card, the package is the folder `content/mun-shape/`.
+
+- `create --shape DIR` puts it there for any variant. It copies
+  `shape.json` and the files it names, whatever their block's verdict, so the
+  card declares what the folder declares and the console drops what the
+  folder's check drops; other files in the folder stay out. Only regular
+  files are copied, never through a link. It refuses a package the console
+  would not use whole (`shape_not_ready`, with the reasons) unless
+  `--shape-partial`, and a content tree that already has `mun-shape/`
+  (`shape_conflict`). The card is then read back: its package's verdict is
+  printed.
+- For a `game-gl` card made with `--content DIR`, the package may instead
+  be `DIR/mun-shape/`; the tool copies the tree into `content/`.
+- `check CARD` reads the card as the console does (the card's own validity
+  first, then `<content root>/mun-shape/`) and shows the read level of the
+  card's own cover; `--cover` is for folders only.
+- `inspect` adds one summary: the format the package declares, its state,
+  the blocks used, each block dropped with its code and reason, and the
+  notes; `--json` gives them under `shape`.
 
 ### Defective packages
 

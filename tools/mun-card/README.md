@@ -69,10 +69,18 @@ the folder that goes on a card as `content/mun-shape/`:
 ./mun card shape init mypkg --example sea       # or a copy of a sample package
 ./mun card shape check mypkg --report           # exit 0 all used, 2 something dropped or unused
 ./mun card shape variants .local/shape-fixtures # one defective package per rule
+./mun card create mine … --shape mypkg          # the package on the card, refused unless used whole
+./mun card shape check mine                     # the package on the card, as the console reads it
+./mun card inspect mine                         # the card, and its package in brief
 ```
 
 `init` writes nothing into a destination with links, or with files at the
 names it writes unless `--force`, which replaces only those files.
+`create --shape` copies `shape.json` and the files it names (regular files,
+never through a link) to `content/mun-shape/`; `--shape-partial` makes the
+card even when the console would drop part of the package or all of it. The
+whole way, previewed in a console: [dress the console in your
+game](../../docs/guides/shape-your-game.md).
 
 Package layout: `minitoml` (strict TOML subset used on both sides),
 `validate` (manifest v0 rules, naming generations and `CardInfo`), `source`

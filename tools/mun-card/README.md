@@ -65,13 +65,13 @@ whether the SHA-256 changed during inspection (it must not).
 the folder that goes on a card as `content/mun-shape/`:
 
 ```sh
-./mun card shape init mypkg --cover cover.png   # template; palette read from the cover
-./mun card shape init mypkg --example sea       # or a copy of a sample package
-./mun card shape check mypkg --report           # exit 0 all used, 2 something dropped or unused
-./mun card shape variants .local/shape-fixtures # one defective package per rule
-./mun card create mine … --shape mypkg          # the package on the card, refused unless used whole
-./mun card shape check mine                     # the package on the card, as the console reads it
-./mun card inspect mine                         # the card, and its package in brief
+./mun card shape init .local/mypkg --cover cover.png   # template; palette read from the cover
+./mun card shape init .local/mypkg --example sea       # or a copy of a sample package
+./mun card shape check .local/mypkg --report           # exit 0 all used, 2 something dropped or unused
+./mun card shape variants .local/shape-fixtures        # one defective package per rule
+./mun card create mine … --shape .local/mypkg          # the package on the card, refused unless used whole
+./mun card shape check mine                            # the package on the card, as the console reads it
+./mun card inspect mine                                # the card, and its package in brief
 ```
 
 `init` writes nothing into a destination with links, or with files at the

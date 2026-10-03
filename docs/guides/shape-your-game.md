@@ -28,8 +28,8 @@ number, are the contract: [MUN Shape](../shape.md).
 ## 1. Create a package
 
 ```sh
-./mun card shape init mypkg --example sea      # a copy of a sample to change
-./mun card shape init mypkg --cover cover.png  # or a template, its palette read from your cover
+./mun card shape init .local/mypkg --example sea      # a copy of a sample to change
+./mun card shape init .local/mypkg --cover cover.png  # or a template, its palette read from your cover
 ```
 
 `--example` copies one of the two samples (`sea`: deep blue glass, a world
@@ -37,12 +37,14 @@ under water, a tide; `paper`: cream paper, ink mountains, a sweep). The
 template from a cover declares a palette (the one the console would read
 from that cover), the card object, the surfaces and a transition, which need
 no file; its README says how to add a world and sounds. `init` never writes
-over files you have, unless you ask with `--force`.
+over files you have, unless you ask with `--force`. The package lives in
+`.local/`, which Git ignores, like the rest of your work in these guides: a
+build refuses a checkout with files Git does not know.
 
 ## 2. What is in it
 
 ```text
-mypkg/
+.local/mypkg/
   shape.json            the package: JSON, format "mun-shape/1"
   card/window.png       the card object's screen
   world/backdrop.png    the world behind Home: backdrop, layers, sprites, light
@@ -98,7 +100,7 @@ Use only art and sounds you have the right to put on the card.
 ## 4. Check it
 
 ```sh
-./mun card shape check mypkg --report
+./mun card shape check .local/mypkg --report
 ```
 
 The checker reads the folder exactly as a console reads a card. Its first
@@ -121,7 +123,7 @@ yet.
 ## 5. Preview it in the console
 
 ```sh
-./mun dev shape mypkg --watch --window
+./mun dev shape .local/mypkg --watch --window
 ```
 
 A laboratory console starts in a window (the guest `shape`, made the first
@@ -152,7 +154,7 @@ Add `--shape` to the command that makes your card:
 
 ```sh
 ./mun card create mygame --variant game --game .local/mycollect/mun-collect \
-    --title "My Game" --id org.example.mygame --version 1.0.0 --shape mypkg
+    --title "My Game" --id org.example.mygame --version 1.0.0 --shape .local/mypkg
 ```
 
 `--shape` copies `shape.json` and the files it names to the card's

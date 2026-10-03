@@ -19,9 +19,9 @@ them.
 ```sh
 ./mun card shape check examples/shape/sea --report
 ./mun card shape check examples/shape/paper --report
-./mun card shape init mypkg --example paper     # a copy to change
-./mun dev shape examples/shape/sea --window     # the sample in a laboratory console
-afplay examples/shape/sea/sfx/insert.wav        # macOS; aplay on Linux
+./mun card shape init .local/mypkg --example paper     # a copy to change
+./mun dev shape examples/shape/sea --window            # the sample in a laboratory console
+afplay examples/shape/sea/sfx/insert.wav               # macOS; aplay on Linux
 ```
 
 From a copy to a card of your own: [dress the console in your

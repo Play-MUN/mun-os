@@ -164,8 +164,8 @@ laboratory, through the real card service and shell
 
 ```sh
 ./mun dev shape examples/shape/sea --window            # a console in a window with the package on a card
-./mun dev shape mypkg --watch                          # no window; every change re-inserted; Ctrl-C ends
-./mun dev shape mypkg --watch --base mygame            # a copy of mygame dressed instead of MUN Collect
+./mun dev shape .local/mypkg --watch                   # no window; every change re-inserted; Ctrl-C ends
+./mun dev shape .local/mypkg --watch --base mygame     # a copy of mygame dressed instead of MUN Collect
 ```
 
 - The console is the guest `shape` (`--guest`), made the first time from the

@@ -427,6 +427,28 @@ class SampleTests(unittest.TestCase):
             self.assertEqual(present, named, name)       # nothing unused, nothing missing
             for display, values in shape.memory_estimate(result).items():
                 self.assertLessEqual(values["total"], values["objective"], (name, display))
+                self.assertEqual(values["level"], 0, (name, display))
+
+    def test_the_estimate_is_the_consoles(self):
+        # The console's own estimate, from its journal in the laboratory
+        # (MiB, rounded down): sea 81 at 1080p and 137 at 1440p, paper 64 at 1080p.
+        estimates = {name: shape.memory_estimate(self.result(name)) for name in ("sea", "paper")}
+        self.assertEqual(int(estimates["sea"]["1080p"]["total"]), 81)
+        self.assertEqual(int(estimates["sea"]["1440p"]["total"]), 137)
+        self.assertEqual(int(estimates["paper"]["1080p"]["total"]), 64)
+
+    def test_a_world_that_scales_large_is_drawn_still_as_the_console_would(self):
+        folder = Path(tempfile.mkdtemp(prefix="shape-wide-"))
+        self.addCleanup(shutil.rmtree, folder, True)
+        (folder / "wide.png").write_bytes(shapetools.encode_png(512, 16, [bytes([50, 100, 130]) * 512] * 16, False))
+        (folder / "shape.json").write_text(json.dumps({"format": "mun-shape/1", "world": {
+            "backdrop": {"gradient": ["#001020", "#203040"]}, "layers": [{"image": "wide.png", "motion": "drift"}]}}))
+        estimates = shape.memory_estimate(shape.check_package(DirectorySource(folder)))
+        for display in ("1080p", "1440p"):
+            values = estimates[display]
+            self.assertEqual((values["level"], values["detail"]), (3, "still"), display)
+            self.assertGreater(values["levels"][0], values["objective"], display)
+            self.assertLessEqual(values["total"], values["objective"], display)
 
     def test_the_identities_differ_in_every_aspect_but_the_contract(self):
         sea, paper = self.result("sea").shape, self.result("paper").shape

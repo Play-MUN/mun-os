@@ -280,7 +280,9 @@ within 10 ms (95th percentile) of the console without Shape; nothing drawn
 continuously while the world is still or resting; incremental memory at most
 136 MiB at 1080p and 200 MiB at 1440p, the package's copy included; ready
 within 1.5 s of the card being valid. `mun-card shape check --report`
-estimates a package's memory by arithmetic, which is not a measurement. A
+computes the console's own estimate (*Fits the display*) from the headers
+and the level of detail a console would choose at 1080p and 1440p; an
+estimate before decoding, not a measurement. A
 package that fits the enforced limits but not a display's budget is to be
 drawn at a lower level of detail (without light textures, then with fewer
 layers, then still, then colours only), never at the expense of navigation.
@@ -526,7 +528,10 @@ The algorithm, exact so that the console and the checker agree:
 
 `check` prints what a console would use, block by block, each surface's
 colours, opacity and transition plan, and every note; `--report` adds the
-contrast ratios and the memory estimate; `--json` prints the normalised
+contrast ratios and, per display, the level of detail a console would draw
+the world at with its peak by category (the console's arithmetic, the
+richer levels' peaks when it would step down), and the card window and
+sounds outside the world's budget; `--json` prints the normalised
 package, the files, the notes and the estimates, as strict JSON (no `NaN`
 or infinities; a silent sound's `peak_dbfs` is `null`). It exits 0 when
 everything declared is used, 2 when anything is dropped, replaced or the

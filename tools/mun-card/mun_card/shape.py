@@ -999,45 +999,103 @@ def world_class(shape: Optional[Dict[str, Any]]) -> str:
     return f"{world['rate']} fps" if moving else "still"
 
 
-# Memory objectives (docs/shape.md), not measured limits: the shell's peak
-# over neutral Home plus the export, per display.
+# The display's budget for what a world adds (docs/shape.md, "Fits the
+# display"), and its levels of detail. memory_estimate() does the console's
+# own arithmetic from the images' headers (MUN Shell's src/shapeworld.cpp),
+# so that the checker says at which level a console would draw the world.
+# An estimate before decoding, not a measurement.
 MEMORY_OBJECTIVES = {"1080p": (1920, 1080, 136), "1440p": (2560, 1440, 200)}
+DETAIL_LEVELS = ("full", "no light textures", "backdrop and nearest layer at 10 fps", "still", "none")
 
 
-def memory_estimate(result: ShapeResult) -> Dict[str, Dict[str, float]]:
-    """Arithmetic estimate, in MiB, of what the shell would hold for this
-    package at each display, by the categories of docs/shape.md. Not a
-    measurement: the shell's own figures are measured with the renderer."""
+def _lround(value: float) -> int:
+    """C's lround for the positive values here: half away from zero."""
+    return int(math.floor(value + 0.5))
+
+
+def _image_bytes(width: int, height: int, bits: int = 32) -> int:
+    """A QImage's bytes: its lines padded to 32 bits."""
+    return (width * bits + 31) // 32 * 4 * height
+
+
+def _decode_bytes(details: Dict[str, Any]) -> int:
+    """Decoding one PNG as the console does: the format Qt gives its colour
+    type and depth (16-bit colour 64 bits a pixel, 16-bit grey 16, 8-bit
+    colour 32, palette and grey at most 8), plus the premultiplied copy when
+    that format is not 32 bits wide."""
+    width, height, depth, colour = details["width"], details["height"], details["depth"], details["colour"]
+    if depth == 16:
+        bits = 64 if colour in (2, 4, 6) else 16
+    else:
+        bits = 32 if colour in (2, 4, 6) else 8
+    return _image_bytes(width, height, bits) + (0 if bits == 32 else _image_bytes(width, height))
+
+
+def _world_peak(world: Dict[str, Any], files: Dict[str, Any], export: int, width: int, height: int,
+                level: int) -> Dict[str, int]:
+    """What `level` of the world takes at its peak on a display, by category,
+    in bytes: four frames (two, the transition's content, one for a copy Qt
+    may make), the export, the backdrop, what the level keeps of the layers
+    (each as wide as it scales to, at the display's height), the sprites in
+    three sizes and mirrored, the light textures over the screen, and the
+    largest one image being decoded."""
+    full = _image_bytes(width, height)
+    scale = height / 1080
+    peak = {"frames": 4 * full, "export": export, "backdrop": full, "layers": 0, "sprites": 0, "lights": 0, "decode": 0}
+    decodes = []
+    if "image" in world["backdrop"]:
+        decodes.append(_decode_bytes(files[world["backdrop"]["image"]]))
+    layers = world["layers"]
+    for index, layer in enumerate(layers):
+        if level >= 2 and index != len(layers) - 1:
+            continue
+        details = files[layer["image"]]
+        decodes.append(_decode_bytes(details))
+        if level <= 2:
+            peak["layers"] += _image_bytes(max(1, _lround(details["width"] * height / details["height"])), height)
+    if level <= 1:
+        for emitter in world["emitters"]:
+            details = files[emitter["sprite"]]
+            decodes.append(_decode_bytes(details))
+            factor = emitter["scale"] * scale
+            for size in (0.8, 1.0, 1.2):
+                peak["sprites"] += 2 * _image_bytes(max(1, _lround(details["width"] * factor * size)),
+                                                    max(1, _lround(details["height"] * factor * size)))
+    if level == 0:
+        for light in world["light"]:
+            decodes.append(_decode_bytes(files[light["texture"]]))
+            grow = 1.06 if light["motion"] == "sway" else 1.0
+            peak["lights"] += _image_bytes(_lround(width * grow), _lround(height * grow))
+    peak["decode"] = max(decodes, default=0)
+    return peak
+
+
+def memory_estimate(result: ShapeResult) -> Dict[str, Dict[str, Any]]:
+    """Per display: the level of detail a console would draw the world at
+    (the richest whose peak fits the budget), its peak in MiB by category,
+    every level's peak, and, outside the world's budget, the card window and
+    the sounds the shell decodes. Without a world: level `none`."""
     shape, files = result.shape or {}, result.files
     world = shape.get("world")
     mib = 1024 * 1024
+    export = sum(details["bytes"] for details in files.values())
+    window = shape.get("card", {}).get("window")
+    others = {"window": round(_image_bytes(files[window]["width"], files[window]["height"]) / mib, 1) if window else 0.0,
+              "sounds": round(sum(details["seconds"] * SOUND_RATE * 4 for details in files.values()
+                                  if details["type"] == "wav") / mib, 1)}
     estimates = {}
     for name, (width, height, objective) in MEMORY_OBJECTIVES.items():
-        scale = (width / 1920) ** 2
-        screen = width * height * 4
-        full_screen = 0
-        sprites = 0.0
-        if world:
-            full_screen = 1 + len(world["layers"]) + len(world["light"])
-            for emitter in world["emitters"]:
-                details = files[emitter["sprite"]]
-                sprites += details["width"] * details["height"] * 4 * scale * emitter["scale"] ** 2
-        window = shape.get("card", {}).get("window")
-        if window:
-            sprites += files[window]["width"] * files[window]["height"] * 4 * scale
-        pngs = [details for details in files.values() if details["type"] == "png"]
-        categories = {
-            "export": sum(details["bytes"] for details in files.values()) / mib,
-            "layers": full_screen * screen / mib,
-            "sprites_window": sprites / mib,
-            "frames": (2 if world_class(shape).endswith("fps") else (1 if world else 0)) * screen / mib,
-            "sounds": sum(details["seconds"] * SOUND_RATE * 4 for details in files.values()
-                          if details["type"] == "wav") / mib,
-            "decode": max((d["width"] * d["height"] * 4 for d in pngs), default=0) / mib,
-            "previous": (screen / mib) if world else 0,
-        }
-        categories = {key: round(value, 1) for key, value in categories.items()}
-        categories["total"] = round(sum(categories.values()), 1)
-        categories["objective"] = objective
-        estimates[name] = categories
+        entry: Dict[str, Any] = {"objective": objective, "others": others}
+        if not world:
+            entry.update(level=4, detail=DETAIL_LEVELS[4], total=0.0, levels=[])
+            estimates[name] = entry
+            continue
+        peaks = [_world_peak(world, files, export, width, height, level) for level in range(4)]
+        totals = [sum(peak.values()) for peak in peaks]
+        level = next((index for index, total in enumerate(totals) if total <= objective * mib), 4)
+        shown = peaks[min(level, 3)]
+        entry.update(level=level, detail=DETAIL_LEVELS[level], total=round(totals[min(level, 3)] / mib, 1),
+                     levels=[round(total / mib, 1) for total in totals],
+                     categories={key: round(value / mib, 1) for key, value in shown.items()})
+        estimates[name] = entry
     return estimates

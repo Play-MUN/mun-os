@@ -180,8 +180,10 @@ _STATE_WORDS = {
     "unused": "SIN USO: la consola no usaría el paquete; la tarjeta sigue siendo válida",
     "none": "sin paquete: la consola usaría el nivel de lectura de la portada o MUN",
 }
-_MEMORY_WORDS = {"export": "exportación", "layers": "capas", "sprites_window": "figuras y ventana",
-                 "frames": "fotogramas", "sounds": "sonidos", "decode": "decodificación", "previous": "anterior"}
+_MEMORY_WORDS = {"frames": "fotogramas", "export": "exportación", "backdrop": "fondo", "layers": "capas",
+                 "sprites": "figuras", "lights": "luces", "decode": "decodificación"}
+_LEVEL_WORDS = ("completo", "sin texturas de luz", "fondo y capa cercana a 10 fps", "quieto (compuesto una vez)",
+                "ninguno (la paleta sobre el mundo de MUN)")
 _BLOCK_WORDS = {"palette": "paleta", "card": "objeto", "world": "mundo", "surfaces": "superficies",
                 "transition": "transición", "sounds": "sonidos"}
 
@@ -306,11 +308,20 @@ def _print_shape(label: str, result, report: bool, read_level) -> None:
         print(f"    texto/placa {shape.contrast_ratio(colours['text'], colours['plate']):.2f}:1 (mínimo {shape.TEXT_RATIO:g}) · "
               f"foco/placa {shape.contrast_ratio(colours['focus'], colours['plate']):.2f}:1 (mínimo {shape.FOCUS_RATIO:g}) · "
               f"placa de MUN a {shape.neutral_opacity():.3f}")
-        print("  memoria estimada (aritmética, no medida; objetivos pendientes de medir en el shell):")
-        for display, values in shape.memory_estimate(result).items():
-            parts = ", ".join(f"{_MEMORY_WORDS[key]} {value:g}" for key, value in values.items()
-                              if key not in ("total", "objective"))
-            print(f"    {display}: {values['total']:g} MiB de {values['objective']} ({parts})")
+        print("  memoria del mundo en su pico, calculada como la consola antes de decodificar (no medida):")
+        estimates = shape.memory_estimate(result)
+        for display, values in estimates.items():
+            if values["level"] == 4 and not values["levels"]:
+                print(f"    {display}: sin mundo")
+                continue
+            parts = ", ".join(f"{_MEMORY_WORDS[key]} {value:g}" for key, value in values["categories"].items() if value)
+            richer = (f"; el nivel completo pediría {values['levels'][0]:g} MiB" if values["level"] > 0 else "")
+            print(f"    {display}: nivel {_LEVEL_WORDS[values['level']]}, {values['total']:g} MiB de "
+                  f"{values['objective']} ({parts}){richer}")
+        others = next(iter(estimates.values()))["others"]
+        if others["window"] or others["sounds"]:
+            print(f"    además, fuera del presupuesto del mundo: ventana {others['window']:g} MiB, "
+                  f"sonidos {others['sounds']:g} MiB")
     if read_level is not None:
         tokens = " ".join(f"{key} {value}" for key, value in read_level.items() if key not in ("focus", "plate_opacity"))
         print(f"  nivel de lectura de la portada: {tokens}")

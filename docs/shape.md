@@ -515,6 +515,9 @@ The algorithm, exact so that the console and the checker agree:
 
 ## Tools
 
+The way from a folder to a card, step by step, is a guide:
+[dress the console in your game](guides/shape-your-game.md).
+
 ```sh
 ./mun card shape init DIR [--cover cover.png]   # a template; the palette read from the cover
 ./mun card shape init DIR --example sea         # or a copy of a sample package (sea, paper)

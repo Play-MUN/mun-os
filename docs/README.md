@@ -14,6 +14,9 @@
   your own, from the executable to a save restored after a restart.
 - [Bring a game to MUN](guides/port-a-game.md): runtime profiles, libraries,
   data and saves, recipes; why packaging a game is not porting it.
+- [Dress the console in your game](guides/shape-your-game.md): a MUN Shape
+  package from a sample to a card, checked, previewed in the console,
+  played and ejected.
 
 ## Contracts
 

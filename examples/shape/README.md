@@ -20,8 +20,12 @@ them.
 ./mun card shape check examples/shape/sea --report
 ./mun card shape check examples/shape/paper --report
 ./mun card shape init mypkg --example paper     # a copy to change
+./mun dev shape examples/shape/sea --window     # the sample in a laboratory console
 afplay examples/shape/sea/sfx/insert.wav        # macOS; aplay on Linux
 ```
+
+From a copy to a card of your own: [dress the console in your
+game](../../docs/guides/shape-your-game.md).
 
 Every image and sound here is made by [`generate.py`](generate.py) with
 Python's standard library and fixed seeds: gradients, silhouettes from sums

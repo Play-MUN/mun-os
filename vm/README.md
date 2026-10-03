@@ -159,7 +159,8 @@ Rules the tool enforces:
 
 `./mun dev shape DIR` shows a MUN Shape package folder in a console of the
 laboratory, through the real card service and shell
-([docs/shape.md](../docs/shape.md#tools)):
+([docs/shape.md](../docs/shape.md#tools),
+[the guide](../docs/guides/shape-your-game.md)):
 
 ```sh
 ./mun dev shape examples/shape/sea --window            # a console in a window with the package on a card

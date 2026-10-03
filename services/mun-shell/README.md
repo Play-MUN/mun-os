@@ -289,6 +289,11 @@ code (`src/shape.*`, `src/shapeworld.*`, `src/shapefront.h`):
     a transition's frames are timed, not judged.
   - An image that does not decode drops the whole world: the palette over
     MUN's world.
+  - What it costs, measured in the laboratory's virtual machine (software
+    renderer) at 1080p and 1440p: CPU at rest and navigating, key-to-frame
+    time, frame pacing, memory and the estimate, in
+    [docs/shape.md](../../docs/shape.md#measured). Light textures are most
+    of a world's paint time; at 1440p the VM is at the watchdog's edge.
 - **Decoding**: the export's `shape.json` (bound to the insertion), the
   window image, the cover and the world's images are read and decoded off
   the GUI thread, with the dimensions checked first (1024 × 1024 for the

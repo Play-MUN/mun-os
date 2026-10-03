@@ -33,8 +33,9 @@ come from CardClient. The cases:
   it leaves, lent colours (controller.qml).
 - world: ShapeWorld alone (world.qml): its detail within the budget, its
   frames in motion, still and at rest, a still world set whole at once
-  (shown, not the empty frame before it), its steps down, a layer that does
-  not decode.
+  (shown, not the empty frame before it), every option the samples do not
+  use (a swaying layer, an orbit, a pulsing light added, a still one), its
+  steps down, a layer that does not decode.
 - memory: what a world takes at its peak, the shell's own resident memory
   measured (wait4) against the engine's estimate at 1080p and 1440p, for
   worlds that keep every limit but scale large or decode larger, and a
@@ -802,6 +803,62 @@ def world_cases(shell: Shell, checks: Checks, exports: Path, packages: Path):
             shown = tuple(image[2][i:i + 3])
         checks.expect(case, "a still world set whole at once is shown, not the empty frame before it",
                       shown is not None and sum(shown) > 60, (shown, probes.get("end")))
+
+    # Every option no sample uses, drawn: a swaying layer, an orbiting
+    # emitter, a light that pulses and is added, a still one screened. Two
+    # grabs 2.5 s of world time apart: the bars moved, within their sway; the
+    # sprites keep to their orbit around the card object and moved; the light
+    # brightens the backdrop and breathes.
+    W, H = 1920, 1080
+    bars = [bytes(4 * W)] * (H - 160) + [b"".join(bytes([240, 240, 240, 255]) if (x // 60) % 2 == 0 else bytes(4)
+                                                  for x in range(W))] * 160
+    dot = [b"".join(bytes([230, 40, 40, 255]) if (x - 16) ** 2 + (y - 16) ** 2 < 196 else bytes(4) for x in range(32))
+           for y in range(32)]
+    options = write_package(packages / "world-options", {"format": "mun-shape/1", "world": {
+        "backdrop": {"gradient": ["#101418", "#101418"]}, "rate": 20,
+        "layers": [{"image": "bars.png", "motion": "sway", "speed": 90}],
+        "emitters": [{"sprite": "dot.png", "count": 12, "path": "orbit", "speed": 160, "band": [0.3, 0.7]}],
+        "light": [{"texture": "glow.png", "motion": "pulse", "blend": "add", "opacity": 0.25},
+                  {"texture": "haze.png", "motion": "still", "blend": "screen", "opacity": 0.4}]}}, {
+        "bars.png": png(W, H, bars, colour=6), "dot.png": png(32, 32, dot, colour=6),
+        "glow.png": png(64, 36, [bytes([255, 255, 255, 255]) * 64] * 36, colour=6),
+        "haze.png": png(64, 36, [bytes([40, 80, 120, 255]) * 64] * 36, colour=6)})
+    options_world, options_root = world_of(export(exports, insertion(0x402), options))
+    out, probes, grabs = run("world-options", [{"at": 0, "root": options_root, "world": options_world, "progress": 1},
+                                               {"at": 1500, "grab": "options-a"}, {"at": 1600, "probe": "a"},
+                                               {"at": 4000, "grab": "options-b"}, {"at": 4100, "probe": "b"},
+                                               {"at": 4300, "quit": True}])
+    a, b = probes.get("a", {}), probes.get("b", {})
+    checks.expect("world-options", "every option accepted and drawn at full detail, in motion",
+                  a.get("drawn") and a.get("detail") == 0 and b.get("frames", 0) - a.get("frames", 0) >= 30, (a, b))
+    shots = [read_ppm(Path(grabs[name]["path"])) for name in ("options-a", "options-b") if grabs.get(name, {}).get("path")]
+    if len(shots) == 2:
+        def at(image, x, y):
+            i = (y * image[0] + x) * 3
+            return image[2][i:i + 3]
+
+        def sprites(image):   # red over everything else, however the light brightens it
+            return {(x, y) for y in range(0, H, 4) for x in range(0, W, 4)
+                    if (lambda p: p[0] - p[1] > 90 and p[0] - p[2] > 90)(at(image, x, y))}
+
+        def bar_edge(image):
+            row = [at(image, x, H - 80)[0] > 150 for x in range(W)]
+            return next((x for x in range(1, W) if row[x] and not row[x - 1]), None)
+
+        found = [sprites(image) for image in shots]
+        # The orbit: 280 to 280 + 0.6 of the band (432) canvas px around (470, 570), flattened to 0.32.
+        outside = [p for group in found for p in group if abs(p[0] - 470) > 560 or abs(p[1] - 570) > 560 * 0.32 + 20]
+        checks.expect("world-options", "orbit: the sprites circle the card object, and move",
+                      all(found) and not outside and found[0] != found[1],
+                      ([len(group) for group in found], outside[:3]))
+        edges = [bar_edge(image) for image in shots]
+        checks.expect("world-options", "sway: the layer moved, within its 90 px either way",
+                      None not in edges and 0 < abs(edges[0] - edges[1]) <= 180, edges)
+        clear = [tuple(at(image, 1700, 120)) for image in shots]
+        checks.expect("world-options", "lights: added and screened over the backdrop, the added one breathing",
+                      all(p[2] > 24 + 40 for p in clear) and clear[0] != clear[1], clear)
+    else:
+        checks.expect("world-options", "both frames grabbed", False, grabs)
 
     out, probes, _ = run("world-steps", base + [
         {"at": 1200, "probe": "d0"}, {"at": 1300, "stepDown": "test"}, {"at": 1600, "probe": "d1"},

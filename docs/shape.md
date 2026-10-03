@@ -521,6 +521,7 @@ The algorithm, exact so that the console and the checker agree:
 ./mun card shape variants [OUT]                 # the defective packages below
 ./mun card create NAME … --shape DIR [--shape-partial]   # a card that carries the package
 ./mun card inspect CARD                         # the card, and its package in brief
+./mun dev shape DIR [--watch] [--window] [--base CARD]   # preview it in a laboratory console
 ```
 
 `check` prints what a console would use, block by block, each surface's
@@ -571,6 +572,17 @@ On a card, the package is the folder `content/mun-shape/`.
 - `inspect` adds one summary: the format the package declares, its state,
   the blocks used, each block dropped with its code and reason, and the
   notes; `--json` gives them under `shape`.
+- `./mun dev shape DIR` makes a disposable card from the folder (MUN
+  Collect from the guest's build, or with `--base CARD` a copy of that card,
+  which is only read) and inserts it in a laboratory console (`shape` by
+  default, made the first time). With `--watch`, every change in the folder
+  is checked and, once the folder has been still for a second and no game
+  is being played, the card leaves by the safe removal and a new one is
+  inserted: a new insertion each time, never a package changed under one.
+  A folder the console would not use is reported and the card stays. The
+  preview's cards are `pv0-<guest>` and `pv1-<guest>`; it starts only in a
+  console with no other card in, and never takes out or deletes another
+  card ([the laboratory](../vm/README.md#mun-shape-preview)).
 
 ### Defective packages
 

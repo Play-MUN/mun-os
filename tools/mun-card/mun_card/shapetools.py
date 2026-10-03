@@ -824,3 +824,77 @@ def stage_package(folder: Path, into: Path):
         target.write_bytes(source.read(name, entry.size))
     return result
 
+
+def clone_image(source: Path, destination: Path) -> None:
+    """A copy of a card image: a copy-on-write clone where the filesystem has
+    them (APFS, Btrfs, XFS), else a plain copy. The source is only read."""
+    source, destination = Path(source), Path(destination)
+    if os.path.lexists(destination):
+        raise CardError("image_exists", f"{destination} ya existe")
+    for command in (["cp", "-c", str(source), str(destination)],                 # macOS: clonefile
+                    ["cp", "--reflink=auto", str(source), str(destination)]):    # Linux
+        try:
+            if __import__("subprocess").run(command, capture_output=True).returncode == 0:
+                return
+        except OSError:
+            pass
+        if os.path.lexists(destination):
+            os.unlink(destination)
+    import shutil
+    shutil.copyfile(source, destination)
+
+
+def replace_package(image_path: Path, content_root: str, staged: Path) -> None:
+    """Replace `<content_root>/mun-shape/` on a card image with the folder
+    `staged` (what stage_package wrote), with debugfs, without mounting.
+
+    For disposable copies only (the laboratory's preview makes one from a
+    base card): it writes the image in place, so it is never given a card a
+    player keeps. Only the package's own folder is listed, removed and
+    written; the rest of the card is not touched. Read back afterwards: every
+    file there, with its size."""
+    import subprocess
+    import tempfile
+    from .image import find_tool
+    from .source import DebugfsSource
+
+    debugfs = find_tool("debugfs")
+    source = DebugfsSource(image_path, debugfs)
+    base = f"{content_root.strip('/')}/{shape.PACKAGE_DIR}"
+    commands: List[str] = []
+    existing = source.stat(base)
+    if existing is not None and existing.kind == "dir":
+        found: List[Tuple[str, str]] = []
+        pending = [base]
+        while pending:
+            directory = pending.pop()
+            for name, kind, _ in source.list(directory):
+                path = f"{directory}/{name}"
+                found.append((path, kind))
+                if kind == "dir":
+                    pending.append(path)
+        for path, kind in sorted(found, key=lambda item: item[0].count("/"), reverse=True):
+            commands.append(f"{'rmdir' if kind == 'dir' else 'rm'} /{path}")
+        commands.append(f"rmdir /{base}")
+    elif existing is not None:
+        commands.append(f"rm /{base}")
+    staged = Path(staged)
+    wanted: Dict[str, int] = {}
+    commands.append(f"mkdir /{base}")
+    for path in sorted(staged.rglob("*"), key=lambda item: (item.relative_to(staged).as_posix().count("/"), str(item))):
+        relative = f"{base}/{path.relative_to(staged).as_posix()}"
+        if path.is_dir():
+            commands.append(f"mkdir /{relative}")
+        else:
+            commands.append(f"write {path} /{relative}")
+            wanted[relative] = path.stat().st_size
+    with tempfile.NamedTemporaryFile("w", suffix=".debugfs", delete=False) as script:
+        script.write("\n".join(commands) + "\n")
+    try:
+        subprocess.run([debugfs, "-w", "-f", script.name, str(image_path)], capture_output=True, check=False)
+    finally:
+        os.unlink(script.name)
+    for relative, size in wanted.items():
+        entry = source.stat(relative)
+        if entry is None or entry.kind != "file" or entry.size != size:
+            raise CardError("shape_write_failed", "No se pudo escribir el paquete en la copia de la tarjeta", relative)

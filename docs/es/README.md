@@ -2,7 +2,8 @@
 
 [English](../README.md) · **Español**
 
-Las páginas que todavía no tienen traducción enlazan a su original, en inglés.
+Las páginas que todavía no tienen traducción enlazan a su original, en inglés
+([lo que sigue en inglés](#lo-que-sigue-en-inglés)).
 
 ## Empieza aquí
 
@@ -58,3 +59,25 @@ Los componentes documentan sus propios protocolos, unidades y privilegios:
 [`mun-card`](../../tools/mun-card/README.md),
 [ejemplos](../../examples/README.md) y [pruebas](../../tests/README.md), todos
 en inglés.
+
+## Lo que sigue en inglés
+
+La versión inglesa es la referencia técnica; la española cubre, por ahora,
+el README, esta página, los primeros pasos y el glosario. Sigue solo en
+inglés:
+
+- Las demás páginas de `docs/`: guías, contratos, arquitectura, licencias y
+  publicación de versiones. Aquí aparecen marcadas «en inglés».
+- `CONTRIBUTING.md`, `SECURITY.md` y los README de los componentes, de las
+  herramientas, de los ejemplos, de las pruebas, del laboratorio y de la
+  construcción de la imagen.
+- Los textos de las licencias (`LICENSE`, `NOTICE`, `NAME-AND-LOGO.txt` y
+  las licencias de las tipografías), que son los que valen.
+- El código, sus comentarios, los mensajes de los commits y la plantilla de
+  las pull requests.
+- Los mensajes y la ayuda (`--help`) de `./mun get`, `./mun play` y
+  `./mun dev`, y los de QEMU. Los mensajes de `./mun card` están en español
+  y su ayuda, en inglés.
+
+La consola arranca en inglés y también habla español
+([glosario](glossary.md#las-palabras-de-la-consola)).

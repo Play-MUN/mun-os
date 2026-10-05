@@ -3,6 +3,27 @@
   "about": "Each translation with its English original, the technical reference, and the SHA-256 of the original's text when the translation was last reviewed against it. scripts/check_foundation.py checks the pairs; source_sha256 is set by hand, only after the translation has been reviewed.",
   "translations": [
     {
+      "translation": "README.es.md",
+      "source": "README.md",
+      "language": "es",
+      "reviewed": "2026-10-05",
+      "source_sha256": "e0249145bffbad5b3426c499014ba2e7801b88e14f2848543f77ef17667ed866"
+    },
+    {
+      "translation": "docs/es/README.md",
+      "source": "docs/README.md",
+      "language": "es",
+      "reviewed": "2026-10-05",
+      "source_sha256": "d6c001dffa8e323989ee9b5f7fac88efe9439d986b1e028edad731cf8f8d28eb"
+    },
+    {
+      "translation": "docs/es/getting-started.md",
+      "source": "docs/getting-started.md",
+      "language": "es",
+      "reviewed": "2026-10-05",
+      "source_sha256": "6d86f8700537e61eb0737690ee6caa2b2d6eebef6f532db374f82ca5886378bd"
+    },
+    {
       "translation": "docs/es/glossary.md",
       "source": "docs/glossary.md",
       "language": "es",

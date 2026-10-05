@@ -164,10 +164,10 @@ def check_build(guest: str, build_dir: Path, latest: Optional[Path], recorded: b
         made = "no readable BUILD-INFO"
     which = f"guest {guest} runs build {build_dir.name}" if recorded else f"build {build_dir.name}"
     if found is None:
-        why = (f"{which} ({made}) records no MUN Shape: it was made before builds recorded the MUN Shape their "
-               "console reads, so it does not say what it shows (v0.1.0-dev.2 shows none)")
+        why = (f"{which} ({made}), which records no MUN Shape: it was made before builds recorded the MUN Shape "
+               "their console reads, so it does not say what it shows (v0.1.0-dev.2 shows none)")
     else:
-        why = f"{which} ({made}) reads {found}; this checkout writes {shape_rules.FORMAT}"
+        why = f"{which} ({made}), which reads {found}; this checkout writes {shape_rules.FORMAT}"
     if latest is not None and latest != build_dir and build_shape(latest) == shape_rules.FORMAT:
         fix = (f"use a guest made from build {latest.name}: --guest NAME (a new one)"
                + (f", or remove this one first: ./mun dev vm {guest} destroy --yes" if recorded else ""))

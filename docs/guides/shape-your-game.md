@@ -183,8 +183,14 @@ Then check the card itself, as the console will find it:
 ## 7. Insert, play, come back, eject
 
 ```sh
-./mun play --card mygame
+./mun play                                  # a console with no card, in a window
+./mun dev vm play card-attach mygame        # once Home is on screen, from another terminal
 ```
+
+`./mun play --card mygame` puts the card in as the console starts: the
+console finds it there and is dressed at once, without the arrival and the
+cue. To see them, put the card in once Home is up, as above ([see MUN Shape
+in action](see-shape-in-action.md) walks through it).
 
 - **Insert.** The card is read, the card object takes your window, then
   your transition brings the identity in from the object outwards and your
@@ -282,6 +288,8 @@ one small defective package per case, to see them in the console.
 
 ## Going further
 
+- [See MUN Shape in action](see-shape-in-action.md): what a dressed card
+  holds, whatever the game, and a walk through it in a console.
 - [MUN Shape](../shape.md), the contract: every field, rule and code.
 - [The sample packages](../../examples/shape/README.md) and how their art is
   made.

@@ -17,6 +17,9 @@
 - [Dress the console in your game](guides/shape-your-game.md): a MUN Shape
   package from a sample to a card, checked, previewed in the console,
   played and ejected.
+- [See MUN Shape in action](guides/see-shape-in-action.md): what a card
+  with MUN Shape holds, whatever the game, and a console taking its
+  identity from insertion to power-off.
 
 ## Contracts
 

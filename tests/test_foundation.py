@@ -134,6 +134,13 @@ class TranslationTests(unittest.TestCase):
         self.assertEqual(self.repo.check(),
                          ["README.es.md: links the English page docs/design.md without saying «en inglés»"])
 
+    def test_the_english_mark_may_wrap_across_lines(self):
+        self.repo.write("README.es.md", "# Proyecto\n\n[English](README.md) · **Español**\n\n"
+                                        "Mira [cómo empezar](docs/es/start.md) y el [diseño](docs/design.md), en\n"
+                                        "inglés.\n")
+        self.repo.record(("README.es.md", "README.md"), ("docs/es/start.md", "docs/start.md"))
+        self.assertEqual(self.repo.check(), [])
+
     def test_a_missing_anchor_is_found_in_either_language(self):
         self.repo.write("README.es.md", "# Proyecto\n\n[English](README.md) · **Español**\n\n"
                                         "Mira [cómo empezar](docs/es/start.md#1-que-necesitas) y el "

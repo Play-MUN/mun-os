@@ -20,7 +20,7 @@ original's SHA-256 when the translation was last reviewed against it.
   coverage grows page by page.
 - A translation links to the translation of a page when there is one, and
   says «en inglés» in the same paragraph, item or row when it links an
-  English page instead.
+  English page instead (a line break inside those words does not count).
 - An original that changed after the review fails the check until its
   translation has been reviewed again; only then is source_sha256 set to the
   original's new hash, by hand. A changed original does not mean the
@@ -206,7 +206,7 @@ def check(root=ROOT):
             if name in pairs and linked and linked.endswith(".md") and linked != pairs[name]["source"]:
                 if linked in translated:
                     errors.append(f"{name}: links {target}, which has a translation: {translated[linked]}")
-                elif not is_spanish(linked) and ENGLISH_MARK not in content[end:block_end(content, end)]:
+                elif not is_spanish(linked) and ENGLISH_MARK not in " ".join(content[end:block_end(content, end)].split()):
                     errors.append(f"{name}: links the English page {target} without saying «{ENGLISH_MARK}»")
 
     listed = set(pairs)

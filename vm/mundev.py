@@ -553,6 +553,13 @@ def cmd_shape(args: argparse.Namespace) -> int:
     stop = threading.Event()
     hint = (f"the console stays on: ./mun dev vm {args.guest} stop (or destroy --yes) when you are done"
             if not args.window else "")
+    if args.window and vm.read_pid() is not None:
+        # QEMU's window opens with the console; one already on keeps its display.
+        print(f"[shape] guest {args.guest} is already on, so no window opens: the preview runs in it as it is "
+              f"(./mun dev vm {args.guest} screenshot); for a window, stop it first: ./mun dev vm {args.guest} stop",
+              flush=True)
+        args.window = False
+        hint = f"the console stays on: ./mun dev vm {args.guest} stop (or destroy --yes) when you are done"
     if vm.read_pid() is None and args.window:
         # The window keeps this process in the foreground; the preview runs beside it.
         worker = threading.Thread(target=preview.run, args=(stop, args.watch, True), name="shape-preview", daemon=True)

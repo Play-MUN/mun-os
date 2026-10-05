@@ -262,6 +262,20 @@ class ShapeConsoleTests(Fixture):
         main.assert_not_called()
         self.assertFalse((self.root / "guests" / "shape").exists(), "no guest made")
 
+    def test_a_window_is_not_promised_for_a_console_already_on(self):
+        import shapepreview
+        self.build("b1", shape="mun-shape/1")
+        with patch.object(vm, "run"), patch.object(vm, "which", side_effect=lambda name: name):
+            mundev.create_guest("shape", self.root / "builds" / "b1")
+        out = io.StringIO()
+        with patch.object(vm, "select_instance"), patch.object(vm, "read_pid", return_value=4242), \
+                patch.object(vm, "main") as main, patch.object(shapepreview, "Preview") as preview, \
+                contextlib.redirect_stdout(out):
+            self.assertEqual(mundev.cmd_shape(self.shape_args("shape")), 0)
+        main.assert_not_called()                              # no `open`: QEMU's window comes only with a start
+        preview.return_value.run.assert_called_once()
+        self.assertIn("already on, so no window opens", out.getvalue())
+
     def test_the_list_says_which_builds_and_guests_show_shape(self):
         self.build("b1")
         self.build("b2", shape="mun-shape/1")

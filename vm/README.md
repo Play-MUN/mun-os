@@ -204,6 +204,9 @@ laboratory, through the real card service and shell
 - It starts only in a guest with no other card attached and never detaches
   another card. It unplugs a card the console releases (*Eject safely*), as
   the window's watcher does.
+- `--window` opens the console in a window when the guest is off; a guest
+  already on keeps its display, and the preview runs in it as it is (it says
+  so).
 - At the end (Ctrl-C, or the console turned off) its card leaves safely if
   the console is still on and no game is being played, and its own cards are
   deleted. The guest stays: `./mun dev vm shape stop` or `destroy --yes`.

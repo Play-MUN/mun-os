@@ -5,7 +5,7 @@
 Ejecuta MUN™ OS en tu ordenador como consola virtual, juega la Game Card que
 viene con él, guarda y continúa más tarde. No hace falta compilar nada:
 descargas las herramientas y una imagen ya hecha. Dónde se ha comprobado cada
-paso está en [compatibilidad](../compatibility.md) (en inglés).
+paso está en [compatibilidad](compatibility.md).
 
 ## 1. Qué necesitas
 
@@ -150,7 +150,7 @@ make check                        # las comprobaciones del anfitrión
 
 Una build deja sus juegos junto a la imagen, no en tarjetas: la tercera línea
 hace una tarjeta de MUN Collect con la copia de esta build
-([crear una Game Card](../guides/create-game-card.md), en inglés, lo explica).
+([crear una Game Card](guides/create-game-card.md) lo explica).
 
 Cómo se compone una imagen y qué registra una build:
 [construcción de la imagen](../../os/README.md) (en inglés). Consolas en

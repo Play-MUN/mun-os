@@ -1,5 +1,7 @@
 # Create a Game Card
 
+**English** · [Español](../es/guides/create-game-card.md)
+
 Make your own Game Card with MUN Collect, the example game: give it an
 identity and a cover, check it, play it in the console, save on it, eject
 it, and continue from it after the console restarts. Twenty minutes, no

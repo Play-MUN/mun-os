@@ -1,5 +1,7 @@
 # Contributing
 
+**English** · [Español](CONTRIBUTING.es.md)
+
 MUN™ OS is at an early stage: one development image for QEMU, no supported
 release and no selected hardware. Contributions are welcome: fixes, tests,
 documentation, card and game tooling, ports of the laboratory to more
@@ -90,6 +92,17 @@ TOML fields and error codes stay as they are in a translation, and the
 output of a tool is quoted in the language the tool prints.
 
 ## Branches, commits and pull requests
+
+A change travels this way:
+
+1. A short-lived branch from `dev`.
+2. A pull request against `dev`, with its checks green, reviewed and
+   approved by the maintainer.
+3. Merged into `dev`, where changes stay until a preview is prepared.
+4. A pull request from `dev` to `main`, the candidate checked as
+   [releasing](docs/releasing.md) says, and the release tagged on `main`.
+
+In detail:
 
 - `dev` is where the work lands first. Fork the repository, or, with write
   access, work on a short-lived branch from `dev`: `feat/…`, `fix/…`,

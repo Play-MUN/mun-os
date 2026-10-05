@@ -45,14 +45,14 @@ explica qué existe y qué está previsto.
   para cada ordenador.
 - **Haz una Game Card.** Pon un juego en una tarjeta, juégalo, guarda en ella,
   retírala y continúa, con MUN Collect como ejemplo:
-  [crear una Game Card](docs/guides/create-game-card.md) y después
-  [traer un juego a MUN](docs/guides/port-a-game.md), en inglés.
+  [crear una Game Card](docs/es/guides/create-game-card.md) y después
+  [traer un juego a MUN](docs/es/guides/port-a-game.md).
 - **Construye la imagen.** Componla tú mismo a partir de entradas con versión
   fijada, en un Mac con Apple Silicon:
   [construir la imagen tú mismo](docs/es/getting-started.md#construir-la-imagen-tú-mismo)
   y [construcción de la imagen](os/README.md) (en inglés).
 - **Contribuye.** Ejecuta las comprobaciones, elige un issue y abre un pull
-  request: [contribuir](CONTRIBUTING.md) (en inglés).
+  request: [contribuir](CONTRIBUTING.es.md).
 
 ## Dónde funciona
 
@@ -74,7 +74,7 @@ lenta.
 arrancar la consola, jugar su tarjeta y apagar, en las máquinas virtuales de
 GitHub. Todavía no se ha probado en ningún ordenador con Linux o Windows.
 Jugar, hacer tarjetas y construir imágenes tienen cada uno sus requisitos:
-[compatibilidad](docs/compatibility.md) (en inglés).
+[compatibilidad](docs/es/compatibility.md).
 
 ## Principios
 
@@ -96,15 +96,15 @@ Jugar, hacer tarjetas y construir imágenes tienen cada uno sus requisitos:
 ## Documentación
 
 - [Primeros pasos](docs/es/getting-started.md) y
-  [compatibilidad](docs/compatibility.md) (en inglés)
-- [Crear una Game Card](docs/guides/create-game-card.md) y
-  [traer un juego a MUN](docs/guides/port-a-game.md) (en inglés)
+  [compatibilidad](docs/es/compatibility.md)
+- [Crear una Game Card](docs/es/guides/create-game-card.md) y
+  [traer un juego a MUN](docs/es/guides/port-a-game.md)
 - Para autores de tarjetas y juegos: [Game Cards](docs/game-cards.md),
   [partidas](docs/saves.md), [ejecutar un juego](docs/runtime.md) (en inglés)
 - [Arquitectura](docs/architecture.md), [construcción de la imagen](os/README.md),
   [laboratorio](vm/README.md) (en inglés) y [todos los documentos](docs/es/README.md)
-- [Licencias](docs/licensing.md), [seguridad](SECURITY.md),
-  [contribuir](CONTRIBUTING.md) (en inglés)
+- [Licencias](docs/licensing.md) (en inglés), [seguridad](SECURITY.es.md),
+  [contribuir](CONTRIBUTING.es.md)
 
 ## Mapa del repositorio
 

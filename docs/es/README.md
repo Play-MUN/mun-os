@@ -10,17 +10,17 @@ Las páginas que todavía no tienen traducción enlazan a su original, en inglé
 - [README](../../README.es.md): qué es MUN™ OS y qué funciona hoy.
 - [Primeros pasos](getting-started.md): descarga las herramientas y una
   imagen, arranca la consola, juega, guarda y continúa.
-- [Compatibilidad](../compatibility.md) (en inglés): dónde funcionan jugar,
-  hacer tarjetas y construir imágenes, y cómo se comprobó.
+- [Compatibilidad](compatibility.md): dónde funcionan jugar, hacer tarjetas
+  y construir imágenes, y cómo se comprobó.
 
 ## Guías
 
-- [Crear una Game Card](../guides/create-game-card.md) (en inglés): MUN
-  Collect en una tarjeta propia, desde el ejecutable hasta una partida
-  recuperada tras reiniciar.
-- [Traer un juego a MUN](../guides/port-a-game.md) (en inglés): perfiles de
-  ejecución, bibliotecas, datos y partidas, recetas; por qué empaquetar un
-  juego no es portarlo.
+- [Crear una Game Card](guides/create-game-card.md): MUN Collect en una
+  tarjeta propia, desde el ejecutable hasta una partida recuperada tras
+  reiniciar.
+- [Traer un juego a MUN](guides/port-a-game.md): perfiles de ejecución,
+  bibliotecas, datos y partidas, recetas; por qué empaquetar un juego no es
+  portarlo.
 
 ## Contratos
 
@@ -46,7 +46,7 @@ Las páginas que todavía no tienen traducción enlazan a su original, en inglé
 
 ## El proyecto
 
-- [Contribuir](../../CONTRIBUTING.md), [seguridad](../../SECURITY.md),
+- [Contribuir](../../CONTRIBUTING.es.md), [seguridad](../../SECURITY.es.md),
   [publicación de versiones](../releasing.md) (en inglés).
 - [Licencias](../licensing.md) (en inglés): la licencia de MUN OS, los
   componentes de terceros, las imágenes y sus fuentes, los nombres y
@@ -56,21 +56,23 @@ Los componentes documentan sus propios protocolos, unidades y privilegios:
 [MUN Shell](../../services/mun-shell/README.md),
 [servicio de tarjetas](../../services/mun-cardd/README.md),
 [lanzador](../../services/mun-launchd/README.md),
-[`mun-card`](../../tools/mun-card/README.md),
-[ejemplos](../../examples/README.md) y [pruebas](../../tests/README.md), todos
-en inglés.
+[`mun-card`](../../tools/mun-card/README.md) y
+[pruebas](../../tests/README.md), en inglés, y [ejemplos](../../examples/README.es.md).
 
 ## Lo que sigue en inglés
 
-La versión inglesa es la referencia técnica; la española cubre, por ahora,
-el README, esta página, los primeros pasos y el glosario. Sigue solo en
+La versión inglesa es la referencia técnica. La española cubre, por ahora,
+el README, esta página, los primeros pasos, el glosario, la compatibilidad,
+las guías para crear una Game Card y traer un juego, cómo contribuir, la
+seguridad y los README de los ejemplos y de MUN Collect. Sigue solo en
 inglés:
 
-- Las demás páginas de `docs/`: guías, contratos, arquitectura, licencias y
-  publicación de versiones. Aquí aparecen marcadas «en inglés».
-- `CONTRIBUTING.md`, `SECURITY.md` y los README de los componentes, de las
-  herramientas, de los ejemplos, de las pruebas, del laboratorio y de la
-  construcción de la imagen.
+- Las demás páginas de `docs/`: los contratos, la arquitectura, los
+  lenguajes, las licencias y la publicación de versiones. Aquí aparecen
+  marcadas «en inglés».
+- Los README de los componentes, de las herramientas, de las pruebas, del
+  laboratorio, de la construcción de la imagen y de la prueba gráfica
+  (`mun-gl-probe`).
 - Los textos de las licencias (`LICENSE`, `NOTICE`, `NAME-AND-LOGO.txt` y
   las licencias de las tipografías), que son los que valen.
 - El código, sus comentarios, los mensajes de los commits y la plantilla de

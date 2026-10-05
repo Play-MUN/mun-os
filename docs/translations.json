@@ -3,6 +3,13 @@
   "about": "Each translation with its English original, the technical reference, and the SHA-256 of the original's text when the translation was last reviewed against it. scripts/check_foundation.py checks the pairs; source_sha256 is set by hand, only after the translation has been reviewed.",
   "translations": [
     {
+      "translation": "CONTRIBUTING.es.md",
+      "source": "CONTRIBUTING.md",
+      "language": "es",
+      "reviewed": "2026-10-05",
+      "source_sha256": "e36859f71949361982a55d839d952235fbc229fa35f648c3f3d9f429f5c7e4c5"
+    },
+    {
       "translation": "README.es.md",
       "source": "README.md",
       "language": "es",
@@ -10,11 +17,25 @@
       "source_sha256": "e0249145bffbad5b3426c499014ba2e7801b88e14f2848543f77ef17667ed866"
     },
     {
+      "translation": "SECURITY.es.md",
+      "source": "SECURITY.md",
+      "language": "es",
+      "reviewed": "2026-10-05",
+      "source_sha256": "c33513851dfba9c666b47f26f895d7cffc41885b76db463291ed169a92ac9358"
+    },
+    {
       "translation": "docs/es/README.md",
       "source": "docs/README.md",
       "language": "es",
       "reviewed": "2026-10-05",
       "source_sha256": "d6c001dffa8e323989ee9b5f7fac88efe9439d986b1e028edad731cf8f8d28eb"
+    },
+    {
+      "translation": "docs/es/compatibility.md",
+      "source": "docs/compatibility.md",
+      "language": "es",
+      "reviewed": "2026-10-05",
+      "source_sha256": "ed160559d17761ee61a5ae8840d18fd0687b329cca62260b9827a40e84d71f50"
     },
     {
       "translation": "docs/es/getting-started.md",
@@ -29,6 +50,34 @@
       "language": "es",
       "reviewed": "2026-10-05",
       "source_sha256": "1ea2e6adb0da994efb04712270d9108e9d1a040e71c0299d185e2dfa2c4c204a"
+    },
+    {
+      "translation": "docs/es/guides/create-game-card.md",
+      "source": "docs/guides/create-game-card.md",
+      "language": "es",
+      "reviewed": "2026-10-05",
+      "source_sha256": "967b16e0a1fd0275d9b15e3fecd96e8668cb0e36cbfdec2a6f0a29bb197b2e40"
+    },
+    {
+      "translation": "docs/es/guides/port-a-game.md",
+      "source": "docs/guides/port-a-game.md",
+      "language": "es",
+      "reviewed": "2026-10-05",
+      "source_sha256": "f36a6f94a88bfb1cd2388c8eeba9ed40e0f8f391a54f15c0899c4a7696244cfd"
+    },
+    {
+      "translation": "examples/README.es.md",
+      "source": "examples/README.md",
+      "language": "es",
+      "reviewed": "2026-10-05",
+      "source_sha256": "9ecb98f3944c89ecf9835cf688fef1b31a30a6cb9d146e76a3ad2ae1812785e5"
+    },
+    {
+      "translation": "examples/mun-collect/README.es.md",
+      "source": "examples/mun-collect/README.md",
+      "language": "es",
+      "reviewed": "2026-10-05",
+      "source_sha256": "136e76a3389dffae9f5fa2c377a15151697063adc505cec48ec99033d41892ea"
     }
   ]
 }

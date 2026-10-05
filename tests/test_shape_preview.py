@@ -319,6 +319,33 @@ class PreviewTests(unittest.TestCase):
         self.assertEqual(console.visible(),
                          [("attach", "pv0-shape"), ("detach", "pv0-shape", False), ("attach", "pv1-shape")])
 
+    def test_a_console_that_stops_answering_ends_the_watch_without_a_trace(self):
+        # Turned off from its menu, the console stops answering through
+        # qemu-ga while its QEMU still runs, then QEMU ends.
+        console = Console()
+        stop = threading.Event()
+        silent = {"count": 0}
+
+        def reconcile(**_):
+            silent["count"] += 1
+            if silent["count"] >= 3:
+                console.gone = True
+            raise vm.LabError("qemu-ga connection closed")
+
+        console.gone = False
+        with contextlib.ExitStack() as stack:
+            for item in console.patches():
+                stack.enter_context(item)
+            stack.enter_context(patch.object(shapepreview, "POLL_SECONDS", 0.05))
+            stack.enter_context(patch.object(shapepreview, "SHELL_GRACE_SECONDS", 0))
+            stack.enter_context(patch.object(vm, "reconcile_released", side_effect=reconcile))
+            stack.enter_context(patch.object(vm, "read_pid", side_effect=lambda: None if console.gone else 4242))
+            worker = threading.Thread(target=self.preview().run, args=(stop, True, True))
+            worker.start()
+            worker.join(30)
+            self.assertFalse(worker.is_alive(), "the watch ends once the console is gone")
+        self.assertEqual(self.out.getvalue().count("the console does not answer"), 1)
+
     def test_a_base_card_is_copied_and_never_written(self):
         with contextlib.redirect_stdout(io.StringIO()):
             code = card_cli.main(["create", str(self.cards / "mygame.img"), "--shape", str(SAMPLES / "paper")])

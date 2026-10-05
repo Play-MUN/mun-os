@@ -401,10 +401,10 @@ class Preview:
         """MUN Shell has run long enough to see a card arrive: a card inserted
         before it watches is one it finds at start, without the arrival a
         player sees (its transition and cue)."""
-        state, _, running = vm.guest_command(SHELL_STATE, timeout=30).stdout.strip().partition(" ")
         try:
+            state, _, running = vm.guest_command(SHELL_STATE, timeout=30).stdout.strip().partition(" ")
             return state == "active" and float(running or 0) >= SHELL_GRACE_SECONDS
-        except ValueError:
+        except (vm.LabError, ValueError):
             return False
 
     def insert(self, name: str) -> None:
@@ -493,14 +493,23 @@ class Preview:
         seen = folder_digest(self.folder)
         pending_since: Optional[float] = None
         while not stop.is_set():
-            vm.reconcile_released(announce=self.say)
-            if watch:
-                now_seen = folder_digest(self.folder)
-                if now_seen != seen:
-                    seen, pending_since = now_seen, time.monotonic()
-                if pending_since is not None and time.monotonic() - pending_since >= SETTLE_SECONDS:
-                    if self.change():
-                        pending_since = None
+            try:
+                vm.reconcile_released(announce=self.say)
+                if watch:
+                    now_seen = folder_digest(self.folder)
+                    if now_seen != seen:
+                        seen, pending_since = now_seen, time.monotonic()
+                    if pending_since is not None and time.monotonic() - pending_since >= SETTLE_SECONDS:
+                        if self.change():
+                            pending_since = None
+            except vm.LabError as exc:
+                # The console turning off stops answering before its QEMU ends;
+                # `finish` takes it from there. Any other silence is waited out.
+                if stop.is_set() or vm.read_pid() is None:
+                    break
+                self.tell_once("silent", f"the console does not answer ({exc}); trying again")
+            else:
+                self._told.discard("silent")
             stop.wait(POLL_SECONDS)
 
     def finish(self) -> None:

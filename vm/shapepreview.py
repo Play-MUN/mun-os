@@ -41,8 +41,10 @@ What it keeps to:
 - The console's rules. The previous card leaves by the safe removal path
   (the console releases it, cancelling a copy still in progress, and only
   then is it unplugged), never abruptly. While a game is being played the
-  new package waits for it to end; a release the console refuses is tried
-  again later. *Eject safely* in the console takes the card out as a
+  new package waits for it to end, and then for MUN Shell to be back (the
+  launcher starts it again after the game): a card put in before the shell
+  watches is found at start, without the arrival a player sees. A release
+  the console refuses is tried again later. *Eject safely* in the console takes the card out as a
   player's hand would; the next change inserts the new one.
 - A folder the console would not use at all is reported and leaves the card
   in place; one it would use in part is shown, as a console shows it.
@@ -78,6 +80,19 @@ PREVIEW_ID = "mun.shapepreview"
 POLL_SECONDS = 1.0
 SETTLE_SECONDS = 1.0     # a change is taken once the folder has been still this long
 SHELL_GRACE_SECONDS = 3.0   # the shell's connection to the card service, once it is running
+
+# In the guest, through qemu-ga: whether MUN Shell runs and for how many
+# seconds ("active 12.3", "inactive 0"). The launcher stops the shell for a
+# game and starts it again once its own state is idle again, so idle alone
+# does not mean the shell is there to see a card arrive.
+SHELL_STATE = r"""python3 - <<'EOF'
+import subprocess, time
+out = subprocess.run(["systemctl", "show", "mun-shell", "-p", "ActiveState", "-p", "ActiveEnterTimestampMonotonic"],
+                     capture_output=True, text=True).stdout
+values = dict(line.split("=", 1) for line in out.splitlines() if "=" in line)
+since = int(values.get("ActiveEnterTimestampMonotonic") or 0) / 1e6
+print(values.get("ActiveState", ""), round(time.clock_gettime(time.CLOCK_MONOTONIC) - since, 1) if since else 0)
+EOF"""
 
 # In the guest, through qemu-ga: the launcher's state from its first message
 # (a snapshot): "idle" when no game is being played.
@@ -382,6 +397,16 @@ class Preview:
         state = vm.guest_command(LAUNCHER_STATE, timeout=30).stdout.strip()
         return state != "idle"
 
+    def shell_ready(self) -> bool:
+        """MUN Shell has run long enough to see a card arrive: a card inserted
+        before it watches is one it finds at start, without the arrival a
+        player sees (its transition and cue)."""
+        state, _, running = vm.guest_command(SHELL_STATE, timeout=30).stdout.strip().partition(" ")
+        try:
+            return state == "active" and float(running or 0) >= SHELL_GRACE_SECONDS
+        except ValueError:
+            return False
+
     def insert(self, name: str) -> None:
         self.report(name, self.make_card(name))
         vm.cmd_card_attach(argparse.Namespace(name=name))
@@ -398,6 +423,10 @@ class Preview:
             return True
         if self.game_running():
             self.tell_once("game", "a game is being played: the new package waits for it to end")
+            return False
+        if not self.shell_ready():
+            self.tell_once("shell", "MUN Shell is not running yet (it starts again after a game): "
+                                    "the new card waits for it")
             return False
         current = self.ours_in()
         following = next(name for name in self.names if name != current)
@@ -425,18 +454,15 @@ class Preview:
         return True
 
     def wait_for_console(self, stop: threading.Event) -> bool:
-        """Until the console is up and its shell is running: a card inserted
-        before the shell watches is one it finds at start, without the
-        arrival a player sees (its transition and cue)."""
+        """Until the console is up and its shell ready (`shell_ready`)."""
         while not stop.is_set():
             if vm.read_pid() is not None and vm.guest_ready():
                 break
             stop.wait(2)
         while not stop.is_set():
-            if vm.guest_command("systemctl is-active mun-shell", timeout=30).stdout.strip() == "active":
-                stop.wait(SHELL_GRACE_SECONDS)
-                return not stop.is_set()
-            stop.wait(2)
+            if self.shell_ready():
+                return True
+            stop.wait(1)
         return False
 
     def run(self, stop: threading.Event, watch: bool, follow: bool) -> None:

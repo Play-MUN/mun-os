@@ -134,9 +134,9 @@ A laboratory console starts in a window (the guest `shape`, made the first
 time from your latest image) with a disposable card: MUN Collect dressed in
 your package. You see it as a player will: the transition, the world, the
 menus' sounds, the panel. Edit a file and save: once the folder is still for
-a second, the preview checks it, waits until no game is being played,
-takes the card out by the console's safe removal and inserts a new one with
-your change. Each change is a new insertion, so you see your arrival
+a second, the preview checks it, waits until no game is being played and
+the console's menu is back, takes the card out by the console's safe removal
+and inserts a new one with your change. Each change is a new insertion, so you see your arrival
 transition and hear your cue every time.
 
 - The console must show MUN Shape (`./mun dev list` shows

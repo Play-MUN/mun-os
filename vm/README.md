@@ -185,9 +185,11 @@ laboratory, through the real card service and shell
 - With `--watch` the folder is followed: once it has been still for a
   second, it is checked; a package the console would not use is reported and
   changes nothing. Otherwise, while no game is being played (the launcher's
-  state in the guest), the inserted card leaves by `card-detach`'s safe
-  removal (a refusal is tried again later, never forced) and the next card
-  is attached: a new insertion, with its own export.
+  state in the guest) and MUN Shell runs (after a game the launcher starts
+  it again, and a card put in before it watches would come in without its
+  arrival), the inserted card leaves by `card-detach`'s safe removal (a
+  refusal is tried again later, never forced) and the next card is
+  attached: a new insertion, with its own export.
 - Its cards are `pv0-<guest>` and `pv1-<guest>` (a long guest name is
   shortened with a digest, so two guests never share them). A card is the
   preview's by what it made, not by its name: it makes each card aside, puts

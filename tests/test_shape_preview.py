@@ -2,9 +2,10 @@
 `./mun dev shape`): its cards are its own, known by the files it made, not by
 their names; a file it did not make keeps its bytes and its identity; one
 preview per console; each change is a new insertion after the previous one
-left by the safe path; a game is never interrupted; a card it starts from is
-only read; and a console whose build records no MUN Shape is refused. The
-console is replaced by mocks; the cards are real images (e2fsprogs)."""
+left by the safe path, once the shell is there to see it arrive; a game is
+never interrupted; a card it starts from is only read; and a console whose
+build records no MUN Shape is refused. The console is replaced by mocks; the
+cards are real images (e2fsprogs)."""
 
 import contextlib
 import hashlib
@@ -72,9 +73,9 @@ class Console:
         del self.cards[name]
 
     def command(self, script, timeout=120.0, **_):
-        if script.startswith("systemctl is-active"):
+        if "ActiveEnterTimestampMonotonic" in script:
             self.calls.append(("shell?",))
-            return SimpleNamespace(stdout="active\n" if self.shell_up else "activating\n", stderr="", returncode=0)
+            return SimpleNamespace(stdout="active 10.0\n" if self.shell_up else "inactive 0\n", stderr="", returncode=0)
         return SimpleNamespace(stdout="running\n" if self.playing else "idle\n", stderr="", returncode=0)
 
     def patches(self):
@@ -252,6 +253,21 @@ class PreviewTests(unittest.TestCase):
         self.assertFalse(changed)
         self.assertEqual(console.calls, [])
         self.assertIn("waits for it to end", self.out.getvalue())
+
+    def test_after_a_game_the_new_card_waits_for_the_shell_to_be_back(self):
+        # The launcher is idle again before it starts the shell: a card put
+        # in then would be found at start, without its arrival.
+        preview = self.preview()
+        console = Console()
+        self.made_and_inserted(preview, console, "pv0-shape")
+        console.shell_up = False
+        self.assertFalse(self.run_with(console, preview.change))
+        self.assertFalse(self.run_with(console, preview.change))
+        self.assertEqual(console.visible(), [])
+        self.assertEqual(self.out.getvalue().count("the new card waits for it"), 1)
+        console.shell_up = True
+        self.assertTrue(self.run_with(console, preview.change))
+        self.assertEqual(console.visible(), [("detach", "pv0-shape", False), ("attach", "pv1-shape")])
 
     def test_a_change_is_a_new_card_after_the_previous_left_safely(self):
         preview = self.preview()

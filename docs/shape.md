@@ -324,9 +324,14 @@ navigation as without a card.
 
 ## When something is wrong
 
-Shape never makes a card invalid, never delays *Play* or *Eject safely*, and
-never shows the player an error; its diagnostics go to logs and to the
-checker.
+Shape never makes a card invalid, and preparing it never holds back the
+card's `valid` state or *Play*. A problem with a package never shows the
+player an error: the block or the package is dropped, and the diagnostics
+go to logs and to the checker. *Eject safely* cancels the console's copy of
+the package and may wait for it to close the card's files, at most 3 s
+before it answers that the card is still in use and keeps the release
+pending ([how the console uses a package](#how-the-console-uses-a-package));
+what a release tells the player shows as with any card.
 
 | Case | Result |
 | --- | --- |
@@ -437,9 +442,10 @@ The algorithm, exact so that the console and the checker agree:
 [README](../services/mun-cardd/README.md#mun-shape-export)):
 
 - It starts only after the card is valid, and only after that state has
-  been published: nothing about Shape delays `valid`, *Play* or *Eject
-  safely*. One worker per insertion does all the reading; the service's
-  event loop never reads the card for it.
+  been published: the copy never holds back `valid` or *Play*. *Eject
+  safely* cancels it and waits for it to close its files (below). One
+  worker per insertion does all the reading; the service's event loop
+  never reads the card for it.
 - The worker reads the package through the same checker as `mun-card`
   (`mun_card/shape.py`), which checks every file's entry, size and the
   budget before reading it; each file it reads is read once from the card,

@@ -229,8 +229,12 @@ every game.
 
 ## When a resource is missing or fails
 
-A package never makes a card invalid, and never delays *Play* or *Eject
-safely*. A block is used whole or dropped whole:
+A package never makes a card invalid, and the card can be played while the
+console still prepares it. *Eject safely* cancels that preparation and may
+wait for it to close the card's files: at most 3 s, then the console says
+the card is still in use, not to remove it yet, and the release stays
+pending until it can finish ([MUN Shape](../shape.md#how-the-console-uses-a-package)).
+A block is used whole or dropped whole:
 
 | What is wrong | What the console does |
 | --- | --- |

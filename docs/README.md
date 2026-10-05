@@ -31,7 +31,6 @@
   environment, display, content during play, session results.
 - [MUN Shape](shape.md): the package with which a card dresses the console
   in its game's identity; its format, limits, contrast rules and checker.
-  Not rendered by the console yet.
 
 ## Building and reference
 

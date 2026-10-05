@@ -80,8 +80,9 @@ background = "#BFD9F2"
 The directory `mun-shape/` at the root of the content is reserved for MUN
 Shape, the package with which a card dresses the console in its game's
 identity ([shape.md](shape.md)). A game's own files do not use that name. The
-manifest names nothing of it, and a package never makes a card invalid; no
-release renders it yet.
+manifest names nothing of it, and a package never makes a card invalid. A
+console shows it when its image records the MUN Shape it reads
+([shape.md](shape.md#compatibility)); v0.1.0-dev.2 does not.
 
 Every path in the manifest is relative, stays inside the card, has no empty,
 `.` or `..` segment, no backslash or NUL, uses only letters, digits, `.`, `_`

@@ -180,12 +180,24 @@ laboratory, through the real card service and shell
   state in the guest), the inserted card leaves by `card-detach`'s safe
   removal (a refusal is tried again later, never forced) and the next card
   is attached: a new insertion, with its own export.
-- Its cards are `pv0-<guest>` and `pv1-<guest>`, made and deleted by it. It
-  starts only in a guest with no other card attached and never detaches or
-  deletes another card. It unplugs a card the console releases (*Eject
-  safely*), as the window's watcher does.
+- Its cards are `pv0-<guest>` and `pv1-<guest>` (a long guest name is
+  shortened with a digest, so two guests never share them). A card is the
+  preview's by what it made, not by its name: it makes each card aside, puts
+  it at its name only if nothing is there, and records the file's identity
+  (device, inode, size, birth time where the host keeps one) and the card's
+  identifier in `.local/gamecards/.shape-preview/`. It remakes, unplugs or
+  deletes only that same file holding that same card. Any other file at
+  those names (a card of yours, a copy moved there or copied into it) keeps
+  its bytes and its inode: the preview does not start, or a change waits,
+  and it names the file. It never deletes a card another guest holds.
+- One preview per console: while it runs it holds
+  `.local/gamecards/.shape-preview/<guest>.lock`, and a second one for the
+  same guest is refused.
+- It starts only in a guest with no other card attached and never detaches
+  another card. It unplugs a card the console releases (*Eject safely*), as
+  the window's watcher does.
 - At the end (Ctrl-C, or the console turned off) its card leaves safely if
-  the console is still on and no game is being played, and its cards are
+  the console is still on and no game is being played, and its own cards are
   deleted. The guest stays: `./mun dev vm shape stop` or `destroy --yes`.
 
 ## Sound and pointer

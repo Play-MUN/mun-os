@@ -591,9 +591,11 @@ On a card, the package is the folder `content/mun-shape/`.
   is being played, the card leaves by the safe removal and a new one is
   inserted: a new insertion each time, never a package changed under one.
   A folder the console would not use is reported and the card stays. The
-  preview's cards are `pv0-<guest>` and `pv1-<guest>`; it starts only in a
-  console with no other card in, and never takes out or deletes another
-  card ([the laboratory](../vm/README.md#mun-shape-preview)).
+  preview's cards are `pv0-<guest>` and `pv1-<guest>`, known by the files it
+  made, not by their names: a file at those names it did not make is never
+  written, taken out or deleted. One preview runs per console, and it starts
+  only in a console with no other card in
+  ([the laboratory](../vm/README.md#mun-shape-preview)).
 
 ### Defective packages
 

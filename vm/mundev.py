@@ -536,6 +536,7 @@ def cmd_shape(args: argparse.Namespace) -> int:
         if base.stem in shapepreview.card_names(args.guest):
             raise vm.LabError(f"{base.stem} is the preview's own card; start from another one")
     vm.select_instance(args.guest)
+    # Takes the guest's preview lock: a second preview of this console stops here.
     preview = shapepreview.Preview(folder.resolve(), args.guest, build_dir, base.resolve() if base else None, args.title)
     stop = threading.Event()
     hint = (f"the console stays on: ./mun dev vm {args.guest} stop (or destroy --yes) when you are done"

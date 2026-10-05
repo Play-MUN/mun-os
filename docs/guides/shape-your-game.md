@@ -141,7 +141,8 @@ transition and hear your cue every time.
   (the card itself is only read).
 - The preview uses its own cards (`pv0-shape`, `pv1-shape`) and nothing
   else: it does not start in a console with another card in, and it never
-  takes out or deletes a card of yours.
+  takes out or deletes a card of yours, even one you named `pv0-shape`
+  (it stops and names the file). One preview runs per console.
 - Without `--window` the console runs without one (look at it with
   `./mun dev vm shape screenshot`), and Ctrl-C ends the preview: the card
   leaves safely, the console stays on (`./mun dev vm shape stop` turns it

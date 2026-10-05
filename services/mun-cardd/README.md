@@ -78,7 +78,9 @@ the service does with it.
   chunks, into `/run/mun/shape/.<insertion>.<attempt>.part/` (0700), and
   validating those bytes. It keeps only the accepted files, writes the
   normalised `shape.json` (with `insertion` and `version`), seals files
-  0440 and folders 0550 with the group `mun-shell`, and, as its last step,
+  0440, folders 0550 and the export's own folder 0750 (its owner's write
+  permission lets every system rename it) with the group `mun-shell`, and,
+  as its last step,
   renames the folder to `/run/mun/shape/<insertion>.<attempt>/`. Card files
   are opened one component at a time with `O_NOFOLLOW` and non-blocking;
   the event loop never reads the card for this. `<attempt>` counts copies

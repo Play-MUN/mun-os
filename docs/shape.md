@@ -455,8 +455,9 @@ The algorithm, exact so that the console and the checker agree:
   identity are checked between chunks. The service never decodes an image
   or a sound.
 - The export holds only the files the checker accepted and the normalised
-  `shape.json`, bound to the insertion and content version; files are 0440
-  and folders 0550 (group: the shell's), sealed before it is published,
+  `shape.json`, bound to the insertion and content version; files are 0440,
+  folders 0550 and the export's own folder 0750 (group: the shell's, which
+  reads and never writes), sealed before it is published,
   as the last step, with one rename as `/run/mun/shape/<insertion>.<attempt>/`.
   Complete and immutable, or nothing: a copy that fails, is cancelled or
   arrives for an insertion that is no longer current is deleted, never

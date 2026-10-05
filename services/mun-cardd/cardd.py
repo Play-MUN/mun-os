@@ -1029,8 +1029,9 @@ class ShapeExport:
     A worker thread reads the package through the shared checker, bounded
     and in chunks, into `.<insertion>.<attempt>.part/` (0700) under the
     root; keeps only the files the checker accepted and adds the normalised
-    `shape.json`; seals files 0440 and folders 0550 (group: the shell's);
-    and, as its last step, publishes `<insertion>.<attempt>/` with one
+    `shape.json`; seals files 0440, folders 0550 and its own folder 0750
+    (group: the shell's); and, as its last step, publishes
+    `<insertion>.<attempt>/` with one
     rename. Anything that fails, including cancellation, ends with this
     attempt's staging copy and result deleted and nothing published.
     `finished` is set on the manager thread when it receives the outcome;
@@ -1133,16 +1134,19 @@ def _prune(staging: Path, keep: set) -> None:
 
 
 def _seal(staging: Path, group: Optional[int]) -> None:
-    """Files 0440 and folders 0550, the top one included, group the shell's:
-    all before the rename that publishes it (renaming a folder within the
-    same parent needs no write permission on the folder itself)."""
+    """Files 0440 and folders 0550, group the shell's, all before the rename
+    that publishes the copy. The top folder is 0750: the shell's group reads
+    it as any other and never writes it, and its owner keeps the write
+    permission some systems ask for to rename a folder (macOS refuses to
+    rename one its owner cannot write; Linux does not ask). Its owner is
+    this service, which on the console runs as root and writes it anyway."""
     for directory, folders, files in os.walk(staging, topdown=False):
         for name in files:
             path = os.path.join(directory, name)
             os.chmod(path, 0o440)
             if group is not None:
                 os.chown(path, -1, group)
-        os.chmod(directory, 0o550)
+        os.chmod(directory, 0o750 if Path(directory) == staging else 0o550)
         if group is not None:
             os.chown(directory, -1, group)
 

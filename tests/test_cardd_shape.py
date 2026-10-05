@@ -166,7 +166,8 @@ class ShapeExportTests(unittest.TestCase):
                          (card["insertion"], "0.1.0", "mun-shape/1"))
         self.assertIn("surfaces", document, "the normalised document, not the card's own")
         self.assertEqual((export / "world" / "fish.png").read_bytes(), (SEA / "world" / "fish.png").read_bytes())
-        for path in [export, *export.rglob("*")]:
+        self.assertEqual(statmod.S_IMODE(export.lstat().st_mode), 0o750, "its own folder: renamed on any system")
+        for path in export.rglob("*"):
             mode = statmod.S_IMODE(path.lstat().st_mode)
             self.assertEqual(mode, 0o550 if path.is_dir() else 0o440, path)
         self.assertEqual((record["files"], record["bytes"]), (len(expected) - 1,
@@ -665,7 +666,7 @@ class PublicationFailureTests(unittest.TestCase):
         real_chmod = os.chmod
 
         def chmod(path, mode, *args, **kwargs):
-            if Path(path).name.endswith(".part") and mode == 0o550:
+            if Path(path).name.endswith(".part") and mode == 0o750:
                 raise OSError(5, "injected failure sealing the copy")
             return real_chmod(path, mode, *args, **kwargs)
         with patch.object(cardd.os, "chmod", chmod):

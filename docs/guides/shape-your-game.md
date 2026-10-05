@@ -16,9 +16,13 @@ number, are the contract: [MUN Shape](../shape.md).
 
 ## Before you start
 
-- The tools and an image, as in [getting started](../getting-started.md)
-  (sections 1 to 3): `./mun get` (or `./mun dev build`) and `./mun play`
-  work.
+- The tools, as in [getting started](../getting-started.md) (sections 1
+  and 2), and an image that shows MUN Shape, built from this checkout as in
+  [build the image yourself](../getting-started.md#build-the-image-yourself)
+  (`./mun dev build`): the published v0.1.0-dev.2, which
+  `./mun get` downloads, does not show MUN Shape (a card with a package is
+  valid and playable there, in MUN's look). `./mun dev list` says which
+  images do: `shape mun-shape/1`.
 - e2fsprogs 1.47 or later for the card tool ([create a Game
   Card](create-game-card.md#before-you-start)).
 - A game on a card, or MUN Collect as in [create a Game
@@ -135,6 +139,11 @@ takes the card out by the console's safe removal and inserts a new one with
 your change. Each change is a new insertion, so you see your arrival
 transition and hear your cue every time.
 
+- The console must show MUN Shape (`./mun dev list` shows
+  `shape mun-shape/1` for its build and guest). A guest made earlier from
+  an image that does not is refused, and the preview says how to get one
+  that does: a new guest from your latest image (`--guest NAME`), or
+  `./mun dev vm shape destroy --yes` and start again.
 - A change the console would not use at all is reported in the terminal
   and the card in the console stays as it was.
 - `--base mygame` dresses a copy of one of your cards instead of MUN Collect

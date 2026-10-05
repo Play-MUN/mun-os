@@ -425,6 +425,11 @@ The algorithm, exact so that the console and the checker agree:
 - Shape adds nothing to `mun.toml`. MUN OS v0.1.0-dev.1 and v0.1.0-dev.2 read
   only what the manifest names inside the content, so to them a card with
   `mun-shape/` is the same card, played with its lent colours.
+- An image records the format its console reads in its BUILD-INFO
+  (`"shape": {"format": "mun-shape/1"}`). An image made before that record
+  existed does not say what it shows (v0.1.0-dev.2 shows no MUN Shape). The
+  laboratory's preview takes only an image that records the format, and
+  `./mun dev list` shows it per build and guest.
 
 ## How the console uses a package
 
@@ -594,7 +599,9 @@ On a card, the package is the folder `content/mun-shape/`.
   preview's cards are `pv0-<guest>` and `pv1-<guest>`, known by the files it
   made, not by their names: a file at those names it did not make is never
   written, taken out or deleted. One preview runs per console, and it starts
-  only in a console with no other card in
+  only in a console with no other card in. The console's build must record
+  the MUN Shape it reads (`shape` in its BUILD-INFO); an older guest is
+  refused, with the way to one that shows it
   ([the laboratory](../vm/README.md#mun-shape-preview)).
 
 ### Defective packages

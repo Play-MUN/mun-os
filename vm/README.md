@@ -169,11 +169,19 @@ laboratory, through the real card service and shell
 ```
 
 - The console is the guest `shape` (`--guest`), made the first time from the
-  latest build (`--build`). The card is MUN Collect from that build with the
-  package (`mun-card create --variant game --shape`), or, with `--base`, a
-  copy of a card from `.local/gamecards/`, cloned and given the package with
-  debugfs; the card started from is only read. A downloaded image has no
-  MUN Collect executable: its `collect.img` is the base then.
+  latest build (`--build`). Its build must record the MUN Shape its console
+  reads (`shape` in `BUILD-INFO.json`, `mun-shape/1`), as builds of this
+  checkout do; `./mun dev list` shows it for every build and guest
+  (`shape not recorded` for older ones). A build that records none was made
+  before builds recorded it and does not say what it shows (the published
+  v0.1.0-dev.2 shows no MUN Shape); a guest of one is refused and left as it
+  is, with the way to one that shows it: `--guest NAME` for a new guest from
+  the latest build, or `./mun dev vm NAME destroy --yes`.
+- The card is MUN Collect from that build with the package
+  (`mun-card create --variant game --shape`), or, with `--base`, a copy of a
+  card from `.local/gamecards/`, cloned and given the package with debugfs;
+  the card started from is only read. A downloaded image has no MUN Collect
+  executable: its `collect.img` is the base then.
 - With `--watch` the folder is followed: once it has been still for a
   second, it is checked; a package the console would not use is reported and
   changes nothing. Otherwise, while no game is being played (the launcher's

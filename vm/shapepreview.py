@@ -29,6 +29,11 @@ What it keeps to:
   (.local/gamecards/.shape-preview/<guest>.lock) while it runs; a second
   one for the same guest is refused. Previews in different guests have
   different cards and records.
+- A console that shows MUN Shape. A build records the MUN Shape format its
+  console reads (`shape` in BUILD-INFO); the preview refuses a guest whose
+  build records none (made before builds recorded it, which does not say
+  what it shows: v0.1.0-dev.2 shows no MUN Shape) or another major version,
+  and says how to get a guest that does.
 - Each insertion is its own. A change is a new card inserted after the
   previous one has left: the console sees one insertion leave and a new one
   arrive, with the package exported for that insertion only, never one
@@ -118,6 +123,43 @@ def file_identity(info: os.stat_result) -> Dict[str, Optional[float]]:
     birth time, where the host keeps one, does not change at all."""
     return {"device": info.st_dev, "inode": info.st_ino, "size": info.st_size,
             "birth": getattr(info, "st_birthtime", None)}
+
+
+def build_shape(build_dir: Path) -> Optional[str]:
+    """The MUN Shape format a build's console reads, as its BUILD-INFO records
+    it; None for a build that records none."""
+    try:
+        info = json.loads((build_dir / "BUILD-INFO.json").read_text())
+    except (OSError, ValueError):
+        return None
+    shape = info.get("shape")
+    return shape.get("format") if isinstance(shape, dict) and isinstance(shape.get("format"), str) else None
+
+
+def check_build(guest: str, build_dir: Path, latest: Optional[Path], recorded: bool) -> None:
+    """Refuse a console that does not show MUN Shape as this checkout's tools
+    describe it. `recorded`: the guest exists, made from `build_dir`."""
+    found = build_shape(build_dir)
+    if found == shape_rules.FORMAT:
+        return
+    try:
+        info = json.loads((build_dir / "BUILD-INFO.json").read_text())
+        made = f"{info['source']['describe']}, {info['built']['finished'][:10]}"
+    except (OSError, ValueError, KeyError, TypeError):
+        made = "no readable BUILD-INFO"
+    which = f"guest {guest} runs build {build_dir.name}" if recorded else f"build {build_dir.name}"
+    if found is None:
+        why = (f"{which} ({made}) records no MUN Shape: it was made before builds recorded the MUN Shape their "
+               "console reads, so it does not say what it shows (v0.1.0-dev.2 shows none)")
+    else:
+        why = f"{which} ({made}) reads {found}; this checkout writes {shape_rules.FORMAT}"
+    if latest is not None and latest != build_dir and build_shape(latest) == shape_rules.FORMAT:
+        fix = (f"use a guest made from build {latest.name}: --guest NAME (a new one)"
+               + (f", or remove this one first: ./mun dev vm {guest} destroy --yes" if recorded else ""))
+    else:
+        fix = "make a new image: ./mun dev build" + (
+            f", then remove this guest (./mun dev vm {guest} destroy --yes) or give --guest NAME" if recorded else "")
+    raise vm.LabError(f"{why}. The preview needs a build that records {shape_rules.FORMAT}: {fix}")
 
 
 class NotOurs(vm.LabError):

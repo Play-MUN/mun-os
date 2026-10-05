@@ -2,9 +2,9 @@
 `./mun dev shape`): its cards are its own, known by the files it made, not by
 their names; a file it did not make keeps its bytes and its identity; one
 preview per console; each change is a new insertion after the previous one
-left by the safe path; a game is never interrupted; and a card it starts from is
-only read. The console is replaced by mocks; the cards are real images
-(e2fsprogs)."""
+left by the safe path; a game is never interrupted; a card it starts from is
+only read; and a console whose build records no MUN Shape is refused. The
+console is replaced by mocks; the cards are real images (e2fsprogs)."""
 
 import contextlib
 import hashlib
@@ -117,6 +117,52 @@ class NamesAndFolderTests(unittest.TestCase):
             (folder / "world").mkdir()
             (folder / "world" / "a.png").write_bytes(b"1")
             self.assertNotEqual(shapepreview.folder_digest(folder), before)
+
+
+class BuildTests(unittest.TestCase):
+    """Which console the preview takes: one whose build records the MUN Shape
+    this checkout writes."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="shape-builds-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    def build(self, name, shape=None):
+        build = self.tmp / name
+        build.mkdir()
+        info = {"source": {"describe": "abc1234"}, "built": {"finished": "2026-10-01T00:00:00Z"}}
+        if shape:
+            info["shape"] = {"format": shape}
+        (build / "BUILD-INFO.json").write_text(json.dumps(info))
+        return build
+
+    def test_a_build_that_records_this_checkouts_shape_is_taken(self):
+        new = self.build("new", "mun-shape/1")
+        self.assertEqual(shapepreview.build_shape(new), "mun-shape/1")
+        shapepreview.check_build("shape", new, new, recorded=True)
+
+    def test_an_existing_guest_of_an_older_build_is_refused_with_the_way_to_a_new_one(self):
+        old, new = self.build("s3u"), self.build("s4w", "mun-shape/1")
+        with self.assertRaises(vm.LabError) as refused:
+            shapepreview.check_build("consola", old, new, recorded=True)
+        text = str(refused.exception)
+        self.assertIn("guest consola runs build s3u", text)
+        self.assertIn("records no MUN Shape", text)
+        self.assertIn("build s4w", text)
+        self.assertIn("./mun dev vm consola destroy --yes", text)
+
+    def test_without_any_build_that_records_it_the_way_is_a_new_image(self):
+        old = self.build("dev2")
+        with self.assertRaises(vm.LabError) as refused:
+            shapepreview.check_build("shape", old, old, recorded=False)
+        self.assertIn("./mun dev build", str(refused.exception))
+        self.assertNotIn("destroy", str(refused.exception), "no guest exists yet to remove")
+
+    def test_another_major_version_is_refused(self):
+        other = self.build("future", "mun-shape/2")
+        with self.assertRaises(vm.LabError) as refused:
+            shapepreview.check_build("shape", other, other, recorded=False)
+        self.assertIn("reads mun-shape/2", str(refused.exception))
 
 
 @unittest.skipUnless(have_e2fsprogs(), "e2fsprogs (mke2fs, debugfs) not installed")

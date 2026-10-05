@@ -486,9 +486,9 @@ def create_guest(name: str, build: Path) -> None:
     log(f"guest {name}: new disk over build {build.name} ({info['build_id']})")
 
 
-def ensure_guest(name: str, build: Optional[str]) -> Path:
-    """Guest `name`, made the first time from `build` (default: the latest);
-    returns its build's directory."""
+def guest_build(name: str, build: Optional[str]) -> Tuple[Path, bool]:
+    """The build guest `name` runs (True) or would be made from the first
+    time (False): `build`, or the latest."""
     if not NAME.fullmatch(name):
         raise vm.LabError("guest name: 2-16 lowercase letters, digits or '-', starting with a letter or digit")
     guest_file = GUESTS_ROOT / name / "guest.json"
@@ -496,17 +496,24 @@ def ensure_guest(name: str, build: Optional[str]) -> Path:
         recorded = json.loads(guest_file.read_text())["build"]
         if build and build != recorded:
             raise vm.LabError(f"guest {name} runs build {recorded}; use a new --guest name for build {build}")
-        return BUILDS_ROOT / recorded
+        return BUILDS_ROOT / recorded, True
     available = builds()
     if build:
         chosen = BUILDS_ROOT / build
         if chosen not in available:
             raise vm.LabError(f"no finished build {build} in {BUILDS_ROOT}")
-    elif available:
-        chosen = available[-1]
-    else:
-        raise vm.LabError("no build yet: run `./mun dev build` first")
-    create_guest(name, chosen)
+        return chosen, False
+    if available:
+        return available[-1], False
+    raise vm.LabError("no build yet: run `./mun dev build` first")
+
+
+def ensure_guest(name: str, build: Optional[str]) -> Path:
+    """Guest `name`, made the first time from `build` (default: the latest);
+    returns its build's directory."""
+    chosen, exists = guest_build(name, build)
+    if not exists:
+        create_guest(name, chosen)
     return chosen
 
 
@@ -527,6 +534,11 @@ def cmd_shape(args: argparse.Namespace) -> int:
     folder = Path(args.folder)
     if folder.is_symlink() or not folder.is_dir():
         raise vm.LabError(f"{folder} is not a folder")
+    # Which console it would be, before a guest is made or started: one whose
+    # build records no MUN Shape is refused, the guest left as it is.
+    build_dir, recorded = guest_build(args.guest, args.build)
+    available = builds()
+    shapepreview.check_build(args.guest, build_dir, available[-1] if available else None, recorded)
     build_dir = ensure_guest(args.guest, args.build)
     base = None
     if args.base:
@@ -582,11 +594,21 @@ def cmd_list(args: argparse.Namespace) -> None:
             with contextlib.suppress(OSError, ValueError, KeyError):
                 origin = f" downloaded from {json.loads((build / 'ORIGIN.json').read_text())['source']}"
         print(f"build {build.name:16} {info['version']} {info['environment']} release={str(info['release']).lower()} "
-              f"id {info['build_id']} source {info['source']['describe']}{origin}")
+              f"id {info['build_id']} source {info['source']['describe']}{origin} shape {shape_of(build)}")
     if GUESTS_ROOT.is_dir():
         for guest in sorted(GUESTS_ROOT.glob("*/guest.json")):
             data = json.loads(guest.read_text())
-            print(f"guest {guest.parent.name:16} build {data['build']} created {data['created']}")
+            print(f"guest {guest.parent.name:16} build {data['build']} created {data['created']} "
+                  f"shape {shape_of(BUILDS_ROOT / data['build'])}")
+
+
+def shape_of(build: Path) -> str:
+    """The MUN Shape format a build's console reads, or why there is none to
+    show: a build made before builds recorded it, or one no longer here."""
+    import shapepreview
+    if not (build / "BUILD-INFO.json").is_file():
+        return "unknown (build not here)"
+    return shapepreview.build_shape(build) or "not recorded"
 
 
 # ------------------------------------------------------------ downloads

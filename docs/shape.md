@@ -6,8 +6,8 @@ menus, the materials of the menu entries and the game's panel, a transition
 and the menu sounds. The card describes it with data; MUN™ draws every
 package with the same code, and nothing on the card runs.
 
-**Status.** This document is the package contract, format `mun-shape/1`, and
-its checker, `mun-card shape`. The card service copies a valid card's
+**Status.** This document is the package contract of MUN Shape v1, format
+`mun-shape/1`, and its checker, `mun-card shape`. The card service copies a valid card's
 package, checked, to RAM for the shell, and the shell draws all of it: the
 palette and materials of the eligible surfaces, the card object, the world
 behind Home with its motion, the transitions that bring the identity in and
@@ -515,9 +515,10 @@ The algorithm, exact so that the console and the checker agree:
   while the launcher takes the screen.
 - Settings: *MUN Shape* Full, Colours only or Off; *Game sounds on the
   menus*; *Reduce motion* (fades, and a still world and objects).
-- Not yet: an ambient sound loop, a gallery, a custom typeface; game-file
-  preloading is out of scope. The organic outline is reached during the
-  transition and then held still: moving it continuously would repaint the
+- Outside MUN Shape v1: preloading a game's files, a gallery, a game's
+  typefaces, a continuous ambient sound, video and advanced graphics effects.
+  A later version may add some of them; v1 does not. The organic outline is
+  reached during the transition and then held still: moving it continuously would repaint the
   card object's glows on the interface thread, which the software renderer
   cannot afford without cost to navigation.
 

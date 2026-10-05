@@ -4,7 +4,7 @@ While your Game Card is in the console, MUN can take your game's identity:
 its colours on the menu, glass or paper under the words, the card object
 showing your art, a world moving behind Home, a transition that brings it
 in and takes it away, and your game's sounds on the menus. This is MUN
-Shape. It is optional and offline, it is a folder on your card, and the
+Shape v1. It is optional and offline, it is a folder on your card, and the
 console draws it with its own code: you write no software for it and
 nothing in your game changes.
 

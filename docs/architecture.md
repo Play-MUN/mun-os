@@ -32,11 +32,11 @@ mun-launchd ── systemd-run ──► mun-game-<session>   runs the copy in /
 
 | Component | Language | Role |
 | --- | --- | --- |
-| [MUN Shell](../services/mun-shell/README.md) (`mun-shell`) | C++ and Qt 6 QML | The interface on tty1: home, card states and options, Play, session results, safe eject, settings and system information, power off. Unprivileged; it reads the system, never changes it, except through one root helper with a fixed vocabulary (`mun-power poweroff|reboot`) |
+| [MUN Shell](../services/mun-shell/README.md) (`mun-shell`) | C++ and Qt 6 QML | The interface on tty1: home, card states and options, Play, session results, safe eject, settings and system information, power off; it draws a card's [MUN Shape](shape.md) while the card is in. Unprivileged; it reads the system, never changes it, except through one root helper with a fixed vocabulary (`mun-power poweroff|reboot`) |
 | [Card service](../services/mun-cardd/README.md) (`mun-cardd`) | Python | Mounts cards for the console and is the only process that writes to one: detects eligible media, checks the file system and mounts it read-only in its private mount namespace, validates the manifest, publishes states, stages a game's entry, writes saves, and copies a valid card's MUN Shape package, checked, to RAM for the shell ([shape](shape.md)) |
 | [Launcher](../services/mun-launchd/README.md) (`mun-launchd`) | Python | Authorises and supervises game sessions: re-checks the card, has the entry staged, stops the shell, runs the game as a sandboxed transient unit, coordinates saves, records the result and restores the shell whatever happened |
 | [`mun_card`](../tools/mun-card/README.md) | Python | The card format: strict TOML subset, validation, save bounds and the envelope rule. Shared by the card service and the host tool, so both apply the same rules |
-| [`mun-card`](../tools/mun-card/README.md) | Python | Host tool: creates, inspects offline, hashes and converts card images |
+| [`mun-card`](../tools/mun-card/README.md) | Python | Host tool: creates, inspects offline, hashes and converts card images; checks and packages MUN Shape |
 | [Image build](../os/README.md) (`os/`) | shell, mkosi | Composes the image from pinned inputs in a disposable builder and records BUILD-INFO |
 | [Laboratory](../vm/README.md) (`vm/`, `./mun dev`, `./mun vm`) | Python | Host side: builds, QEMU guests, virtual cards, input, evidence |
 

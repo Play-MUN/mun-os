@@ -34,7 +34,7 @@ The requirements to play and to build are in
 later and Make; a C compiler adds the example game's save tests.
 
 ```sh
-make check      # documentation links, Python syntax, host regressions, C save tests
+make check      # documentation links, anchors and translations, Python syntax, host regressions, C save tests
 make test       # the Python host regressions only
 ```
 
@@ -72,6 +72,22 @@ library only, temporary files and fake process and protocol boundaries; they
 need no network, QEMU or root ([tests/README.md](tests/README.md)). Add a
 regression test with each fix. Behaviour that only a running guest can show
 is described in the pull request with the commands used.
+
+## Documentation and translations
+
+Documentation is written in English, the technical reference. Some pages
+also have a Spanish translation: `docs/es/` mirrors `docs/`, a page elsewhere
+has `NAME.es.md` beside `NAME.md`, and each pair is linked both ways by an
+English / Español line. `docs/translations.json` lists every translation
+with the SHA-256 of the English text it was last reviewed against.
+
+When you change a page that has a translation, update the translation in the
+same change if you can, or say in the pull request that it needs one.
+`make check` fails until the translation has been reviewed against the new
+English text and its `source_sha256` set to the value the check prints; set
+it only after reading both. Commands, options, paths, file names, JSON and
+TOML fields and error codes stay as they are in a translation, and the
+output of a tool is quoted in the language the tool prints.
 
 ## Branches, commits and pull requests
 

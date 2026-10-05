@@ -1,0 +1,13 @@
+{
+  "format": "mun-translations/1",
+  "about": "Each translation with its English original, the technical reference, and the SHA-256 of the original's text when the translation was last reviewed against it. scripts/check_foundation.py checks the pairs; source_sha256 is set by hand, only after the translation has been reviewed.",
+  "translations": [
+    {
+      "translation": "docs/es/glossary.md",
+      "source": "docs/glossary.md",
+      "language": "es",
+      "reviewed": "2026-10-05",
+      "source_sha256": "1ea2e6adb0da994efb04712270d9108e9d1a040e71c0299d185e2dfa2c4c204a"
+    }
+  ]
+}

@@ -419,6 +419,8 @@ class BuildInfoTests(unittest.TestCase):
         self.assertEqual(info["initrd"]["packages"], [{"name": "lvm2", "version": "2.03.31-2", "architecture": "arm64"}])
         self.assertEqual(info["initrd"]["sha256"], hashlib.sha256(b"cpio").hexdigest())
         self.assertEqual(info["debian"]["snapshot"], json.loads((OS / "inputs.json").read_text())["debian"]["snapshot"])
+        self.assertEqual(info["shape"], {"format": "mun-shape/1"},
+                         "the MUN Shape format the console reads, from the checker the card service uses")
 
 
 class EntryPointTests(unittest.TestCase):

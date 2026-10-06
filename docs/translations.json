@@ -42,7 +42,7 @@
       "source": "docs/getting-started.md",
       "language": "es",
       "reviewed": "2026-10-06",
-      "source_sha256": "8d7400bc90fed11d72620f06444e42c746b891eef787c36ab151a1b5e692fff4"
+      "source_sha256": "5c118053746fad9b721bd6c17135caf7409af9fababf3fe6a8494bab617ec31b"
     },
     {
       "translation": "docs/es/glossary.md",
@@ -70,7 +70,7 @@
       "source": "docs/guides/see-shape-in-action.md",
       "language": "es",
       "reviewed": "2026-10-06",
-      "source_sha256": "0bf8c7dee4e73872b88686e822c8870b025147e02b6fe55481b4d479d7fdb83b"
+      "source_sha256": "66abec8487d31fc15396cd95843e41e9adfcec52e700b82f4af5d50182fa5ed9"
     },
     {
       "translation": "docs/es/guides/shape-your-game.md",

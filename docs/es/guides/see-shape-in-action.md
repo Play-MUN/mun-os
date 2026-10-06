@@ -66,8 +66,8 @@ válida.
 ## La consola tiene que mostrar MUN Shape
 
 Una imagen registra en su `BUILD-INFO.json` el MUN Shape que lee su consola
-(`"shape": {"format": "mun-shape/1"}`). La v0.1.0-dev.3 publicada lo
-registra, igual que las imágenes construidas desde tu copia del repositorio;
+(`"shape": {"format": "mun-shape/1"}`). La v0.1.0-dev.3 lo registra, igual
+que las imágenes construidas desde tu copia del repositorio;
 las versiones preliminares anteriores, la v0.1.0-dev.2 y las de antes, no
 muestran MUN Shape. Mira lo que tienes:
 

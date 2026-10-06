@@ -16,8 +16,11 @@ Before `dev` goes into `main`, its pages already speak of the new release:
 a pull request to `dev` points the preview's address in
 [getting started](getting-started.md#3-the-image) and in the bug report
 template (`.github/ISSUE_TEMPLATE/bug_report.yml`) at the new release, in
-English and in Spanish, and says what changes for its players. What earlier
-releases did or did not do stays, named as theirs. Where a release was
+English and in Spanish, and says what changes for its players. Next to that
+address, getting started says which release its pages are for and what to
+use while that release is not on the releases page yet, so the pages hold
+before and after it is published. What earlier releases did or did not do
+stays, named as theirs. Where a release was
 checked is never carried over: until the Hosts workflow has run on the new
 release, its Linux and Windows checks are pending, in the pages and in its
 notes.

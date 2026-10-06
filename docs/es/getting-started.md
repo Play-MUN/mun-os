@@ -48,8 +48,13 @@ imagen.
 
 Una versión preliminar trae la imagen, su registro (`BUILD-INFO.json`), dos
 Game Cards (MUN Collect y la MUN Test Card), los textos de las licencias y
-`release.json`, que lista cada archivo con su tamaño y su SHA-256. Pásale a
-`./mun get` la dirección de ese `release.json`:
+`release.json`, que lista cada archivo con su tamaño y su SHA-256. Estas
+páginas son de la v0.1.0-dev.3; si todavía no está en la
+[página de versiones](https://github.com/Play-MUN/mun-os/releases), usa la
+última versión preliminar que haya allí, con las páginas de su propia
+etiqueta, o construye la imagen de esta rama
+([construir la imagen tú mismo](#construir-la-imagen-tú-mismo)). Pásale a
+`./mun get` la dirección de su `release.json`:
 
 ```sh
 ./mun get https://github.com/Play-MUN/mun-os/releases/download/v0.1.0-dev.3/release.json
@@ -61,10 +66,20 @@ interrumpida continúa si vuelves a ejecutar la misma orden. Una Game Card que
 ya existe nunca se sustituye (puede tener tus partidas). En Windows:
 `py mun get …`.
 
-Si jugaste una versión preliminar anterior, su consola sigue con aquella
-imagen: `./mun dev vm play destroy --yes` borra esa consola (las imágenes y
-las tarjetas, con sus partidas, se quedan), y el siguiente `./mun play` crea
-una nueva con la imagen que acabas de descargar.
+Si jugaste una versión preliminar anterior, su consola (`play`) sigue con
+aquella imagen, y `./mun play` sin más toma la imagen construida más
+recientemente que tengas, que no tiene por qué ser esta descarga. Arranca
+esta por su nombre, en una consola propia: `./mun dev list` muestra el nombre
+con que se instaló (`d<mes><día>-<hora>` de su build, salvo que elijas uno
+con `./mun get … --name NAME`).
+
+```sh
+./mun play --build NAME --guest NAME --card collect
+```
+
+Usa `--guest NAME` también en las órdenes de más abajo. La consola anterior
+se queda como estaba, con sus propios ajustes; tus tarjetas y sus partidas
+sirven en las dos.
 
 ## 4. Jugar
 

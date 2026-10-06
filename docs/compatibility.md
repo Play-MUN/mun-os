@@ -13,7 +13,7 @@ QEMU 8.2 or later with its ARM64 UEFI firmware ([getting started](getting-starte
 
 | Computer | Console's processor | Headless (download, start, card, game, power-off) | Window, keyboard, sound |
 | --- | --- | --- | --- |
-| macOS 27, Apple Silicon | Virtualized (HVF) | Checked on a Mac | Checked on a Mac (Cocoa, CoreAudio) |
+| macOS 27, Apple Silicon | Virtualized (HVF) | Checked on a Mac (v0.1.0-dev.3) | Checked on a Mac (v0.1.0-dev.3; Cocoa, CoreAudio) |
 | macOS 15, ARM64 (GitHub's virtual machine) | Emulated: no HVF inside a VM | Checked in CI | Not tried |
 | Linux x86_64, Ubuntu 24.04 | Emulated | Checked in CI and in a virtual machine | Not tried (GTK or SDL) |
 | Linux ARM64, Ubuntu 24.04 | Emulated (no `/dev/kvm` in either) | Checked in CI and in a virtual machine | Not tried |
@@ -58,7 +58,7 @@ VM from pinned inputs, and needs Git, Make, OpenSSH, QEMU, e2fsprogs, about
 
 | Computer | State |
 | --- | --- |
-| macOS, Apple Silicon (HVF, `hdiutil` for the builder's seed) | Checked (builds of about two minutes) |
+| macOS, Apple Silicon (HVF, `hdiutil` for the builder's seed) | Checked: the v0.1.0-dev.3 build took about 9 minutes, its inputs already downloaded |
 | Linux ARM64 with KVM (`xorriso` for the seed) | Supported by the tools; not tried |
 | Linux x86_64, or ARM64 without KVM | The builder is emulated: hours; not tried |
 | Windows | Not supported; WSL 2 not tried |

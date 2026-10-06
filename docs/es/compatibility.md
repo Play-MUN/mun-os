@@ -14,7 +14,7 @@ con una imagen descargada, hacer Game Cards y construir una imagen.
 
 | Ordenador | Procesador de la consola | Sin pantalla (descarga, arranque, tarjeta, juego, apagado) | Ventana, teclado, sonido |
 | --- | --- | --- | --- |
-| macOS 27, Apple Silicon | Virtualizado (HVF) | Comprobado en un Mac | Comprobado en un Mac (Cocoa, CoreAudio) |
+| macOS 27, Apple Silicon | Virtualizado (HVF) | Comprobado en un Mac (v0.1.0-dev.3) | Comprobado en un Mac (v0.1.0-dev.3; Cocoa, CoreAudio) |
 | macOS 15, ARM64 (la máquina virtual de GitHub) | Emulado: no hay HVF dentro de una VM | Comprobado en CI | Sin probar |
 | Linux x86_64, Ubuntu 24.04 | Emulado | Comprobado en CI y en una máquina virtual | Sin probar (GTK o SDL) |
 | Linux ARM64, Ubuntu 24.04 | Emulado (sin `/dev/kvm` en ninguno de los dos) | Comprobado en CI y en una máquina virtual | Sin probar |
@@ -60,7 +60,7 @@ OpenSSH, QEMU, e2fsprogs, unos 10 GB de disco y red durante la construcción.
 
 | Ordenador | Estado |
 | --- | --- |
-| macOS, Apple Silicon (HVF, `hdiutil` para la semilla del constructor) | Comprobado (builds de unos dos minutos) |
+| macOS, Apple Silicon (HVF, `hdiutil` para la semilla del constructor) | Comprobado: la build de la v0.1.0-dev.3 tardó unos 9 minutos, con sus entradas ya descargadas |
 | Linux ARM64 con KVM (`xorriso` para la semilla) | Las herramientas lo admiten; sin probar |
 | Linux x86_64, o ARM64 sin KVM | El constructor se emula: horas; sin probar |
 | Windows | Sin soporte; WSL 2 sin probar |

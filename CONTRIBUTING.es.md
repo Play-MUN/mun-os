@@ -10,6 +10,56 @@ de juegos, y llevar el laboratorio a más ordenadores. Lee primero el
 [arquitectura](docs/architecture.md) (en inglés); los contratos que un cambio
 debe respetar están en [docs/](docs/es/README.md).
 
+## Cómo ayudar
+
+No toda la ayuda es código. Cada una de estas formas pasa por una incidencia
+o una pull request contra `dev`, como explica el resto de esta página:
+
+- **Pruébalo en tu ordenador.** Sigue los [primeros pasos](docs/es/getting-started.md)
+  donde las tablas dicen sin probar, o comprobado solo sin ventana: Linux o
+  Windows con ventana, teclado y sonido, Linux ARM64 con KVM, otra
+  distribución. Cuenta lo que pasó con la plantilla de errores (tu
+  ordenador, las versiones de QEMU y de Python, el build id de la imagen);
+  saber que funciona vale tanto como saber que no.
+- **Errores e instrucciones confusas.** Un paso que no hace lo que dice la
+  página, o que tuviste que adivinar, es un error de la documentación: abre
+  una incidencia, o una pull request que corrija la página, en inglés y, si
+  la tiene, en su traducción.
+- **Traducciones y accesibilidad.** Las páginas en español se mantienen al
+  día con sus originales en inglés ([abajo](#documentación-y-traducciones)).
+  Revisarlas frente a las etiquetas de la propia consola, o hacer la
+  interfaz más fácil de leer (contraste, tamaños, textos que no caben), ayuda
+  a todos los jugadores. Un idioma nuevo empieza como propuesta en una
+  incidencia.
+- **Paquetes de MUN Shape y juegos de ejemplo.** Un paquete con tu propio
+  arte, comprobado con `./mun card shape check --report`, enseña lo que
+  puede hacer MUN Shape; un juego de ejemplo enseña lo que puede llevar una
+  tarjeta. Todo tiene que ser tuyo para poder licenciarlo
+  ([derechos](#derechos-y-firma)): por eso los ejemplos de `examples/shape/`
+  se generan con código.
+- **Servicios, herramientas e integración de hardware.** El shell, el
+  servicio de tarjetas, el lanzador, las herramientas de tarjetas y el
+  laboratorio: la [arquitectura](docs/architecture.md) y los
+  [lenguajes](docs/development/languages.md), en inglés, explican cómo
+  encajan. La integración de hardware (arranque, pantalla, entrada, el lector
+  de tarjetas) corresponde a la configuración oficial cuando se elija, o a un
+  fork para otra placa; propónla antes en una incidencia.
+
+### Primeras tareas
+
+- Sigue los primeros pasos en Linux o en Windows con ventana y sonido, y
+  cuenta lo que viste en cada paso.
+- Ejecuta `./mun play` en un ordenador ARM64 con Linux y KVM: las
+  herramientas lo admiten y nadie lo ha probado todavía.
+- En español y a 1080p, *Configuración* › *Imagen y sonido* corta la fila
+  *Sonidos del juego en los menús*; haz que se vea entera sin cambiar la
+  etiqueta.
+- Lee una guía como alguien que llega de nuevas y convierte en una
+  corrección cada paso que tuviste que adivinar.
+- Una más grande: un tercer ejemplo de MUN Shape, con el arte y los sonidos
+  generados con código como en `examples/shape/generate.py`, que dé `LISTO`
+  al comprobarlo.
+
 ## Quién decide
 
 MUN OS lo fundó y lo mantiene Iván Moreno Mendoza (Play MUN). El mantenedor

@@ -2,61 +2,98 @@
 
 **English** · [Español](README.es.md)
 
-**BOP — Buy. Own. Play.** MUN™ is a game console in development, for games
-you own on Game Cards: insert a card, play offline, and your progress
-travels with the card. MUN OS is its open-source operating system.
+MUN™ is a game console we are building in the open, for games you own on
+Game Cards. MUN OS is its operating system, open source and developed in
+public. You can already run it on your computer as a virtual console, try
+it, take it apart and take part; the console's official hardware comes
+later.
 
 ![MUN Shell's Home with the MUN Collect Game Card inserted](docs/images/mun-shell-home.jpg)
 
-MUN OS is **experimental**. There is no MUN hardware and no supported
-release yet. What exists is one development image, ARM64 like the console
-will be, that QEMU runs as a virtual console on macOS, Linux and Windows
-computers; the image says so itself (`environment = "qemu-arm64"`,
-`release = false`).
+## What you can do today
 
-MUN -1, the first console, will have **one officially supported hardware
-configuration**, not selected yet; the assembled console and DIY builds on
-that configuration will use the same official image. Ports to other
-hardware are welcome as independently maintained forks.
+1. **Try MUN OS, without compiling.** Download the tools and a ready-made
+   image, start the virtual console, insert a Game Card, play, save, eject
+   it safely and continue later: [getting started](docs/getting-started.md).
+   You need Python and QEMU.
+2. **Create for MUN.** Put a game on a Game Card, and dress the console in
+   its identity with MUN Shape: [create a Game Card](docs/guides/create-game-card.md),
+   [bring a game to MUN](docs/guides/port-a-game.md) and
+   [dress the console in your game](docs/guides/shape-your-game.md). The
+   card tools also need e2fsprogs.
+3. **Build and adapt the system.** Build the image yourself from pinned
+   inputs, change it and run your own: [build the image yourself](docs/getting-started.md#build-the-image-yourself),
+   [image build](os/README.md) and [architecture](docs/architecture.md).
+   Building is checked on a Mac with Apple Silicon.
+4. **Contribute and follow.** Try it on your computer, report what fails or
+   confuses, translate, make sample packages and games, work on the services
+   and tools: [contributing](CONTRIBUTING.md#ways-to-help). The
+   [releases](https://github.com/Play-MUN/mun-os/releases) and the
+   [pull requests](https://github.com/Play-MUN/mun-os/pulls) show where it
+   is going.
 
-## What works today
+Playing, making cards and building each have their own requirements:
+[compatibility](docs/compatibility.md).
 
-In the virtual console: MUN Shell starts on its own; Game Cards (disk images
-standing in for cards) are validated and shown; a game on a card starts
-sandboxed and hands the console back however it ends; saves are written to
-the card and restored on another console or another build; a card is
-ejected safely; the resolution (720p, 1080p, 1440p) applies at once, and
-games built on SDL or OpenGL start in it; the menus have sound; English and
-Spanish. While its card is in, a game can dress the console in its own
-identity, MUN Shape v1: colours, materials, the card object, a world behind
-the menus, transitions and sounds, read from a folder on the card and drawn
-by MUN. The examples are MUN Collect, a small game, a graphics and audio
-probe, and two MUN Shape packages.
+## BOP — Buy. Own. Play.
+
+A legitimate Game Card is enough to own its game and play it. In the
+virtual console, with disk images standing in for cards:
+
+- **Insert it and play.** The game starts from the card, with no account,
+  no activation and no network.
+- **Your progress travels with the card.** Saves are written to the card,
+  not to the console: another console, or another build of MUN OS,
+  continues from it.
+- **Eject it safely,** and the card leaves the slot with everything it
+  carries.
+- **The console keeps no library.** Its storage holds the system; *My
+  games* says it plainly: your games live on their Game Cards.
+
+## What works today, and what does not yet
+
+MUN OS v0.1.0-dev.3 is a development preview. In the virtual console:
+
+- **MUN Shell**, the console's own interface, starts on its own: Home,
+  Settings (English or Spanish, 720p to 1440p, sounds), menus with sound.
+- **Game Cards** are validated before anything on them runs. A game starts
+  sandboxed and hands the console back however it ends, its saves go to the
+  card, and a card is ejected safely. Games built on SDL or OpenGL start in
+  the console's resolution.
+- **MUN Shape v1:** a declarative package of resources on the card
+  (a palette, materials, the card object, a world behind the menus,
+  transitions and sounds) that the console draws with its own code while the
+  card is in; nothing on the card runs. MUN keeps the layout, the words,
+  Settings and legibility, and the player decides how much of it to show.
+- **Examples:** MUN Collect, a small game; a graphics and audio probe; two
+  MUN Shape packages.
 
 | MUN Collect, without a package | The same card with the `sea` sample |
 | --- | --- |
 | ![Home with the MUN Collect Game Card, in MUN's look with the colours read from its cover](docs/images/mun-shape-before.jpg) | ![The same Home with MUN Collect carrying the sea sample: a world under water, glass plates and the card object showing the sea](docs/images/mun-shape-after.jpg) |
 
-Not there yet: controllers, card and system updates, and any physical
+**Not yet:** controllers, card and system updates, and any physical
 hardware. [Architecture](docs/architecture.md) says what exists and what is
 planned.
 
-## Where to start
+## Open, and where it is going
 
-- **Try the preview.** Download the tools and the image of a
-  [preview release](https://github.com/Play-MUN/mun-os/releases), start the
-  console and play the Game Card that comes with it; no compiler needed.
-  [Getting started](docs/getting-started.md) has the steps for each
-  computer.
-- **Make a Game Card.** Put a game on a card, play it, save on it, eject it
-  and continue, with MUN Collect as the example:
-  [create a Game Card](docs/guides/create-game-card.md), then
-  [bring a game to MUN](docs/guides/port-a-game.md).
-- **Build the image.** Compose it yourself from pinned inputs, on a Mac with
-  Apple Silicon: [build the image yourself](docs/getting-started.md#build-the-image-yourself)
-  and [image build](os/README.md).
-- **Contribute.** Run the checks, pick an issue, open a pull request:
-  [contributing](CONTRIBUTING.md).
+MUN OS's own work is under the [Apache License 2.0](LICENSE): you may study
+the code, change it, rebuild the image and distribute it under the terms of
+its licences. Each release publishes the corresponding source of every
+package in its image; third-party components keep their own terms, and the
+MUN and Play MUN names and logos have [their own](NAME-AND-LOGO.txt)
+([licensing](docs/licensing.md)).
+
+Today there is one experimental image, ARM64 like the console will be, that
+QEMU runs as a virtual console; the image says so itself
+(`environment = "qemu-arm64"`, `release = false`). MUN -1, the first console,
+will have **one officially supported hardware configuration**, not selected
+yet; the assembled console and DIY builds on it will use the same official
+image. Open and adaptable does not mean it runs on any board today: a
+physical port needs its own integration (boot, display, input, storage, the
+card reader), and ports to other hardware are welcome as independently
+maintained forks.
 
 ## Where it runs
 
@@ -69,17 +106,16 @@ the same console, slower.
 
 | Your computer | The console's processor | Checked |
 | --- | --- | --- |
-| macOS, Apple Silicon | Virtualized (HVF) | On a Mac (macOS 27), with window and sound; in CI on macOS 15, headless and emulated (no HVF in a VM) |
-| Linux, x86_64 or ARM64 | Emulated; KVM on ARM64 not tried yet | In CI and in Ubuntu 24.04 virtual machines, headless |
-| Windows, x86_64 or ARM64 | Emulated | In CI (Windows Server 2025; Windows 11 ARM64), headless |
+| macOS, Apple Silicon | Virtualized (HVF) | v0.1.0-dev.3 on a Mac (macOS 27), with window, keyboard and sound; v0.1.0-dev.2 in CI on macOS 15, headless and emulated (no HVF in a VM) |
+| Linux, x86_64 or ARM64 | Emulated; KVM on ARM64 not tried yet | v0.1.0-dev.2 in CI and in Ubuntu 24.04 virtual machines, headless |
+| Windows, x86_64 or ARM64 | Emulated | v0.1.0-dev.2 in CI (Windows Server 2025; Windows 11 ARM64), headless |
 
 "In CI" is the Hosts workflow: download a preview, start the console, play
-its card, power off, in GitHub's virtual machines. It checks each preview
-once it is published, and that preview's release notes give the result:
-the checks in CI above are v0.1.0-dev.2's, and v0.1.0-dev.3 is pending
-there until its own run. No Linux or Windows computer has been tried yet.
-Playing, making cards and building images each have their own
-requirements: [compatibility](docs/compatibility.md).
+its card, power off, in GitHub's virtual machines, without a window. It
+checks each preview once it is published, and that preview's release notes
+give the result: v0.1.0-dev.3 is pending there until its own run. No Linux
+or Windows computer has been tried yet, and no window, keyboard or sound
+outside macOS.
 
 ## Principles
 
@@ -119,7 +155,7 @@ requirements: [compatibility](docs/compatibility.md).
 | `os/` | MUN OS image composition: pinned inputs, mkosi configuration, builder scripts |
 | `vm/` | The laboratory: builder VMs, image guests, virtual cards, downloads |
 | `mun` | The tools' entry point: `./mun get`, `./mun play`, `./mun card`, `./mun dev` |
-| `examples/` | Example games |
+| `examples/` | Example games and MUN Shape packages |
 | `tests/`, `scripts/` | Host regressions and the documentation check |
 | `docs/` | Guides, contracts, architecture and reference; Spanish translations in `docs/es/` |
 | `.local/` | Ignored: builds, guests, card images, downloads |

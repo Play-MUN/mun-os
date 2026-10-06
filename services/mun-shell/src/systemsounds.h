@@ -21,19 +21,32 @@
 //
 // stop() fades a sound out over kFadeFrames instead of cutting it.
 //
-// Thread contract: play() and stop() on the GUI thread, started() delivered
-// on it; the worker owns the ALSA handle and is joined by the destructor,
-// before any member it reads is destroyed.
+// A Game Card's MUN Shape package may bring its own menu sounds and an
+// insertion cue (docs/shape.md): useGameSounds() reads them from the card
+// service's export, in the same format and within the contract's durations
+// (the set is taken whole or not at all), and while `gameSounds` is on
+// play("move") and the others play the game's; playGame("insert") plays the
+// cue. The start-up and a card without sounds keep MUN's. A set is replaced
+// on the GUI thread; a sound already queued or playing holds its samples
+// (shared) until it ends.
+//
+// Thread contract: play(), stop(), useGameSounds() and playGame() on the GUI
+// thread, started() delivered on it; the worker owns the ALSA handle and is
+// joined by the destructor, before any member it reads is destroyed.
 #pragma once
 
 #include <QByteArray>
 #include <QObject>
 #include <QString>
+#include <QStringList>
+#include <QVariantMap>
 #include <QtQml/qqmlregistration.h>
 
 #include <chrono>
 #include <condition_variable>
 #include <deque>
+#include <map>
+#include <memory>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -44,6 +57,11 @@ class SystemSounds : public QObject {
     QML_SINGLETON
     // Milliseconds between a sample's write and its being heard.
     Q_PROPERTY(int latency READ latency CONSTANT)
+    // Whether the menus play the game's sounds when it has some (the
+    // player's "Game sounds on the menus" and MUN Shape in its full mode).
+    Q_PROPERTY(bool gameSounds READ gameSounds WRITE setGameSounds NOTIFY gameSoundsChanged)
+    // The game's set is loaded: the names it has.
+    Q_PROPERTY(QStringList gameSet READ gameSet NOTIFY gameSetChanged)
 
 public:
     explicit SystemSounds(QObject *parent = nullptr);
@@ -53,11 +71,25 @@ public:
     Q_INVOKABLE void play(const QString &name);
     // Fades out the named sound wherever it is playing.
     Q_INVOKABLE void stop(const QString &name);
+    // The game's sounds: name -> file of the card service's export ("move",
+    // "enter", "back", optionally "insert"). An empty map, or a set with any
+    // file out of the format or its duration, leaves MUN's.
+    Q_INVOKABLE void useGameSounds(const QVariantMap &files);
+    // One of the game's sounds only ("insert"), whenever the caller asks
+    // (the caller checks the player's choices); nothing if it has none.
+    Q_INVOKABLE void playGame(const QString &name);
     int latency() const { return int(kLatencyMicroseconds / 1000); }
+    bool gameSounds() const { return m_gameSounds; }
+    void setGameSounds(bool on);
+    QStringList gameSet() const;
 
 signals:
     // The first samples of a sound that play() asked for went to the device.
     void started(const QString &name);
+    void gameSoundsChanged();
+    void gameSetChanged();
+    // One of the game's sounds was queued by playGame().
+    void gameSoundQueued(const QString &name);
 
 private:
     struct Sound {
@@ -65,10 +97,11 @@ private:
         std::vector<qint16> samples;  // interleaved stereo frames
         int gain;                     // in quarters of the recorded level
     };
+    using SoundPtr = std::shared_ptr<const Sound>;
     struct Voice {
-        const Sound *sound;
-        size_t sample;  // next sample to mix
-        size_t fade;    // frames left of a fade-out; 0 while not fading
+        SoundPtr sound;  // held while it plays, whatever set replaces it
+        size_t sample;   // next sample to mix
+        size_t fade;     // frames left of a fade-out; 0 while not fading
     };
 
     // What ALSA may buffer ahead: short enough that a sound follows its key.
@@ -81,14 +114,18 @@ private:
     static constexpr std::chrono::seconds kIdle{3};
     static constexpr std::chrono::seconds kRetry{5};
 
+    static SoundPtr parse(const QByteArray &wav, const QString &name, int gain, double maxSeconds);
     void load(const QString &name, int gain);
+    void queue(const SoundPtr &sound);
     void run();
 
-    std::vector<Sound> m_sounds;  // filled before the worker starts, then read-only
+    std::vector<SoundPtr> m_sounds;         // MUN's: filled before the worker starts, then read-only
+    std::map<QString, SoundPtr> m_game;     // the game's: GUI thread only
+    bool m_gameSounds = true;
     std::mutex m_mutex;
     std::condition_variable m_wake;
-    std::deque<const Sound *> m_requests;  // guarded by m_mutex
-    std::deque<const Sound *> m_stops;     // guarded by m_mutex
-    bool m_stop = false;                   // guarded by m_mutex
+    std::deque<SoundPtr> m_requests;  // guarded by m_mutex
+    std::deque<SoundPtr> m_stops;     // guarded by m_mutex
+    bool m_stop = false;              // guarded by m_mutex
     std::thread m_worker;
 };

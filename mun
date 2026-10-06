@@ -6,6 +6,7 @@
     ./mun dev build   build a MUN OS development image for QEMU in a disposable builder
     ./mun dev run     boot an image guest from a build (no network interface)
     ./mun dev vm      operate a guest: cards, keys, screenshots, commands
+    ./mun dev shape   preview a MUN Shape package in a laboratory console (--watch follows its changes)
     ./mun dev list    builds and guests
     ./mun dev bundle  make a downloadable bundle of a build (for ./mun get)
     ./mun card        create, inspect and hash Game Card images (tools/mun-card)

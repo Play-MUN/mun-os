@@ -44,6 +44,16 @@ QtObject {
                                     : t(waiting + " more Game Cards are waiting.", "Otras " + waiting + " Game Cards esperan su turno."))
     }
 
+    // What the card does to the console, as it is (src/shape.h).
+    function shapeText() {
+        switch (Shape.source) {
+        case "shape": return " " + t("The game dresses the console while its card is in.",
+                                     "El juego viste la consola mientras su tarjeta está dentro.")
+        case "lent": case "read": return " " + t("The console takes the card's colours.", "La consola toma los colores de la tarjeta.")
+        }
+        return ""
+    }
+
     function card() {
         const kicker = "GAME CARD"
         switch (shell.cardMode) {
@@ -57,9 +67,7 @@ QtObject {
             return {
                 kicker: kicker,
                 title: info.title || "Game Card",
-                text: (info.kind === "game"
-                       ? t("The card is ready. When you play, the game will dress the console in its own presence.",
-                           "La tarjeta está lista. Cuando juegues, el juego vestirá la consola con su propia presencia.")
+                text: (info.kind === "game" ? t("The card is ready.", "La tarjeta está lista.") + shapeText()
                        : t("This Game Card holds no game.", "Esta Game Card no contiene ningún juego.")) + waitingText(),
                 options: options
             }
@@ -162,6 +170,9 @@ QtObject {
                     : info(t("Resolution", "Resolución"), resolutionValue()),
                 choice(t("Safe area", "Zona segura"), areas.map(a => a + " %"), areas.indexOf(ShellSettings.safeArea),
                        i => ShellSettings.safeArea = areas[i]),
+                // Home's world and objects hold still.
+                choice(t("Reduce motion", "Reducir movimiento"), [t("Off", "Desactivado"), t("On", "Activado")],
+                       ShellSettings.reduceMotion ? 1 : 0, i => ShellSettings.reduceMotion = i === 1),
                 unavailable("HDR"),
                 unavailable(t("Refresh rate", "Frecuencia")),
                 head("AUDIO"),
@@ -169,7 +180,14 @@ QtObject {
                 unavailable(t("Format", "Formato")),
                 choice(t("System sounds", "Sonidos del sistema"), [t("On", "Activados"), t("Off", "Desactivados")],
                        ShellSettings.systemSounds ? 0 : 1, i => ShellSettings.systemSounds = i === 0),
-                unavailable(t("Startup sound", "Sonido de arranque"))
+                choice(t("Game sounds on the menus", "Sonidos del juego en los menús"), [t("On", "Activados"), t("Off", "Desactivados")],
+                       ShellSettings.gameSounds ? 0 : 1, i => ShellSettings.gameSounds = i === 0),
+                unavailable(t("Startup sound", "Sonido de arranque")),
+                // How a Game Card dresses the console (docs/shape.md).
+                head("MUN SHAPE"),
+                choice("MUN Shape", [t("Full", "Completo"), t("Colours only", "Solo colores"), t("Off", "Desactivado")],
+                       ["full", "colours", "off"].indexOf(ShellSettings.shapeMode),
+                       i => ShellSettings.shapeMode = ["full", "colours", "off"][i])
             ]
         }
     }

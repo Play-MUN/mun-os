@@ -50,6 +50,21 @@ class Fixture(unittest.TestCase):
         self.enterContext(patch.object(vm, "GUESTS_ROOT", self.root / "guests"))
         self.enterContext(contextlib.redirect_stdout(io.StringIO()))
 
+    def build(self, name="b1", shape=None):
+        build = self.root / "builds" / name
+        build.mkdir(parents=True)
+        image = build / "mun-os-0.1.0-dev-qemu-arm64.qcow2"
+        image.write_bytes(b"image bytes")
+        digest = hashlib.sha256(b"image bytes").hexdigest()
+        info = {"build_id": f"id-{name}", "version": "0.1.0-dev", "environment": "qemu-arm64", "release": False,
+                "built": {"finished": f"2026-09-27T00:00:0{name[-1]}Z"}, "source": {"describe": f"c0ffee{name[-1]}"},
+                "artifacts": {image.name: {"sha256": digest}}}
+        if shape:
+            info["shape"] = {"format": shape}
+        (build / "BUILD-INFO.json").write_text(json.dumps(info))
+        (build / "SHA256SUMS").write_text(f"{digest}  {image.name}\n")
+        return build
+
 
 class SourceTests(Fixture):
     def repo(self):
@@ -141,19 +156,6 @@ class BuilderTests(Fixture):
 
 
 class ResultTests(Fixture):
-    def build(self, name="b1"):
-        build = self.root / "builds" / name
-        build.mkdir(parents=True)
-        image = build / "mun-os-0.1.0-dev-qemu-arm64.qcow2"
-        image.write_bytes(b"image bytes")
-        digest = hashlib.sha256(b"image bytes").hexdigest()
-        (build / "BUILD-INFO.json").write_text(json.dumps({
-            "build_id": f"id-{name}", "version": "0.1.0-dev", "environment": "qemu-arm64", "release": False,
-            "built": {"finished": f"2026-09-27T00:00:0{name[-1]}Z"},
-            "artifacts": {image.name: {"sha256": digest}}}))
-        (build / "SHA256SUMS").write_text(f"{digest}  {image.name}\n")
-        return build
-
     def test_results_are_checked_against_their_sums(self):
         build = self.build()
         mundev.verify_sums(build)
@@ -223,6 +225,71 @@ class ResultTests(Fixture):
         self.assertEqual(json.loads((self.root / "guests" / "two" / "guest.json").read_text())["build"], "b2",
                          "without --build a new guest takes the latest build")
         self.assertEqual(main.call_args.args[0][2:], ["open"], "the window picks this host's audible backend itself")
+
+
+class ShapeConsoleTests(Fixture):
+    """`./mun dev shape` takes only a console whose build records MUN Shape,
+    and says so before a guest is made or started."""
+
+    def shape_args(self, guest, build=None):
+        folder = self.root / "pkg"
+        folder.mkdir(exist_ok=True)
+        return argparse.Namespace(folder=str(folder), guest=guest, build=build, base=None, title="Shape preview",
+                                  watch=True, window=True, audio=None)
+
+    def test_an_existing_guest_of_an_older_build_is_refused_and_left_as_it_is(self):
+        self.build("b1")
+        self.build("b2", shape="mun-shape/1")
+        with patch.object(vm, "run"), patch.object(vm, "which", side_effect=lambda name: name):
+            mundev.create_guest("consola", self.root / "builds" / "b1")
+        guest = (self.root / "guests" / "consola" / "guest.json").read_bytes()
+        with patch.object(vm, "main") as main, patch.object(vm, "select_instance") as select:
+            with self.assertRaises(vm.LabError) as refused:
+                mundev.cmd_shape(self.shape_args("consola"))
+        self.assertIn("guest consola runs build b1", str(refused.exception))
+        self.assertIn("build b2", str(refused.exception))
+        main.assert_not_called()
+        select.assert_not_called()
+        self.assertEqual((self.root / "guests" / "consola" / "guest.json").read_bytes(), guest)
+
+    def test_a_new_guest_is_not_made_from_a_build_that_records_no_shape(self):
+        self.build("b1")
+        with patch.object(vm, "run") as run, patch.object(vm, "main") as main:
+            with self.assertRaises(vm.LabError) as refused:
+                mundev.cmd_shape(self.shape_args("shape", build="b1"))
+        self.assertIn("./mun dev build", str(refused.exception))
+        run.assert_not_called()
+        main.assert_not_called()
+        self.assertFalse((self.root / "guests" / "shape").exists(), "no guest made")
+
+    def test_a_window_is_not_promised_for_a_console_already_on(self):
+        import shapepreview
+        self.build("b1", shape="mun-shape/1")
+        with patch.object(vm, "run"), patch.object(vm, "which", side_effect=lambda name: name):
+            mundev.create_guest("shape", self.root / "builds" / "b1")
+        out = io.StringIO()
+        with patch.object(vm, "select_instance"), patch.object(vm, "read_pid", return_value=4242), \
+                patch.object(vm, "main") as main, patch.object(shapepreview, "Preview") as preview, \
+                contextlib.redirect_stdout(out):
+            self.assertEqual(mundev.cmd_shape(self.shape_args("shape")), 0)
+        main.assert_not_called()                              # no `open`: QEMU's window comes only with a start
+        preview.return_value.run.assert_called_once()
+        self.assertIn("already on, so no window opens", out.getvalue())
+
+    def test_the_list_says_which_builds_and_guests_show_shape(self):
+        self.build("b1")
+        self.build("b2", shape="mun-shape/1")
+        with patch.object(vm, "run"), patch.object(vm, "which", side_effect=lambda name: name):
+            mundev.create_guest("old", self.root / "builds" / "b1")
+            mundev.create_guest("new", self.root / "builds" / "b2")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            mundev.cmd_list(argparse.Namespace())
+        lines = out.getvalue().splitlines()
+        self.assertTrue(any(line.startswith("build b1") and line.endswith("shape not recorded") for line in lines))
+        self.assertTrue(any(line.startswith("build b2") and line.endswith("shape mun-shape/1") for line in lines))
+        self.assertTrue(any(line.startswith("guest new") and line.endswith("shape mun-shape/1") for line in lines))
+        self.assertTrue(any(line.startswith("guest old") and line.endswith("shape not recorded") for line in lines))
 
 
 class LicenceTests(unittest.TestCase):

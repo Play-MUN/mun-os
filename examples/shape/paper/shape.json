@@ -1,0 +1,73 @@
+{
+  "format": "mun-shape/1",
+  "palette": {
+    "light": "#FBF7EE",
+    "mid": "#BDB3A2",
+    "deep": "#2B2825",
+    "plate": "#F3ECDF",
+    "text": "#1F1C19",
+    "accent": "#B8392A"
+  },
+  "card": {
+    "window": "card/window.png",
+    "shape": "card",
+    "morph": 0.15,
+    "glow": "#F0D9B5"
+  },
+  "world": {
+    "backdrop": {
+      "image": "world/backdrop.png"
+    },
+    "layers": [
+      {
+        "image": "world/mountains-far.png",
+        "motion": "parallax",
+        "depth": 0.2
+      },
+      {
+        "image": "world/mountains-near.png",
+        "motion": "drift",
+        "speed": 6,
+        "depth": 0.7
+      }
+    ],
+    "emitters": [
+      {
+        "sprite": "world/speck.png",
+        "count": 30,
+        "path": "drift",
+        "speed": 12
+      },
+      {
+        "sprite": "world/petal.png",
+        "count": 10,
+        "path": "fall",
+        "speed": 20,
+        "band": [
+          0,
+          0.9
+        ]
+      }
+    ],
+    "rate": 10
+  },
+  "surfaces": {
+    "entries": {
+      "material": "paper"
+    },
+    "panel": {
+      "material": "paper"
+    }
+  },
+  "transition": {
+    "in": "sweep",
+    "out": "fade",
+    "seconds": 1.6
+  },
+  "sounds": {
+    "move": "sfx/move.wav",
+    "enter": "sfx/enter.wav",
+    "back": "sfx/back.wav",
+    "insert": "sfx/insert.wav"
+  }
+}

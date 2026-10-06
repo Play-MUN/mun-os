@@ -147,6 +147,10 @@ que guarde donde la consola guarda las partidas:
 
 ## Para ir más allá
 
+- La identidad de tu juego en la consola mientras su tarjeta está dentro
+  (colores, un mundo, una transición, sonidos):
+  [vestir la consola con tu juego](../../guides/shape-your-game.md), en
+  inglés.
 - Tarjetas rotas a propósito, para ver cómo las rechaza la consola:
   `./mun card variants` y después `./mun card create broken --variant bad-arch`.
 - Dos consolas, una tarjeta: una tarjeta solo está en una consola en marcha a

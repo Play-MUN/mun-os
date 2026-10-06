@@ -29,8 +29,12 @@ tarjeta arranca aislado y devuelve la consola acabe como acabe; las partidas
 se escriben en la tarjeta y se recuperan en otra consola o en otra build; una
 tarjeta se retira con seguridad; la resolución (720p, 1080p, 1440p) se aplica
 al momento, y los juegos hechos con SDL u OpenGL arrancan en ella; los menús
-tienen sonido; inglés y español. Los ejemplos son MUN Collect, un juego
-pequeño, y una prueba de gráficos y audio.
+tienen sonido; inglés y español. Mientras su tarjeta está dentro, un juego
+puede vestir la consola con su propia identidad, MUN Shape v1: colores,
+materiales, el objeto de la tarjeta, un mundo detrás de los menús,
+transiciones y sonidos, leídos de una carpeta de la tarjeta y dibujados por
+MUN. Los ejemplos son MUN Collect, un juego pequeño, una prueba de gráficos y
+audio, y dos paquetes de MUN Shape.
 
 Todavía no: mandos, actualizaciones de las tarjetas y del sistema, y
 cualquier hardware físico. [Arquitectura](docs/architecture.md) (en inglés)
@@ -99,8 +103,11 @@ Jugar, hacer tarjetas y construir imágenes tienen cada uno sus requisitos:
   [compatibilidad](docs/es/compatibility.md)
 - [Crear una Game Card](docs/es/guides/create-game-card.md) y
   [traer un juego a MUN](docs/es/guides/port-a-game.md)
+- [Vestir la consola con tu juego](docs/guides/shape-your-game.md) con MUN
+  Shape, y [verlo en acción](docs/guides/see-shape-in-action.md) (en inglés)
 - Para autores de tarjetas y juegos: [Game Cards](docs/game-cards.md),
-  [partidas](docs/saves.md), [ejecutar un juego](docs/runtime.md) (en inglés)
+  [partidas](docs/saves.md), [ejecutar un juego](docs/runtime.md),
+  [MUN Shape](docs/shape.md) (en inglés)
 - [Arquitectura](docs/architecture.md), [construcción de la imagen](os/README.md),
   [laboratorio](vm/README.md) (en inglés) y [todos los documentos](docs/es/README.md)
 - [Licencias](docs/licensing.md) (en inglés), [seguridad](SECURITY.es.md),

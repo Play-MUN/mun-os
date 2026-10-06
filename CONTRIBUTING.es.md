@@ -81,8 +81,12 @@ Las pruebas del anfitrión están en `tests/` y usan `unittest` de Python, solo
 con la biblioteca estándar, archivos temporales y fronteras de procesos y
 protocolos simuladas; no necesitan red, QEMU ni root
 ([tests/README.md](tests/README.md), en inglés). Añade una prueba de regresión
-con cada corrección. Lo que solo puede verse en un invitado en marcha se
-describe en la pull request con las órdenes usadas.
+con cada corrección. Las regresiones de comportamiento del shell se ejecutan
+sobre su binario compilado en cada construcción de la imagen
+(`./mun dev build`,
+[services/mun-shell/tests/behaviour.py](services/mun-shell/tests/behaviour.py)).
+Lo que solo puede verse en un invitado en marcha se describe en la pull
+request con las órdenes usadas.
 
 ## Documentación y traducciones
 

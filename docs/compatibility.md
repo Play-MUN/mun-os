@@ -1,5 +1,7 @@
 # Compatibility
 
+**English** · [Español](es/compatibility.md)
+
 Three different things run on your computer, with different needs: playing a
 downloaded image, making Game Cards, and building an image. "Checked" below
 says how and where; what was not tried is said as well.

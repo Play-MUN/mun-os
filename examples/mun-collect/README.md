@@ -1,5 +1,7 @@
 # MUN Collect
 
+**English** · [Español](README.es.md)
+
 A small test game that lives on a Game Card: move the ink square with the
 arrow keys, collect the five copper discs, press S to save your progress on
 the card, Esc to return to the console. Its purpose is to prove the launch

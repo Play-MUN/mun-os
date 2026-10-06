@@ -1,8 +1,9 @@
 # Tests
 
 `make test` runs the host-side regressions with Python's standard library;
-`make check` runs them after the documentation link check
-(`scripts/check_foundation.py`) and the Python syntax check, and adds MUN
+`make check` runs them after the documentation check
+(`scripts/check_foundation.py`: local links and anchors, and the translations
+listed in `docs/translations.json`) and the Python syntax check, and adds MUN
 Collect's C save tests (`examples/mun-collect/tests`) when a C compiler is
 present. No network, QEMU installation, root or VM boot is needed: the tests
 use temporary directories and fake process, protocol and device boundaries.
@@ -20,6 +21,7 @@ use temporary directories and fake process, protocol and device boundaries.
 | `test_os.py` | The image composition, pinned inputs, BUILD-INFO and the `./mun` entry point |
 | `test_mundev.py` | Builds, the builder and image guests of `./mun dev` |
 | `test_vm.py` | The laboratory tool: QMP and qemu-ga framing, card attach/detach, the attach registry, lifecycle locks, release reconciliation, audio, downloads |
+| `test_foundation.py` | The documentation check: GitHub's anchors (repeated and accented headings), links, the translation map and its pairs, links from a translation, an original changed after its review |
 
 A few tests need Linux (inotify, file leases, `/proc`) or Python 3.11's
 `tomllib` and are skipped where those are missing. The shell's own C++ and

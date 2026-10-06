@@ -1,5 +1,7 @@
 # MUN OS
 
+**English** · [Español](README.es.md)
+
 **BOP — Buy. Own. Play.** MUN™ is a game console in development, for games
 you own on Game Cards: insert a card, play offline, and your progress
 travels with the card. MUN OS is its open-source operating system.
@@ -112,7 +114,7 @@ have their own requirements: [compatibility](docs/compatibility.md).
 | `mun` | The tools' entry point: `./mun get`, `./mun play`, `./mun card`, `./mun dev` |
 | `examples/` | Example games |
 | `tests/`, `scripts/` | Host regressions and the documentation check |
-| `docs/` | Guides, contracts, architecture and reference |
+| `docs/` | Guides, contracts, architecture and reference; Spanish translations in `docs/es/` |
 | `.local/` | Ignored: builds, guests, card images, downloads |
 
 `make check` (Python 3.9 or later, Make) runs the documentation check, the

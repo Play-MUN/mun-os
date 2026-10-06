@@ -1,5 +1,7 @@
 # Examples
 
+**English** · [Español](README.es.md)
+
 Games that run from a Game Card, and recipes for integrating one. The image
 build compiles the two example games against the image's own libraries and
 leaves them in `.local/mun/builds/<name>/games/`, beside the image, never in

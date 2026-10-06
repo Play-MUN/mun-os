@@ -8,6 +8,10 @@ sin tarjeta, meter la tarjeta, jugar, volver, retirarla y apagar. Para hacer
 un paquete propio, sigue [vestir la consola con tu juego](shape-your-game.md);
 las reglas están en [MUN Shape](../../shape.md), en inglés.
 
+| MUN Collect, sin paquete | La misma tarjeta con el ejemplo `sea` |
+| --- | --- |
+| ![La pantalla principal con la Game Card de MUN Collect, con el aspecto de MUN y los colores leídos de su portada](../../images/mun-shape-before.jpg) | ![La misma pantalla con MUN Collect llevando el ejemplo sea: un mundo bajo el agua, placas de cristal y el objeto de la tarjeta mostrando el mar](../../images/mun-shape-after.jpg) |
+
 Esta guía cita los menús de la consola en español; arranca en inglés y se
 cambia en *Settings* › *Account and language* › *Language*
 ([glosario](../glossary.md#las-palabras-de-la-consola)).

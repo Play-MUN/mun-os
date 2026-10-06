@@ -14,7 +14,7 @@
       "source": "README.md",
       "language": "es",
       "reviewed": "2026-10-06",
-      "source_sha256": "256e48253f906efd8c8fa38b392db9875df0d94d02b2540431b8734544428099"
+      "source_sha256": "019049461ae77fa254f3ec13592c49bea59518860c060625ebfcc84510c725b1"
     },
     {
       "translation": "SECURITY.es.md",
@@ -70,7 +70,7 @@
       "source": "docs/guides/see-shape-in-action.md",
       "language": "es",
       "reviewed": "2026-10-06",
-      "source_sha256": "66abec8487d31fc15396cd95843e41e9adfcec52e700b82f4af5d50182fa5ed9"
+      "source_sha256": "81093fe71350558db042356f62fa12af57455b504ff098be52a7a5f37736c9f6"
     },
     {
       "translation": "docs/es/guides/shape-your-game.md",

@@ -8,6 +8,10 @@ card, put the card in, play, come back, eject, turn off. To make a package
 of your own, follow [dress the console in your game](shape-your-game.md);
 the rules are in [MUN Shape](../shape.md).
 
+| MUN Collect, without a package | The same card with the `sea` sample |
+| --- | --- |
+| ![Home with the MUN Collect Game Card, in MUN's look with the colours read from its cover](../images/mun-shape-before.jpg) | ![The same Home with MUN Collect carrying the sea sample: a world under water, glass plates and the card object showing the sea](../images/mun-shape-after.jpg) |
+
 ## What a dressed card holds
 
 The console reads one folder: `mun-shape/` inside the card's content root,

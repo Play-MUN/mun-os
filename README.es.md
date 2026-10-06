@@ -36,6 +36,10 @@ transiciones y sonidos, leídos de una carpeta de la tarjeta y dibujados por
 MUN. Los ejemplos son MUN Collect, un juego pequeño, una prueba de gráficos y
 audio, y dos paquetes de MUN Shape.
 
+| MUN Collect, sin paquete | La misma tarjeta con el ejemplo `sea` |
+| --- | --- |
+| ![La pantalla principal con la Game Card de MUN Collect, con el aspecto de MUN y los colores leídos de su portada](docs/images/mun-shape-before.jpg) | ![La misma pantalla con MUN Collect llevando el ejemplo sea: un mundo bajo el agua, placas de cristal y el objeto de la tarjeta mostrando el mar](docs/images/mun-shape-after.jpg) |
+
 Todavía no: mandos, actualizaciones de las tarjetas y del sistema, y
 cualquier hardware físico. [Arquitectura](docs/architecture.md) (en inglés)
 explica qué existe y qué está previsto.

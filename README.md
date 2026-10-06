@@ -33,6 +33,10 @@ the menus, transitions and sounds, read from a folder on the card and drawn
 by MUN. The examples are MUN Collect, a small game, a graphics and audio
 probe, and two MUN Shape packages.
 
+| MUN Collect, without a package | The same card with the `sea` sample |
+| --- | --- |
+| ![Home with the MUN Collect Game Card, in MUN's look with the colours read from its cover](docs/images/mun-shape-before.jpg) | ![The same Home with MUN Collect carrying the sea sample: a world under water, glass plates and the card object showing the sea](docs/images/mun-shape-after.jpg) |
+
 Not there yet: controllers, card and system updates, and any physical
 hardware. [Architecture](docs/architecture.md) says what exists and what is
 planned.

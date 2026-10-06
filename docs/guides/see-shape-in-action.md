@@ -59,15 +59,17 @@ cannot use is dropped block by block, and the card stays valid.
 ## The console must show MUN Shape
 
 An image records the MUN Shape its console reads in its `BUILD-INFO.json`
-(`"shape": {"format": "mun-shape/1"}`). Images built from this checkout
-record it; the published v0.1.0-dev.2 does not show MUN Shape. List what
-you have:
+(`"shape": {"format": "mun-shape/1"}`). The published v0.1.0-dev.3 records
+it, as do images built from this checkout; earlier previews, v0.1.0-dev.2
+and before, do not show MUN Shape. List what you have:
 
 ```sh
 ./mun dev list        # each build and guest: "shape mun-shape/1" or "shape not recorded"
 ```
 
-Build one if none records it: `./mun dev build`
+If none records it, get v0.1.0-dev.3
+([getting started](../getting-started.md#3-the-image)) or build one with
+`./mun dev build`
 ([build the image yourself](../getting-started.md#build-the-image-yourself)).
 
 ## Watch it

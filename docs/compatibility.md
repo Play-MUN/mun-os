@@ -24,10 +24,13 @@ QEMU 8.2 or later with its ARM64 UEFI firmware ([getting started](getting-starte
 "Checked in CI" is the repository's Hosts workflow
 (`.github/workflows/hosts.yml`) on GitHub's hosted virtual machines: it
 downloads a preview release as a player would, starts the console, inserts
-MUN Collect, plays and exits it, ejects the card and powers off. It says the
-tools and the image work on that system; it does not measure speed, and no
-physical Linux or Windows computer has been tried. Emulated consoles are
-several times slower than virtualized ones.
+MUN Collect, plays and exits it, ejects the card and powers off. It runs on
+each preview once it is published, and that preview's release notes give
+the result: "Checked in CI" above is v0.1.0-dev.2's, and v0.1.0-dev.3 is
+pending there until its own run. It says the tools and the image work on
+that system; it does not measure speed, and no physical Linux or Windows
+computer has been tried. Emulated consoles are several times slower than
+virtualized ones.
 
 Inside the console, games start in the console's resolution when they use
 SDL or OpenGL, and framebuffer games at the size the display had at boot

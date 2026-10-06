@@ -50,7 +50,7 @@ Game Cards (MUN Collect and the MUN Test Card), the licence texts and
 `./mun get` the address of that `release.json`:
 
 ```sh
-./mun get https://github.com/Play-MUN/mun-os/releases/download/v0.1.0-dev.2/release.json
+./mun get https://github.com/Play-MUN/mun-os/releases/download/v0.1.0-dev.3/release.json
 ```
 
 It downloads every file, checks each one against `release.json`, installs
@@ -58,6 +58,11 @@ the image under `.local/mun/builds/` and the cards under `.local/gamecards/`.
 An interrupted download resumes when you run the same command again. A Game
 Card that already exists is never replaced (it may hold your saves). On
 Windows: `py mun get …`.
+
+If you played an earlier preview, its console stays on that image:
+`./mun dev vm play destroy --yes` removes that console (the images and the
+cards, with their saves, stay), and the next `./mun play` makes a new one
+from the image you just downloaded.
 
 ## 4. Play
 

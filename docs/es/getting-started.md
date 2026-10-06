@@ -52,7 +52,7 @@ Game Cards (MUN Collect y la MUN Test Card), los textos de las licencias y
 `./mun get` la dirección de ese `release.json`:
 
 ```sh
-./mun get https://github.com/Play-MUN/mun-os/releases/download/v0.1.0-dev.2/release.json
+./mun get https://github.com/Play-MUN/mun-os/releases/download/v0.1.0-dev.3/release.json
 ```
 
 Descarga cada archivo, lo comprueba contra `release.json` e instala la imagen
@@ -60,6 +60,11 @@ en `.local/mun/builds/` y las tarjetas en `.local/gamecards/`. Una descarga
 interrumpida continúa si vuelves a ejecutar la misma orden. Una Game Card que
 ya existe nunca se sustituye (puede tener tus partidas). En Windows:
 `py mun get …`.
+
+Si jugaste una versión preliminar anterior, su consola sigue con aquella
+imagen: `./mun dev vm play destroy --yes` borra esa consola (las imágenes y
+las tarjetas, con sus partidas, se quedan), y el siguiente `./mun play` crea
+una nueva con la imagen que acabas de descargar.
 
 ## 4. Jugar
 

@@ -76,7 +76,10 @@ lenta.
 
 «En CI» es el flujo de trabajo Hosts: descargar una versión preliminar,
 arrancar la consola, jugar su tarjeta y apagar, en las máquinas virtuales de
-GitHub. Todavía no se ha probado en ningún ordenador con Linux o Windows.
+GitHub. Comprueba cada versión preliminar cuando se publica, y las notas de
+esa versión dan el resultado: las comprobaciones en CI de arriba son las de
+la v0.1.0-dev.2, y la v0.1.0-dev.3 está pendiente ahí hasta su propia
+ejecución. Todavía no se ha probado en ningún ordenador con Linux o Windows.
 Jugar, hacer tarjetas y construir imágenes tienen cada uno sus requisitos:
 [compatibilidad](docs/es/compatibility.md).
 

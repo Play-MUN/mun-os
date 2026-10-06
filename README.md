@@ -70,9 +70,12 @@ the same console, slower.
 | Windows, x86_64 or ARM64 | Emulated | In CI (Windows Server 2025; Windows 11 ARM64), headless |
 
 "In CI" is the Hosts workflow: download a preview, start the console, play
-its card, power off, in GitHub's virtual machines. No Linux or Windows
-computer has been tried yet. Playing, making cards and building images each
-have their own requirements: [compatibility](docs/compatibility.md).
+its card, power off, in GitHub's virtual machines. It checks each preview
+once it is published, and that preview's release notes give the result:
+the checks in CI above are v0.1.0-dev.2's, and v0.1.0-dev.3 is pending
+there until its own run. No Linux or Windows computer has been tried yet.
+Playing, making cards and building images each have their own
+requirements: [compatibility](docs/compatibility.md).
 
 ## Principles
 

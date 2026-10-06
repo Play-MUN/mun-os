@@ -15,7 +15,7 @@ bibliotecas de la propia imagen y los deja en
   OpenAL, enlazado contra las bibliotecas de la imagen; una prueba del perfil
   `linux-arm64-gl-v0` y del acceso al contenido durante la partida.
 
-- [`shape`](shape/README.md) (en inglés): dos paquetes de MUN Shape, `sea` y
+- [`shape`](shape/README.es.md): dos paquetes de MUN Shape, `sea` y
   `paper`, dibujados y sintetizados por un script de aquí; el mismo contrato,
   dos identidades distintas ([docs/shape.md](../docs/shape.md), en inglés).
 

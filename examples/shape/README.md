@@ -1,5 +1,7 @@
 # MUN Shape sample packages
 
+**English** · [Español](README.es.md)
+
 Two packages for the same contract, [MUN Shape](../../docs/shape.md), with
 identities as far apart as the format allows. The console draws both with
 the same code, worlds and transitions included; the shell's behaviour

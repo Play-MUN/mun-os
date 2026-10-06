@@ -1,5 +1,7 @@
 # See MUN Shape in action
 
+**English** · [Español](../es/guides/see-shape-in-action.md)
+
 How a Game Card that carries MUN Shape is laid out, whatever the game, and
 how to watch a console take that game's identity: start a console with no
 card, put the card in, play, come back, eject, turn off. To make a package

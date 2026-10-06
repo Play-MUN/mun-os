@@ -136,9 +136,9 @@ OK.
 ## 6. Eject it safely, and continue later
 
 On the Game Card panel choose **Eject safely**: the console finishes with the
-card and releases it, "You can remove the Game Card" appears, and the window
-takes the card out of the slot. Then **Turn off**: Up from Game Card, Enter,
-Enter.
+card and releases it ("You can remove the Game Card"), and the window takes
+it out of the slot at once: Game Card is empty again. Then **Turn off**: Up
+from Game Card, Enter, Enter.
 
 Later, the card goes in as the console starts:
 

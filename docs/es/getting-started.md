@@ -150,9 +150,9 @@ con *Sesión terminada*: **Intro** para *Aceptar*.
 ## 6. Retírala con seguridad y continúa más tarde
 
 En el panel de *Game Card* elige **Retirar con seguridad**: la consola
-termina con la tarjeta y la libera, aparece «Puedes retirar la Game Card» y
-la ventana saca la tarjeta de la ranura. Después, **Apagar**: Arriba desde
-*Game Card*, Intro, Intro.
+termina con la tarjeta y la libera («Puedes retirar la Game Card»), y la
+ventana la saca de la ranura enseguida: *Game Card* vuelve a estar vacía.
+Después, **Apagar**: Arriba desde *Game Card*, Intro, Intro.
 
 Más tarde, la tarjeta entra al arrancar la consola:
 

@@ -90,8 +90,13 @@ void CardClient::handleMessage(const QJsonObject &message)
     const QString type = message.value("type").toString();
     if (type == QLatin1String("snapshot")) {
         m_cards.clear();
-        for (const QJsonValue &value : message.value("cards").toArray())
-            m_cards.append(value.toObject().toVariantMap());
+        m_found.clear();
+        for (const QJsonValue &value : message.value("cards").toArray()) {
+            const QVariantMap card = value.toObject().toVariantMap();
+            if (card.value("active").toBool())
+                m_found.insert(card.value("insertion").toString());
+            m_cards.append(card);
+        }
         m_snapshotSeen = true;
     } else if (type == QLatin1String("card")) {
         const QVariantMap card = message.value("card").toObject().toVariantMap();
@@ -106,6 +111,22 @@ void CardClient::handleMessage(const QJsonObject &message)
         }
         if (!replaced)
             m_cards.append(card);
+    } else if (type == QLatin1String("shape")) {
+        // A change of a card's MUN Shape record alone (the card service sends
+        // it apart so the cover is not sent again): it belongs to that slot's
+        // card only while the insertion is the same.
+        const QString slot = message.value("slot").toString();
+        const QString insertion = message.value("insertion").toString();
+        bool found = false;
+        for (QVariantMap &existing : m_cards) {
+            if (existing.value("slot").toString() == slot && existing.value("insertion").toString() == insertion) {
+                existing.insert(QStringLiteral("shape"), message.value("shape").toVariant());
+                found = true;
+                break;
+            }
+        }
+        if (!found)
+            return;
     } else if (type == QLatin1String("removed")) {
         const QString slot = message.value("slot").toString();
         const bool wasActive = m_active.value("slot").toString() == slot;
@@ -146,6 +167,12 @@ QString CardClient::coverUrl() const
     // Qt Quick's Image loads data URLs directly, so no file ever touches disk.
     const QString data = m_active.value("info").toMap().value("cover_data").toString();
     return data.isEmpty() ? QString() : QStringLiteral("data:image/png;base64,") + data;
+}
+
+QString CardClient::arrival() const
+{
+    const QString insertion = m_active.value("insertion").toString();
+    return m_snapshotSeen && !insertion.isEmpty() && !m_found.contains(insertion) ? insertion : QString();
 }
 
 int CardClient::waitingCount() const

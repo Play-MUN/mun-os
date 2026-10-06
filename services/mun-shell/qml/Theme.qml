@@ -30,19 +30,17 @@ QtObject {
     readonly property color ledOff: "#2E3035"
     readonly property color moonShadow: "#3A3B41"
 
-    // A valid Game Card may lend two colours ([presentation],
-    // docs/game-cards.md): while it is the active card, the focus (a chosen
-    // entry's ring, dot, wire and edge, a chosen option's frame) takes its
-    // accent, and the stage's light its background. Everything else stays
-    // MUN's. The service validated them; they are checked again here.
-    readonly property bool cardLends: CardClient.readerAvailable && CardClient.state === "valid"
-    readonly property color cardAccent: cardLends && isColour(CardClient.info.accent) ? CardClient.info.accent : "transparent"
-    readonly property color cardLight: cardLends && isColour(CardClient.info.background) ? CardClient.info.background : "transparent"
-    readonly property color accent: cardAccent.a > 0 ? cardAccent : copperLight
-    readonly property color accentDeep: cardAccent.a > 0 ? Qt.darker(cardAccent, 1.2) : copper
+    // MUN's focus: a chosen entry's ring, dot, wire and edge, a chosen
+    // option's frame. It is the same everywhere MUN speaks (Settings, their
+    // panels, every dialog); a Game Card's colours, lent or from its MUN
+    // Shape, reach only the eligible surfaces, through the Shape singleton
+    // (src/shape.h, docs/shape.md).
+    readonly property color accent: copperLight
+    readonly property color accentDeep: copper
     function accentAlpha(a) { return Qt.rgba(accent.r, accent.g, accent.b, a) }
     function accentDeepAlpha(a) { return Qt.rgba(accentDeep.r, accentDeep.g, accentDeep.b, a) }
-    function isColour(value) { return typeof value === "string" && /^#[0-9A-Fa-f]{6}$/.test(value) }
+    // A colour at an alpha.
+    function alpha(colour, a) { return Qt.rgba(colour.r, colour.g, colour.b, a) }
 
     readonly property string sans: "Archivo"
     readonly property string mark: "Michroma"

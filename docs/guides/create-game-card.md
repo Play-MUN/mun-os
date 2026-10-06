@@ -141,6 +141,9 @@ console's libraries, and making it save where the console keeps saves:
 
 ## Going further
 
+- Your game's identity on the console while its card is in (colours, a
+  world, a transition, sounds): [dress the console in your
+  game](shape-your-game.md).
 - Deliberately broken cards, to see how the console refuses them:
   `./mun card variants`, then `./mun card create broken --variant bad-arch`.
 - Two consoles, one card: a card is only ever in one running console at a

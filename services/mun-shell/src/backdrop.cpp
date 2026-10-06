@@ -59,6 +59,31 @@ QRgb opaque(qreal r, qreal g, qreal b)
                 std::lround(std::clamp<qreal>(b, 0, 255)));
 }
 
+// A card's colour in place of one of MUN's (a glow, the ambient light):
+// the card's hue at MUN's colour's luminance, so that the world is only
+// tinted, never lighter or darker than MUN drew it, and every MUN text over
+// it keeps the contrast it was designed with. Channels 0-255.
+qreal toLinear(qreal c)
+{
+    c /= 255;
+    return c <= 0.04045 ? c / 12.92 : std::pow((c + 0.055) / 1.055, 2.4);
+}
+qreal toEncoded(qreal c)
+{
+    c = std::clamp<qreal>(c, 0, 1);
+    return 255 * (c <= 0.0031308 ? c * 12.92 : 1.055 * std::pow(c, 1 / 2.4) - 0.055);
+}
+std::array<qreal, 3> atLuminanceOf(const QColor &hue, qreal r, qreal g, qreal b)
+{
+    const qreal target = 0.2126 * toLinear(r) + 0.7152 * toLinear(g) + 0.0722 * toLinear(b);
+    const qreal lr = toLinear(hue.red()), lg = toLinear(hue.green()), lb = toLinear(hue.blue());
+    const qreal own = 0.2126 * lr + 0.7152 * lg + 0.0722 * lb;
+    if (own <= 0)
+        return {r, g, b};
+    const qreal scale = target / own;   // a channel that would pass 1 is held there: at most the luminance
+    return {toEncoded(lr * scale), toEncoded(lg * scale), toEncoded(lb * scale)};
+}
+
 // Whether the ambient light painted as `painted` would now look different.
 bool glowDiffers(const std::array<qreal, 4> &now, const std::array<qreal, 4> &painted)
 {
@@ -147,13 +172,24 @@ void Backdrop::setGlowColor(const QColor &colour)
     emit glowColorChanged();
 }
 
+void Backdrop::setTint(const QColor &colour)
+{
+    if (colour == m_tint)
+        return;
+    m_tint = colour;
+    repaint();
+    emit tintChanged();
+}
+
 Backdrop::Rgba Backdrop::glow() const
 {
     Rgba g = glowAt(m_hour);
     if (m_glowColor.isValid() && m_glowColor.alpha() > 0) {
-        g[0] = m_glowColor.red();
-        g[1] = m_glowColor.green();
-        g[2] = m_glowColor.blue();
+        // The card's hue at the hour's colour's luminance and strength.
+        const auto c = atLuminanceOf(m_glowColor, g[0], g[1], g[2]);
+        g[0] = c[0];
+        g[1] = c[1];
+        g[2] = c[2];
     }
     return g;
 }
@@ -253,6 +289,8 @@ void Backdrop::paintBase(const QSize &deviceSize, qreal scale)
     m_base = QImage(deviceSize, QImage::Format_RGB32);
     m_base.setDevicePixelRatio(scale);
     m_baseGlow = g;
+    m_baseTint = m_tint;
+    const bool tinted = m_tint.isValid() && m_tint.alpha() > 0;
     QPainter p(&m_base);
     p.setRenderHint(QPainter::Antialiasing);
     const QRectF all(0, 0, w, h);
@@ -272,14 +310,20 @@ void Backdrop::paintBase(const QSize &deviceSize, qreal scale)
     nightBrush.setTransform(squeeze);
     p.fillRect(all, nightBrush);
 
+    // The two glows, MUN's blue and patina, or the card's tint in their place
+    // at their luminance and strength.
+    const auto tintBlue = atLuminanceOf(m_tint, 46, 78, 118);
+    const auto tintPatina = atLuminanceOf(m_tint, 78, 127, 114);
+    const Rgba blueColour = tinted ? Rgba{tintBlue[0], tintBlue[1], tintBlue[2], 1} : Rgba{46, 78, 118, 1};
+    const Rgba patinaColour = tinted ? Rgba{tintPatina[0], tintPatina[1], tintPatina[2], 1} : Rgba{78, 127, 114, 1};
     QRadialGradient blue = ring(QPointF(w * 0.92, h * 0.95), 60, 1100);
-    blue.setColorAt(0, rgba(46, 78, 118, 0.30));
-    blue.setColorAt(1, rgba(46, 78, 118, 0));
+    blue.setColorAt(0, rgba(blueColour[0], blueColour[1], blueColour[2], 0.30));
+    blue.setColorAt(1, rgba(blueColour[0], blueColour[1], blueColour[2], 0));
     p.fillRect(all, blue);
 
     QRadialGradient patina = ring(m_orb + QPointF(-120, 320), 20, 700);
-    patina.setColorAt(0, rgba(78, 127, 114, 0.14));
-    patina.setColorAt(1, rgba(78, 127, 114, 0));
+    patina.setColorAt(0, rgba(patinaColour[0], patinaColour[1], patinaColour[2], 0.14));
+    patina.setColorAt(1, rgba(patinaColour[0], patinaColour[1], patinaColour[2], 0));
     p.fillRect(all, patina);
 
     QRadialGradient ambient = ring(m_orb, 40, 1400);
@@ -305,7 +349,7 @@ QSGNode *Backdrop::updatePaintNode(QSGNode *old, UpdatePaintNodeData *)
     const qreal scale = window()->effectiveDevicePixelRatio();
     const QSize deviceSize(std::lround(w * scale), std::lround(h * scale));
     if (m_stale || !node->texture() || node->texture()->textureSize() != deviceSize) {
-        if (m_base.size() != deviceSize || glowDiffers(glow(), m_baseGlow))
+        if (m_base.size() != deviceSize || glowDiffers(glow(), m_baseGlow) || m_baseTint != m_tint)
             paintBase(deviceSize, scale);
         // The image the scene graph showed before last is free again: its
         // texture was deleted when the last one replaced it.

@@ -11,11 +11,39 @@ import MUN.Shell
 // `content` is {kicker, title, text, options}; an option is
 // {kind: "head" | "choice" | "action" | "info", label, value}. `selected` is
 // the chosen option's index, -1 while the options do not have the focus.
+//
+// `dressed` is the game's panel (the Game Card entry's): it takes the active
+// card's identity (Shape, docs/shape.md), the game's plate, text and focus
+// while its colours hold (MUN's set on a plate of its proven opacity where
+// only its world is drawn), else MUN's look with the card's focus colour.
+// The identity arrives as the transition's front reaches the panel
+// (`reached`), its plate blending by its proven plan. Every other panel is
+// MUN's; over a game's world (`overWorld`: Home with a world drawn) it sits
+// on MUN's own plate at its proven opacity, from the moment the front
+// reaches it, every text in MUN's text colour.
 ProjectedLayer {
     id: root
     property var content: ({ kicker: "", title: "", text: "", options: [] })
     property int selected: -1
     property string note: ""
+    property bool dressed: false
+    property bool overWorld: false
+    readonly property bool plating: dressed ? Shape.plated : overWorld
+    readonly property rect box: Qt.rect(x, y, width, height)
+    readonly property real reached: plating ? Shape.reach(Shape.phase, Shape.kind, Shape.progress, box) : 0
+    readonly property bool shaped: reached > 0
+    readonly property var look: shaped ? Shape.blend(dressed ? "panel" : "neutral", reached)
+                                       : ({ plate: Shape.plate, opacity: 1, material: "solid", amount: 0, game: false })
+    readonly property bool gameText: dressed && shaped && look.game
+    readonly property color focusColour: !dressed ? Theme.accent : shaped ? (look.game ? Shape.focus : Theme.accent)
+                                         : !Shape.plated ? Shape.focus : Theme.accent
+    // What MUN draws in ash, patina and moon on its panel; on a plate, the
+    // set's text colour (the game's once its plan says so, MUN's moon
+    // before): every text on a plate is the proven one.
+    readonly property color plateText: gameText ? Shape.text : Theme.moon
+    readonly property color textColour: shaped ? plateText : Theme.moon
+    readonly property color secondColour: shaped ? plateText : Theme.ash
+    readonly property color labelColour: shaped ? plateText : Theme.patina
     // A pointer chose option `index`.
     signal optionClicked(int index)
 
@@ -41,6 +69,14 @@ ProjectedLayer {
     onContentChanged: refresh()
     onSelectedChanged: refresh()
     onNoteChanged: refresh()
+    onShapedChanged: refresh()
+    onFocusColourChanged: refresh()
+    onReachedChanged: refresh()
+    Connections {
+        target: Shape
+        enabled: root.dressed
+        function onChanged() { root.refresh() }
+    }
 
     // Pointer input lands on what the view shows: back through the
     // projection to the flat option under it.
@@ -72,14 +108,25 @@ ProjectedLayer {
 
         Box {
             anchors.fill: parent
+            visible: !root.shaped
             radii: [26]
             gradient: ({ type: "linear", angle: 160, stops: [[0, Theme.rgba(62, 92, 130, 0.16)], [0.6, Theme.rgba(20, 24, 32, 0.35)], [1, Theme.rgba(7, 8, 10, 0.4)]] })
             insets: [{ y: 1, color: Theme.rgba(255, 255, 255, 0.08) }, { spread: 1, color: Theme.rgba(143, 176, 214, 0.10) }]
-            Shadow {
-                z: -1
-                radii: [26]
-                shadows: [{ y: 40, blur: 80, spread: -30, color: Theme.rgba(0, 0, 0, 0.8) }]
-            }
+        }
+        // Cast by the panel, whichever surface it shows (placed around its parent).
+        Shadow {
+            z: -1
+            radii: [26]
+            shadows: [{ y: 40, blur: 80, spread: -30, color: Theme.rgba(0, 0, 0, 0.8) }]
+        }
+        Material {
+            anchors.fill: parent
+            visible: root.shaped
+            radii: [26]
+            plate: root.look.plate
+            material: root.look.material
+            opacity: root.look.opacity
+            amount: root.look.amount
         }
 
         Column {
@@ -92,7 +139,7 @@ ProjectedLayer {
                 text: root.content.kicker
                 size: 15
                 tracking: 0.24
-                color: Theme.patina
+                color: root.labelColour
             }
             Item { width: 1; height: 14 }
             UiText {
@@ -104,6 +151,7 @@ ProjectedLayer {
                 tracking: -0.02
                 cssLineHeight: 1.04
                 wrapMode: Text.WordWrap
+                color: root.textColour
             }
             Item { width: 1; height: 18 }
             UiText {
@@ -112,7 +160,7 @@ ProjectedLayer {
                 text: root.content.text
                 size: 25
                 cssLineHeight: 1.45
-                color: Theme.ash
+                color: root.secondColour
                 wrapMode: Text.WordWrap
             }
             Item { width: 1; height: 30 }
@@ -161,7 +209,7 @@ ProjectedLayer {
                                 text: entry.head ? entry.option.label : ""
                                 size: 13
                                 tracking: 0.26
-                                color: Theme.patina
+                                color: root.labelColour
                             }
                             OptionRow {
                                 id: row
@@ -172,6 +220,9 @@ ProjectedLayer {
                                 value: entry.option.value || ""
                                 choice: entry.option.kind === "choice"
                                 on: entry.index === root.selected
+                                shaped: root.shaped
+                                focusColour: root.focusColour
+                                textColour: root.plateText
                             }
                         }
                     }
@@ -184,7 +235,7 @@ ProjectedLayer {
                 height: Math.max(30, implicitHeight)
                 text: root.note
                 size: 21
-                color: Theme.ash
+                color: root.secondColour
                 wrapMode: Text.WordWrap
             }
         }

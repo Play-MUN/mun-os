@@ -11,7 +11,9 @@ use temporary directories and fake process, protocol and device boundaries.
 | File | Covers |
 | --- | --- |
 | `test_card.py` | Manifest validation, both naming generations, image creation and variants, offline inspection, conversion |
+| `test_shape.py` | MUN Shape packages (and the shell's agreement with the checker: its contrast rule, read palette, materials and sound bounds; MUN's surfaces never reading the card's identity; the fixtures, measure and wiring of the shell's behaviour regressions): the strict JSON profile, schema, file headers, budgets, contrast proofs and transition plans, the cover palette, the template, every defective package, the two samples, a card image read like its folder |
 | `test_cardd.py` | The card service: eligibility, states, framing, staging, single-object saves and their failures, safe release |
+| `test_cardd_shape.py` | The card service's MUN Shape export: after `valid`, whole or nothing, links and FIFOs, Play and saves during a copy, safe release within a chunk or pending past a stuck read, a release meeting a save and a copy in either order, removal, replacement and late completions, a retry beside a deferred cleanup, failures on the way to publication, start/stop cleanup |
 | `test_directory_saves.py` | Directory saves: checks, capture rule, carried units, restore, adoption, failure cases |
 | `test_launchd.py` | The launcher: launch flow, identity, runtime profiles, environment, results, cleanup, recovery |
 | `test_launch_cleanup.py` | The cleanup helper and unit |
@@ -22,7 +24,11 @@ use temporary directories and fake process, protocol and device boundaries.
 | `test_foundation.py` | The documentation check: GitHub's anchors (repeated and accented headings), links, the translation map and its pairs, links from a translation, an original changed after its review |
 
 A few tests need Linux (inotify, file leases, `/proc`) or Python 3.11's
-`tomllib` and are skipped where those are missing. Behaviour that only a running guest shows (display, input, a real card
+`tomllib` and are skipped where those are missing. The shell's own C++ and
+QML need Qt, which the host checks do not have: its behaviour regressions
+([services/mun-shell/tests/behaviour.py](../services/mun-shell/tests/behaviour.py))
+run on the compiled binary in the image build, and `test_shape.py` checks
+what they rest on. Behaviour that only a running guest shows (display, input, a real card
 mount, a real game) is checked with the laboratory ([vm/README.md](../vm/README.md)).
 A virtual interruption does not establish what a physical medium does on
 power loss.

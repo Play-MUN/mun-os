@@ -333,7 +333,11 @@ class InputTests(unittest.TestCase):
         # someone owns is built from a recipe kept outside (os/README.md).
         self.assertNotIn("sources", self.inputs, "no third-party game source is pinned here")
         self.assertEqual(sorted(p.name for p in (ROOT / "examples").iterdir() if p.is_dir()),
-                         ["mun-collect", "mun-gl-probe"])
+                         ["mun-collect", "mun-gl-probe", "shape"])
+        # examples/shape holds Shape packages drawn by its own script, data
+        # for the console's presentation, not a game.
+        suffixes = {p.suffix for p in (ROOT / "examples" / "shape").rglob("*") if p.is_file()}
+        self.assertLessEqual(suffixes, {".py", ".md", ".json", ".png", ".wav"})
         build = (OS / "mkosi" / "mkosi.build.chroot").read_text()
         self.assertIn('"$SRCDIR"/recipes/*/', build, "other games come from recipes only")
 
@@ -415,6 +419,8 @@ class BuildInfoTests(unittest.TestCase):
         self.assertEqual(info["initrd"]["packages"], [{"name": "lvm2", "version": "2.03.31-2", "architecture": "arm64"}])
         self.assertEqual(info["initrd"]["sha256"], hashlib.sha256(b"cpio").hexdigest())
         self.assertEqual(info["debian"]["snapshot"], json.loads((OS / "inputs.json").read_text())["debian"]["snapshot"])
+        self.assertEqual(info["shape"], {"format": "mun-shape/1"},
+                         "the MUN Shape format the console reads, from the checker the card service uses")
 
 
 class EntryPointTests(unittest.TestCase):

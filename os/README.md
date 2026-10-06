@@ -106,8 +106,10 @@ build overlay's toolchain; the builder's image, tools, package count and list
 hash; SHA-256 of `inputs.json` and of every file of the mkosi configuration;
 every image package and every initrd package with its exact version; the
 initrd's hash; each game with size and SHA-256 (a recipe's game also with
-its recipe: sources, commits, patches, licence and digest); and the image
-with its hash.
+its recipe: sources, commits, patches, licence and digest); the MUN Shape
+format the image's console reads (`shape.format`, `mun-shape/1`, taken from
+the checker the card service uses; builds made before it was recorded have
+no `shape`); and the image with its hash.
 
 Inside the image, `/usr/lib/mun/release` carries the identity (name, version,
 environment, release, profile, build id, source commit, snapshot); the

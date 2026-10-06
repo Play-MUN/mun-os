@@ -1,0 +1,94 @@
+{
+  "format": "mun-shape/1",
+  "palette": {
+    "light": "#E6FBFF",
+    "mid": "#2A9DBA",
+    "deep": "#02202E",
+    "plate": "#04283A",
+    "text": "#EFFFFF",
+    "accent": "#F2B85C"
+  },
+  "card": {
+    "window": "card/window.png",
+    "shape": "organic",
+    "morph": 0.6,
+    "glow": "#9FE7F2"
+  },
+  "world": {
+    "backdrop": {
+      "image": "world/backdrop.png"
+    },
+    "layers": [
+      {
+        "image": "world/reliefs-far.png",
+        "motion": "drift",
+        "speed": 8,
+        "depth": 0.2,
+        "opacity": 0.9
+      },
+      {
+        "image": "world/reliefs-near.png",
+        "motion": "drift",
+        "speed": 20,
+        "depth": 0.6
+      }
+    ],
+    "emitters": [
+      {
+        "sprite": "world/fish.png",
+        "count": 18,
+        "path": "school",
+        "speed": 45,
+        "band": [
+          0.25,
+          0.6
+        ]
+      },
+      {
+        "sprite": "world/bubble.png",
+        "count": 40,
+        "path": "rise",
+        "speed": 36,
+        "band": [
+          0.1,
+          1
+        ],
+        "scale": 0.8
+      }
+    ],
+    "light": [
+      {
+        "texture": "world/rays.png",
+        "blend": "screen",
+        "motion": "sway",
+        "opacity": 0.55
+      },
+      {
+        "texture": "world/caustics.png",
+        "blend": "screen",
+        "motion": "ripple",
+        "opacity": 0.35
+      }
+    ],
+    "rate": 20
+  },
+  "surfaces": {
+    "entries": {
+      "material": "glass"
+    },
+    "panel": {
+      "material": "glass"
+    }
+  },
+  "transition": {
+    "in": "tide",
+    "out": "tide",
+    "seconds": 3.2
+  },
+  "sounds": {
+    "move": "sfx/move.wav",
+    "enter": "sfx/enter.wav",
+    "back": "sfx/back.wav",
+    "insert": "sfx/insert.wav"
+  }
+}

@@ -72,8 +72,11 @@ ignored and can extend it locally.
 Host tests live in `tests/` and use Python's `unittest` with the standard
 library only, temporary files and fake process and protocol boundaries; they
 need no network, QEMU or root ([tests/README.md](tests/README.md)). Add a
-regression test with each fix. Behaviour that only a running guest can show
-is described in the pull request with the commands used.
+regression test with each fix. The shell's behaviour regressions run on its
+compiled binary in every image build (`./mun dev build`,
+[services/mun-shell/tests/behaviour.py](services/mun-shell/tests/behaviour.py)).
+Behaviour that only a running guest can show is described in the pull
+request with the commands used.
 
 ## Documentation and translations
 

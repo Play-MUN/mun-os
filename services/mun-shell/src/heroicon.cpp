@@ -159,6 +159,11 @@ public:
     qreal time = 0;
     QColor glow = Qt::transparent;
     qreal glowSigma = 0;
+    // The card's MUN Shape: its screen's image, its organic outline's shaping
+    // (negative: MUN's card outline).
+    const QImage *window = nullptr;
+    qreal organic = -1;
+    qreal reveal = 1;   // the window's share over MUN's screen and crescent
 
 private:
     struct Deferred {
@@ -191,23 +196,64 @@ private:
     QList<Deferred> m_deferred;
 };
 
+// The card's organic outline: a superellipse of the card's size that rounds
+// from nearly a rectangle towards an ellipse, and swells a little, as
+// `morph` grows (0 to 1). Still: the same shape for the same morph.
+QPainterPath organicCard(qreal morph)
+{
+    constexpr int kSteps = 120;
+    const qreal exponent = 12 - 8.5 * morph;
+    QPainterPath path;
+    for (int i = 0; i <= kSteps; ++i) {
+        const qreal th = 2 * kPi * i / kSteps;
+        const qreal c = std::cos(th), s = std::sin(th);
+        const qreal swell = 1 + 0.035 * morph * std::sin(3 * th + 0.6);
+        const QPointF point(150 * swell * std::copysign(std::pow(std::abs(c), 2 / exponent), c),
+                            105 * swell * std::copysign(std::pow(std::abs(s), 2 / exponent), s));
+        i ? path.lineTo(point) : path.moveTo(point);
+    }
+    path.closeSubpath();
+    return path;
+}
+
 void drawCard(Ink &ink)
 {
-    ink.fillOrStroke(roundedRect(-150, -105, 300, 210, 20));
+    ink.fillOrStroke(ink.organic >= 0 ? organicCard(ink.organic) : roundedRect(-150, -105, 300, 210, 20));
     const QPainterPath screen = roundedRect(-128, -84, 236, 128, 12);
-    if (ink.face) {
+    const bool window = ink.window && !ink.window->isNull() && ink.reveal > 0;
+    const bool whole = window && ink.reveal >= 1;
+    if (ink.face && !whole) {
         QLinearGradient glass(0, -84, 0, 44);
         glass.setColorAt(0, rgba(34, 54, 82, 0.95));
         glass.setColorAt(1, rgba(8, 12, 20, 0.95));
         ink.fillWith(screen, glass);
-    } else {
+    } else if (!ink.face) {
         ink.stroke(screen);
     }
-    const QPainterPath moon = crescent(-10, -20, 46, ink.lit);
-    if (ink.face)
-        ink.glowFill(moon, rgba(236, 233, 227, 0.92), rgba(221, 233, 255, 0.6), 8);
-    else
-        ink.stroke(moon);
+    // The logo's crescent, until the card's image takes its place.
+    if (!whole) {
+        QPainter *p = ink.painter();
+        p->save();
+        p->setOpacity(p->opacity() * (window ? 1 - ink.reveal : 1));
+        const QPainterPath moon = crescent(-10, -20, 46, ink.lit);
+        if (ink.face)
+            ink.glowFill(moon, rgba(236, 233, 227, 0.92), rgba(221, 233, 255, 0.6), 8);
+        else
+            ink.stroke(moon);
+        p->restore();
+    }
+    if (ink.face && window) {
+        // The card's own image fills the screen, cropped to its shape.
+        QPainter *p = ink.painter();
+        p->save();
+        p->setOpacity(p->opacity() * ink.reveal);
+        p->setClipPath(screen, Qt::IntersectClip);
+        const QRectF box = screen.boundingRect();
+        const QSizeF size = QSizeF(ink.window->size()).scaled(box.size(), Qt::KeepAspectRatioByExpanding);
+        p->setRenderHint(QPainter::SmoothPixmapTransform);
+        p->drawImage(QRectF(box.center() - QPointF(size.width() / 2, size.height() / 2), size), *ink.window);
+        p->restore();
+    }
     for (int i = 0; i < 7; ++i) {
         QPainterPath contact;
         contact.addRect(122, -70 + i * 20, 12, 12);
@@ -405,6 +451,58 @@ void HeroIcon::setLit(qreal lit)
     emit litChanged();
 }
 
+// A change of the card's Shape paints its layers again, once.
+void HeroIcon::cardRestyled()
+{
+    m_layers.remove(QStringLiteral("card"));
+    update();
+    emit cardChanged();
+}
+
+void HeroIcon::setCardWindow(const QVariant &window)
+{
+    const QImage image = window.canConvert<QImage>() ? window.value<QImage>() : QImage();
+    if (image.cacheKey() == m_window.cacheKey() && image.isNull() == m_window.isNull())
+        return;
+    m_window = image;
+    cardRestyled();
+}
+
+void HeroIcon::setCardShape(const QString &shape)
+{
+    const QString valid = shape == QLatin1String("organic") ? shape : QStringLiteral("card");
+    if (valid == m_cardShape)
+        return;
+    m_cardShape = valid;
+    cardRestyled();
+}
+
+void HeroIcon::setMorph(qreal morph)
+{
+    morph = std::isfinite(morph) ? std::clamp<qreal>(morph, 0, 1) : 0;
+    if (qFuzzyCompare(morph + 1, m_morph + 1))
+        return;
+    m_morph = morph;
+    cardRestyled();
+}
+
+void HeroIcon::setCardGlow(const QColor &glow)
+{
+    if (glow == m_cardGlow)
+        return;
+    m_cardGlow = glow;
+    cardRestyled();
+}
+
+void HeroIcon::setCardReveal(qreal reveal)
+{
+    reveal = std::isfinite(reveal) ? std::round(std::clamp<qreal>(reveal, 0, 1) * 10) / 10 : 1;
+    if (qFuzzyCompare(reveal + 1, m_reveal + 1))
+        return;
+    m_reveal = reveal;
+    cardRestyled();
+}
+
 void HeroIcon::setRunning(bool running)
 {
     if (running == m_running)
@@ -546,10 +644,16 @@ const HeroIcon::Layers &HeroIcon::layersFor(const QString &key, qreal scale)
         p.end();
         return cropped(image, QPointF(0, 0), scale);
     };
+    QElapsedTimer took;
+    took.start();
     layers.shadow = render(Shadow);
     layers.wire = render(Wire);
     layers.face = render(Face);
     layers.loaded = render(Shadow | Wire | Face);
+    // The laboratory times this (MUN_SHELL_TIMING): it runs on the GUI thread.
+    static const bool timing = qEnvironmentVariableIsSet("MUN_SHELL_TIMING");
+    if (timing)
+        qInfo("mun-shell: object %s layers painted in %lld ms", qPrintable(key), qlonglong(took.elapsed()));
     return layers;
 }
 
@@ -662,6 +766,16 @@ void HeroIcon::drawObject(QPainter *painter, const QString &key, qreal progress,
 void HeroIcon::drawLayers(QPainter *painter, const QTransform &item, qreal scale, qreal sigmaScale, const QString &key,
                           qreal progress, qreal alpha, qreal time, int layers, bool offsetShadow) const
 {
+    // The card's Shape, for the card only.
+    const bool card = key == QLatin1String("card");
+    const auto dress = [&](Ink &ink) {
+        if (!card)
+            return;
+        ink.window = m_window.isNull() || m_reveal <= 0 ? nullptr : &m_window;
+        ink.reveal = m_reveal;
+        // The outline rounds into its Shape as the transition reaches it.
+        ink.organic = m_cardShape == QLatin1String("organic") && m_reveal > 0 ? m_morph * m_reveal : -1;
+    };
     if (layers & Shadow) {
         painter->save();
         if (offsetShadow)
@@ -672,6 +786,8 @@ void HeroIcon::drawLayers(QPainter *painter, const QTransform &item, qreal scale
         ink.strokeColour = rgba(6, 10, 17, 0.92);
         ink.lit = m_lit;
         ink.time = time;
+        dress(ink);
+        ink.window = nullptr;   // a shadow shows no image
         drawShapes(key, ink);
         painter->restore();
     }
@@ -680,10 +796,15 @@ void HeroIcon::drawLayers(QPainter *painter, const QTransform &item, qreal scale
         painter->setOpacity(alpha);
         Ink wire(painter, item, scale, false, sigmaScale);
         wire.strokeColour = rgba(226, 223, 217, 0.85);
-        wire.glow = rgba(221, 233, 255, 0.45);
+        // MUN's light, turning into the card's as its Shape arrives.
+        const qreal share = card && m_cardGlow.isValid() ? m_reveal : 0;
+        wire.glow = rgba(int(std::lround(221 + (m_cardGlow.red() - 221) * share)),
+                         int(std::lround(233 + (m_cardGlow.green() - 233) * share)),
+                         int(std::lround(255 + (m_cardGlow.blue() - 255) * share)), 0.45);
         wire.glowSigma = 7;
         wire.lit = m_lit;
         wire.time = time;
+        dress(wire);
         drawShapes(key, wire);
         wire.finish();
         painter->restore();
@@ -699,6 +820,7 @@ void HeroIcon::drawLayers(QPainter *painter, const QTransform &item, qreal scale
         ink.strokeColour = rgba(236, 233, 227, 0.9);
         ink.lit = m_lit;
         ink.time = time;
+        dress(ink);
         drawShapes(key, ink);
         painter->restore();
     }

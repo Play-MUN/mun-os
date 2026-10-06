@@ -13,6 +13,12 @@ mkdir -p "$ART/games"
 
 echo "== components"
 sh "$MUN/services/mun-shell/deploy/build.sh" "$MUN/services/mun-shell" "$BUILDDIR/mun-shell" "$MUN_BUILD_ID"
+# The shell's MUN Shape behaviour, on the binary just built with the image's
+# own libraries, offscreen (services/mun-shell/tests/behaviour.py): a failed
+# expectation fails the build. Its measurements go beside the image's logs.
+rm -rf "$BUILDDIR/shell-behaviour"
+python3 "$MUN/services/mun-shell/tests/behaviour.py" "$BUILDDIR/mun-shell/mun-shell" --work "$BUILDDIR/shell-behaviour"
+cp "$BUILDDIR/shell-behaviour/report.json" "$ART/shell-behaviour.json"
 sh "$MUN/services/mun-shell/deploy/stage.sh" "$MUN/services/mun-shell" "$BUILDDIR/mun-shell" "$DESTDIR"
 sh "$MUN/services/mun-cardd/deploy/stage.sh" "$MUN/services/mun-cardd" "$MUN/tools/mun-card/mun_card" "$DESTDIR"
 sh "$MUN/services/mun-launchd/deploy/stage.sh" "$MUN/services/mun-launchd" "$DESTDIR"

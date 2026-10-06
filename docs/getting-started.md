@@ -63,9 +63,10 @@ An interrupted download resumes when you run the same command again. A Game
 Card that already exists is never replaced (it may hold your saves). On
 Windows: `py mun get …`.
 
-If you played an earlier preview, its console (`play`) stays on that image,
-and `./mun play` alone takes the most recently built image you have, which
-need not be this download. Start this one by name, in a console of its own:
+If you played an earlier preview, its console (`play`) stays on that image:
+a console keeps the image it was made from, and a new one is made from the
+most recently built image you have, which need not be this download. Start
+this one by name, in a console of its own:
 `./mun dev list` shows the name it was installed under (`d<month><day>-<time>`
 of its build, unless you chose one with `./mun get … --name NAME`).
 
@@ -73,8 +74,10 @@ of its build, unless you chose one with `./mun get … --name NAME`).
 ./mun play --build NAME --guest NAME --card collect
 ```
 
-Use `--guest NAME` in the commands below as well. The earlier console stays
-as it was, with its own settings; your cards and their saves work in both.
+Use `--guest NAME` in the commands below as well, and `NAME` where they
+say `play` (`./mun dev vm NAME shell-log`, `.local/mun/guests/NAME/`). The
+earlier console stays as it was, with its own settings; your cards and
+their saves work in both.
 
 ## 4. Play
 

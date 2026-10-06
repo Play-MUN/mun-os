@@ -67,9 +67,10 @@ ya existe nunca se sustituye (puede tener tus partidas). En Windows:
 `py mun get …`.
 
 Si jugaste una versión preliminar anterior, su consola (`play`) sigue con
-aquella imagen, y `./mun play` sin más toma la imagen construida más
-recientemente que tengas, que no tiene por qué ser esta descarga. Arranca
-esta por su nombre, en una consola propia: `./mun dev list` muestra el nombre
+aquella imagen: una consola conserva la imagen con la que se creó, y una
+nueva se crea con la imagen construida más recientemente que tengas, que no
+tiene por qué ser esta descarga. Arranca esta por su nombre, en una consola
+propia: `./mun dev list` muestra el nombre
 con que se instaló (`d<mes><día>-<hora>` de su build, salvo que elijas uno
 con `./mun get … --name NAME`).
 
@@ -77,9 +78,10 @@ con `./mun get … --name NAME`).
 ./mun play --build NAME --guest NAME --card collect
 ```
 
-Usa `--guest NAME` también en las órdenes de más abajo. La consola anterior
-se queda como estaba, con sus propios ajustes; tus tarjetas y sus partidas
-sirven en las dos.
+Usa `--guest NAME` también en las órdenes de más abajo, y `NAME` donde digan
+`play` (`./mun dev vm NAME shell-log`, `.local/mun/guests/NAME/`). La consola
+anterior se queda como estaba, con sus propios ajustes; tus tarjetas y sus
+partidas sirven en las dos.
 
 ## 4. Jugar
 

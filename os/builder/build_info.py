@@ -26,6 +26,20 @@ TOOLCHAIN_PACKAGES = ("gcc", "g++", "cpp", "binutils", "libc6-dev", "make", "cma
                       "qt6-base-dev", "qt6-declarative-dev", "libsdl2-dev", "libopenal-dev")
 BUILDER_TOOLS = ("mkosi", "systemd", "systemd-repart", "systemd-ukify", "systemd-boot-efi", "apt", "dpkg",
                  "qemu-utils", "python3", "e2fsprogs", "dosfstools", "mtools", "git")
+# The source tree this script is part of: os/builder/ in the checkout the
+# image is built from.
+SOURCE_ROOT = Path(__file__).resolve().parents[2]
+
+
+def shape_format() -> str:
+    """The MUN Shape format the image's console reads. The card service checks
+    a card's package and writes each insertion's copy with mun_card.shape, and
+    the shell reads that copy; the shell's behaviour regressions run on that
+    pairing in every build and fail it. Recorded so that a tool can tell a
+    console that shows MUN Shape from one made before (which records none)."""
+    sys.path.insert(0, str(SOURCE_ROOT / "tools" / "mun-card"))
+    from mun_card import shape
+    return shape.FORMAT
 
 
 def sha256(path: Path) -> str:
@@ -134,6 +148,7 @@ def main(argv: list) -> int:
             "packages": initrd_packages,
         },
         "games": games,
+        "shape": {"format": shape_format()},
         "artifacts": {
             Path(args.image).name: {"sha256": sha256(Path(args.image)), "size": Path(args.image).stat().st_size},
             "raw_image": {"sha256": sha256(Path(args.raw)), "size": Path(args.raw).stat().st_size,

@@ -16,6 +16,8 @@ Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=PYTHONUNBUFFERED=1
 # Test hook, off by default: seconds of artificial validation delay.
 # Environment=MUN_CARDD_VALIDATION_DELAY=8
+# Test hook, off by default: seconds of pause before each chunk of a Shape copy.
+# Environment=MUN_CARDD_SHAPE_DELAY=0.5
 
 RuntimeDirectory=mun mun/cards
 RuntimeDirectoryMode=0755

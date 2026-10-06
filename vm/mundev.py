@@ -486,30 +486,106 @@ def create_guest(name: str, build: Path) -> None:
     log(f"guest {name}: new disk over build {build.name} ({info['build_id']})")
 
 
-def cmd_run(args: argparse.Namespace) -> int:
-    name = args.guest
+def guest_build(name: str, build: Optional[str]) -> Tuple[Path, bool]:
+    """The build guest `name` runs (True) or would be made from the first
+    time (False): `build`, or the latest."""
     if not NAME.fullmatch(name):
         raise vm.LabError("guest name: 2-16 lowercase letters, digits or '-', starting with a letter or digit")
     guest_file = GUESTS_ROOT / name / "guest.json"
     if guest_file.exists():
         recorded = json.loads(guest_file.read_text())["build"]
-        if args.build and args.build != recorded:
-            raise vm.LabError(f"guest {name} runs build {recorded}; use a new --guest name for build {args.build}")
-    else:
-        available = builds()
-        if args.build:
-            build = BUILDS_ROOT / args.build
-            if build not in available:
-                raise vm.LabError(f"no finished build {args.build} in {BUILDS_ROOT}")
-        elif available:
-            build = available[-1]
-        else:
-            raise vm.LabError("no build yet: run `./mun dev build` first")
-        create_guest(name, build)
+        if build and build != recorded:
+            raise vm.LabError(f"guest {name} runs build {recorded}; use a new --guest name for build {build}")
+        return BUILDS_ROOT / recorded, True
+    available = builds()
+    if build:
+        chosen = BUILDS_ROOT / build
+        if chosen not in available:
+            raise vm.LabError(f"no finished build {build} in {BUILDS_ROOT}")
+        return chosen, False
+    if available:
+        return available[-1], False
+    raise vm.LabError("no build yet: run `./mun dev build` first")
+
+
+def ensure_guest(name: str, build: Optional[str]) -> Path:
+    """Guest `name`, made the first time from `build` (default: the latest);
+    returns its build's directory."""
+    chosen, exists = guest_build(name, build)
+    if not exists:
+        create_guest(name, chosen)
+    return chosen
+
+
+def cmd_run(args: argparse.Namespace) -> int:
+    name = args.guest
+    ensure_guest(name, args.build)
     if args.window:
         extra = (["--audio", args.audio] if args.audio else []) + (["--card", args.card] if getattr(args, "card", None) else [])
         return vm.main(["--instance", name, "open"] + extra)
     return vm.main(["--instance", name, "start", "--audio", args.audio or "none", "--wait", str(args.wait)])
+
+
+def cmd_shape(args: argparse.Namespace) -> int:
+    """A MUN Shape package folder in a laboratory console (vm/shapepreview.py)."""
+    import threading
+    import shapepreview
+
+    folder = Path(args.folder)
+    if folder.is_symlink() or not folder.is_dir():
+        raise vm.LabError(f"{folder} is not a folder")
+    # Which console it would be, before a guest is made or started: one whose
+    # build records no MUN Shape is refused, the guest left as it is.
+    build_dir, recorded = guest_build(args.guest, args.build)
+    available = builds()
+    shapepreview.check_build(args.guest, build_dir, available[-1] if available else None, recorded)
+    build_dir = ensure_guest(args.guest, args.build)
+    base = None
+    if args.base:
+        base = Path(args.base) if args.base.endswith(".img") or "/" in args.base else vm.CARD_ROOT / f"{args.base}.img"
+        if base.is_symlink() or not base.is_file():
+            raise vm.LabError(f"no card {args.base}")
+        if base.stem in shapepreview.card_names(args.guest):
+            raise vm.LabError(f"{base.stem} is the preview's own card; start from another one")
+    vm.select_instance(args.guest)
+    # Takes the guest's preview lock: a second preview of this console stops here.
+    preview = shapepreview.Preview(folder.resolve(), args.guest, build_dir, base.resolve() if base else None, args.title)
+    stop = threading.Event()
+    hint = (f"the console stays on: ./mun dev vm {args.guest} stop (or destroy --yes) when you are done"
+            if not args.window else "")
+    if args.window and vm.read_pid() is not None:
+        # QEMU's window opens with the console; one already on keeps its display.
+        print(f"[shape] guest {args.guest} is already on, so no window opens: the preview runs in it as it is "
+              f"(./mun dev vm {args.guest} screenshot); for a window, stop it first: ./mun dev vm {args.guest} stop",
+              flush=True)
+        args.window = False
+        hint = f"the console stays on: ./mun dev vm {args.guest} stop (or destroy --yes) when you are done"
+    if vm.read_pid() is None and args.window:
+        # The window keeps this process in the foreground; the preview runs beside it.
+        worker = threading.Thread(target=preview.run, args=(stop, args.watch, True), name="shape-preview", daemon=True)
+        worker.start()
+        try:
+            return vm.main(["--instance", args.guest, "open"] + (["--audio", args.audio] if args.audio else []))
+        finally:
+            stop.set()
+            worker.join(30)
+            preview.finish()
+    if vm.read_pid() is None:
+        started = vm.main(["--instance", args.guest, "start", "--audio", args.audio or "none", "--wait", "240"])
+        if started:
+            return started
+    try:
+        preview.run(stop, args.watch, follow=args.watch)
+        if args.watch:
+            print(f"[shape] stopped; {hint}" if hint else "[shape] stopped")
+    except KeyboardInterrupt:
+        pass
+    finally:
+        if args.watch:
+            preview.finish()
+    if not args.watch and hint:
+        print(f"[shape] {hint}")
+    return 0
 
 
 def cmd_vm(args: argparse.Namespace) -> int:
@@ -525,11 +601,21 @@ def cmd_list(args: argparse.Namespace) -> None:
             with contextlib.suppress(OSError, ValueError, KeyError):
                 origin = f" downloaded from {json.loads((build / 'ORIGIN.json').read_text())['source']}"
         print(f"build {build.name:16} {info['version']} {info['environment']} release={str(info['release']).lower()} "
-              f"id {info['build_id']} source {info['source']['describe']}{origin}")
+              f"id {info['build_id']} source {info['source']['describe']}{origin} shape {shape_of(build)}")
     if GUESTS_ROOT.is_dir():
         for guest in sorted(GUESTS_ROOT.glob("*/guest.json")):
             data = json.loads(guest.read_text())
-            print(f"guest {guest.parent.name:16} build {data['build']} created {data['created']}")
+            print(f"guest {guest.parent.name:16} build {data['build']} created {data['created']} "
+                  f"shape {shape_of(BUILDS_ROOT / data['build'])}")
+
+
+def shape_of(build: Path) -> str:
+    """The MUN Shape format a build's console reads, or why there is none to
+    show: a build made before builds recorded it, or one no longer here."""
+    import shapepreview
+    if not (build / "BUILD-INFO.json").is_file():
+        return "unknown (build not here)"
+    return shapepreview.build_shape(build) or "not recorded"
 
 
 # ------------------------------------------------------------ downloads
@@ -838,6 +924,19 @@ def build_parser() -> argparse.ArgumentParser:
                    help="sound backend (default none; with --window, this host's audible one)")
     p.add_argument("--wait", type=int, default=240, help="seconds to wait for qemu-ga in the guest (background start)")
     p.set_defaults(func=cmd_run)
+    p = sub.add_parser("shape", help="preview a MUN Shape package folder in a laboratory console: a disposable "
+                       "card made from it is inserted, and made again on every change with --watch")
+    p.add_argument("folder", help="the package folder (shape.json and its files)")
+    p.add_argument("--guest", default="shape", help="the console to use, made the first time (default shape)")
+    p.add_argument("--build", help="build to make the guest from the first time (default: the latest)")
+    p.add_argument("--base", metavar="CARD", help="dress a copy of this card (a name in .local/gamecards/ or an "
+                   ".img path; it is only read) instead of MUN Collect")
+    p.add_argument("--title", default="Shape preview", help="the MUN Collect card's title (default Shape preview)")
+    p.add_argument("--watch", action="store_true", help="follow the folder: every change is checked and inserted "
+                   "as a new card once the console may take it (Ctrl-C ends, the card leaves safely)")
+    p.add_argument("--window", action="store_true", help="start the console with a window (foreground, sound on)")
+    p.add_argument("--audio", choices=vm.AUDIO_BACKENDS, help="sound backend")
+    p.set_defaults(func=cmd_shape)
     p = sub.add_parser("vm", help="any ./mun vm command for a guest: ./mun dev vm GUEST COMMAND ...")
     p.add_argument("guest")
     p.add_argument("rest", nargs=argparse.REMAINDER)

@@ -1,6 +1,7 @@
 // ShellSettings keeps the player's choices across restarts and reboots: the
 // interface language, the clock format, the resolution, the safe area, the
-// interface sounds and the automatic power off. They live in an INI file in the service's state directory
+// interface sounds, the automatic power off and how a Game Card's MUN Shape
+// is shown. They live in an INI file in the service's state directory
 // ($STATE_DIRECTORY, /var/lib/mun-shell in the image); outside systemd, in the
 // user's configuration directory. Nothing else is stored: games and saves
 // live on their Game Cards.
@@ -37,6 +38,15 @@ class ShellSettings : public QObject {
     // The sounds of moving, entering and going back on the menus: on (the
     // default) or off.
     Q_PROPERTY(bool systemSounds READ systemSounds WRITE setSystemSounds NOTIFY changed)
+    // MUN Shape (docs/shape.md): "full" (the default), "colours" (the game's
+    // colours only, no images or sounds) or "off" (MUN's look alone).
+    Q_PROPERTY(QString shapeMode READ shapeMode WRITE setShapeMode NOTIFY changed)
+    // Reduce motion: identities change at once instead of fading (and, from
+    // the worlds of later increments, still worlds). Off by default.
+    Q_PROPERTY(bool reduceMotion READ reduceMotion WRITE setReduceMotion NOTIFY changed)
+    // A game's own sounds on the menus: on (the default) or off. "System
+    // sounds" off silences them too.
+    Q_PROPERTY(bool gameSounds READ gameSounds WRITE setGameSounds NOTIFY changed)
     // Hours without input on the console's menus before it turns itself off:
     // 0 (never), 1 (the default), 3 or 6. A game in progress does not count.
     Q_PROPERTY(int autoPowerOffHours READ autoPowerOffHours WRITE setAutoPowerOffHours NOTIFY changed)
@@ -70,6 +80,12 @@ public:
     void setSystemSounds(bool on);
     int autoPowerOffHours() const { return m_autoPowerOffHours; }
     void setAutoPowerOffHours(int hours);
+    QString shapeMode() const { return m_shapeMode; }
+    void setShapeMode(const QString &mode);
+    bool reduceMotion() const { return m_reduceMotion; }
+    void setReduceMotion(bool on);
+    bool gameSounds() const { return m_gameSounds; }
+    void setGameSounds(bool on);
     QString activeResolution() const;
     QStringList resolutions() const;
     QString nativeResolution() const;
@@ -109,6 +125,9 @@ private:
     int m_safeArea = 100;
     bool m_systemSounds = true;
     int m_autoPowerOffHours = 1;
+    QString m_shapeMode;
+    bool m_reduceMotion = false;
+    bool m_gameSounds = true;
     bool m_resolutionOnTrial = false;
     bool m_restarting = false;
     QString m_lastError;

@@ -61,10 +61,35 @@ content yields the same bytes. Only regular image files are ever written.
 `inspect` reads the image through `debugfs`, never mounts it, and prints
 whether the SHA-256 changed during inspection (it must not).
 
+`shape` checks MUN Shape packages ([docs/shape.md](../../docs/shape.md)),
+the folder that goes on a card as `content/mun-shape/`:
+
+```sh
+./mun card shape init .local/mypkg --cover cover.png   # template; palette read from the cover
+./mun card shape init .local/mypkg --example sea       # or a copy of a sample package
+./mun card shape check .local/mypkg --report           # exit 0 all used, 2 something dropped or unused
+./mun card shape variants .local/shape-fixtures        # one defective package per rule
+./mun card create mine … --shape .local/mypkg          # the package on the card, refused unless used whole
+./mun card shape check mine                            # the package on the card, as the console reads it
+./mun card inspect mine                                # the card, and its package in brief
+```
+
+`init` writes nothing into a destination with links, or with files at the
+names it writes unless `--force`, which replaces only those files.
+`create --shape` copies `shape.json` and the files it names (regular files,
+never through a link) to `content/mun-shape/`; `--shape-partial` makes the
+card even when the console would drop part of the package or all of it. The
+whole way, previewed in a console: [dress the console in your
+game](../../docs/guides/shape-your-game.md).
+
 Package layout: `minitoml` (strict TOML subset used on both sides),
 `validate` (manifest v0 rules, naming generations and `CardInfo`), `source`
 (mounted directory or `debugfs` image), `ext4` (superblock checks), `image`
 (creation, variants, generated cover), `saves` (save bounds, payload
 integrity and the envelope rule the console restores by, shared with the
 card service and kept equal to the launcher's by a test), `convert` (the
-conversion to MUN names), `errors` (stable codes and messages).
+conversion to MUN names), `errors` (stable codes and messages), `shape`
+(Shape packages: strict JSON, schema, file headers, budgets, contrast; no
+decoding, so the card service can share it) and `shapetools` (host only: the
+cover's palette, which needs a PNG decoder, the template and the defective
+packages).

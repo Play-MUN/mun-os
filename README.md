@@ -25,8 +25,11 @@ sandboxed and hands the console back however it ends; saves are written to
 the card and restored on another console or another build; a card is
 ejected safely; the resolution (720p, 1080p, 1440p) applies at once, and
 games built on SDL or OpenGL start in it; the menus have sound; English and
-Spanish. The examples are MUN Collect, a small game, and a graphics and
-audio probe.
+Spanish. While its card is in, a game can dress the console in its own
+identity, MUN Shape v1: colours, materials, the card object, a world behind
+the menus, transitions and sounds, read from a folder on the card and drawn
+by MUN. The examples are MUN Collect, a small game, a graphics and audio
+probe, and two MUN Shape packages.
 
 Not there yet: controllers, card and system updates, and any physical
 hardware. [Architecture](docs/architecture.md) says what exists and what is
@@ -88,8 +91,11 @@ have their own requirements: [compatibility](docs/compatibility.md).
 - [Getting started](docs/getting-started.md) and [compatibility](docs/compatibility.md)
 - [Create a Game Card](docs/guides/create-game-card.md) and
   [bring a game to MUN](docs/guides/port-a-game.md)
+- [Dress the console in your game](docs/guides/shape-your-game.md) with MUN
+  Shape, and [see it in action](docs/guides/see-shape-in-action.md)
 - For card and game authors: [Game Cards](docs/game-cards.md),
-  [saves](docs/saves.md), [running a game](docs/runtime.md)
+  [saves](docs/saves.md), [running a game](docs/runtime.md),
+  [MUN Shape](docs/shape.md)
 - [Architecture](docs/architecture.md), [image build](os/README.md),
   [laboratory](vm/README.md) and [every document](docs/README.md)
 - [Licensing](docs/licensing.md), [security](SECURITY.md),

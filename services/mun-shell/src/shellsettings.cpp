@@ -15,10 +15,15 @@ const QString kClockKey = QStringLiteral("interface/clock");
 const QString kSafeAreaKey = QStringLiteral("display/safe-area");
 const QString kAutoOffKey = QStringLiteral("power/auto-off-hours");
 const QString kSoundsKey = QStringLiteral("audio/system-sounds");
+const QString kShapeKey = QStringLiteral("shape/mode");
+const QString kMotionKey = QStringLiteral("display/reduce-motion");
+const QString kGameSoundsKey = QStringLiteral("audio/game-sounds");
 
 const QStringList kLanguages{QStringLiteral("en"), QStringLiteral("es")};
 const QStringList kClockFormats{QStringLiteral("24h"), QStringLiteral("12h")};
 const QStringList kOnOff{QStringLiteral("on"), QStringLiteral("off")};
+const QStringList kOffOn{QStringLiteral("off"), QStringLiteral("on")};
+const QStringList kShapeModes{QStringLiteral("full"), QStringLiteral("colours"), QStringLiteral("off")};
 const QList<int> kSafeAreas{100, 97, 94, 91};
 const QList<int> kAutoOffHours{0, 1, 3, 6};
 
@@ -59,6 +64,9 @@ ShellSettings::ShellSettings(QObject *parent)
     m_safeArea = readNumber(*m_file, kSafeAreaKey, kSafeAreas, 100);
     m_systemSounds = readChoice(*m_file, kSoundsKey, kOnOff) == kOnOff.first();
     m_autoPowerOffHours = readNumber(*m_file, kAutoOffKey, kAutoOffHours, 1);
+    m_shapeMode = readChoice(*m_file, kShapeKey, kShapeModes);
+    m_reduceMotion = readChoice(*m_file, kMotionKey, kOffOn) == QLatin1String("on");
+    m_gameSounds = readChoice(*m_file, kGameSoundsKey, kOnOff) == kOnOff.first();
     if (m_file->status() == QSettings::FormatError)
         m_lastError = QStringLiteral("%1 is not a valid settings file; the defaults apply").arg(path());
 }
@@ -100,6 +108,30 @@ void ShellSettings::setSystemSounds(bool on)
         return;
     m_systemSounds = on;
     store(kSoundsKey, on ? kOnOff.first() : kOnOff.last());
+}
+
+void ShellSettings::setShapeMode(const QString &mode)
+{
+    if (!kShapeModes.contains(mode) || mode == m_shapeMode)
+        return;
+    m_shapeMode = mode;
+    store(kShapeKey, mode);
+}
+
+void ShellSettings::setReduceMotion(bool on)
+{
+    if (on == m_reduceMotion)
+        return;
+    m_reduceMotion = on;
+    store(kMotionKey, on ? QStringLiteral("on") : QStringLiteral("off"));
+}
+
+void ShellSettings::setGameSounds(bool on)
+{
+    if (on == m_gameSounds)
+        return;
+    m_gameSounds = on;
+    store(kGameSoundsKey, on ? kOnOff.first() : kOnOff.last());
 }
 
 void ShellSettings::setAutoPowerOffHours(int hours)
@@ -172,11 +204,17 @@ void ShellSettings::resetKeepingLanguage()
     m_safeArea = 100;
     m_autoPowerOffHours = 1;
     m_systemSounds = true;
+    m_shapeMode = kShapeModes.first();
+    m_reduceMotion = false;
+    m_gameSounds = true;
     m_resolutionOnTrial = false;
     m_file->remove(kClockKey);
     m_file->remove(kSafeAreaKey);
     m_file->remove(kAutoOffKey);
     m_file->remove(kSoundsKey);
+    m_file->remove(kShapeKey);
+    m_file->remove(kMotionKey);
+    m_file->remove(kGameSoundsKey);
     m_file->remove(display::kResolutionKey);
     sync();
     emit changed();

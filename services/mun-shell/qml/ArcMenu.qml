@@ -4,8 +4,9 @@ import MUN.Shell
 // A menu arc around the orb: `entries` ({label, detail}) spread `spread`
 // degrees apart on a circle of `radius`, leaning back into the scene with
 // the arcs' perspective (Theme.lean). Hidden, it fades and moves 60 px
-// left; dimmed (while its panel's options have the focus), its entries fade
-// to 0.4. The delegates stay while the entries' texts change, so their
+// left; dimmed (while its panel's options have the focus), its entries step
+// back (ArcNode: MUN's fade to 0.4, a dressed one keeps its proven plate and
+// text). The delegates stay while the entries' texts change, so their
 // transitions run.
 Item {
     id: root
@@ -16,6 +17,8 @@ Item {
     property bool compact: false
     property bool hidden: false
     property bool dimmed: false
+    // The main arc's entries take the active Game Card's identity (ArcNode).
+    property bool dressed: false
     // A pointer chose entry `index`.
     signal activated(int index)
 
@@ -39,7 +42,8 @@ Item {
             detail: root.entries[index] ? (root.entries[index].detail || "") : ""
             on: index === root.current
             compact: root.compact
-            opacity: root.dimmed ? 0.4 : 1
+            dressed: root.dressed
+            dimmed: root.dimmed
             onClicked: root.activated(index)
         }
     }

@@ -155,6 +155,64 @@ Rules the tool enforces:
   flight, unmounts and reports, and only then the device is unplugged.
   `card-detach --abrupt` skips all of that to simulate pulling the card.
 
+## MUN Shape preview
+
+`./mun dev shape DIR` shows a MUN Shape package folder in a console of the
+laboratory, through the real card service and shell
+([docs/shape.md](../docs/shape.md#tools),
+[the guide](../docs/guides/shape-your-game.md)):
+
+```sh
+./mun dev shape examples/shape/sea --window            # a console in a window with the package on a card
+./mun dev shape .local/mypkg --watch                   # no window; every change re-inserted; Ctrl-C ends
+./mun dev shape .local/mypkg --watch --base mygame     # a copy of mygame dressed instead of MUN Collect
+```
+
+- The console is the guest `shape` (`--guest`), made the first time from the
+  latest build (`--build`). Its build must record the MUN Shape its console
+  reads (`shape` in `BUILD-INFO.json`, `mun-shape/1`), as builds of this
+  checkout do; `./mun dev list` shows it for every build and guest
+  (`shape not recorded` for older ones). A build that records none was made
+  before builds recorded it and does not say what it shows (the published
+  v0.1.0-dev.2 shows no MUN Shape); a guest of one is refused and left as it
+  is, with the way to one that shows it: `--guest NAME` for a new guest from
+  the latest build, or `./mun dev vm NAME destroy --yes`.
+- The card is MUN Collect from that build with the package
+  (`mun-card create --variant game --shape`), or, with `--base`, a copy of a
+  card from `.local/gamecards/`, cloned and given the package with debugfs;
+  the card started from is only read. A downloaded image has no MUN Collect
+  executable: its `collect.img` is the base then.
+- With `--watch` the folder is followed: once it has been still for a
+  second, it is checked; a package the console would not use is reported and
+  changes nothing. Otherwise, while no game is being played (the launcher's
+  state in the guest) and MUN Shell runs (after a game the launcher starts
+  it again, and a card put in before it watches would come in without its
+  arrival), the inserted card leaves by `card-detach`'s safe removal (a
+  refusal is tried again later, never forced) and the next card is
+  attached: a new insertion, with its own export.
+- Its cards are `pv0-<guest>` and `pv1-<guest>` (a long guest name is
+  shortened with a digest, so two guests never share them). A card is the
+  preview's by what it made, not by its name: it makes each card aside, puts
+  it at its name only if nothing is there, and records the file's identity
+  (device, inode, size, birth time where the host keeps one) and the card's
+  identifier in `.local/gamecards/.shape-preview/`. It remakes, unplugs or
+  deletes only that same file holding that same card. Any other file at
+  those names (a card of yours, a copy moved there or copied into it) keeps
+  its bytes and its inode: the preview does not start, or a change waits,
+  and it names the file. It never deletes a card another guest holds.
+- One preview per console: while it runs it holds
+  `.local/gamecards/.shape-preview/<guest>.lock`, and a second one for the
+  same guest is refused.
+- It starts only in a guest with no other card attached and never detaches
+  another card. It unplugs a card the console releases (*Eject safely*), as
+  the window's watcher does.
+- `--window` opens the console in a window when the guest is off; a guest
+  already on keeps its display, and the preview runs in it as it is (it says
+  so).
+- At the end (Ctrl-C, or the console turned off) its card leaves safely if
+  the console is still on and no game is being played, and its own cards are
+  deleted. The guest stays: `./mun dev vm shape stop` or `destroy --yes`.
+
 ## Sound and pointer
 
 A guest has a virtio-sound device by default with the silent `none` backend;

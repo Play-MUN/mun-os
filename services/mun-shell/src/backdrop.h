@@ -43,9 +43,15 @@ class Backdrop : public QQuickItem {
     // and strength.
     Q_PROPERTY(qreal hour READ hour WRITE setHour NOTIFY hourChanged)
     // A colour for the ambient light instead of the hour's (a Game Card's
-    // [presentation] background); its strength still follows the hour.
+    // [presentation] background or its Shape's light): its hue at the hour's
+    // colour's luminance, its strength still the hour's.
     // Invalid (the default) or transparent: the hour's colour.
     Q_PROPERTY(QColor glowColor READ glowColor WRITE setGlowColor NOTIFY glowColorChanged)
+    // A Game Card's MUN Shape tints the world modestly: the blue and patina
+    // glows take this colour's hue at their own luminance and strength, so
+    // the world is never lighter or darker than MUN draws it. Invalid (the
+    // default): MUN's.
+    Q_PROPERTY(QColor tint READ tint WRITE setTint NOTIFY tintChanged)
     // Whether the network drifts; waves run to their end either way.
     Q_PROPERTY(bool running READ running WRITE setRunning NOTIFY runningChanged)
     // Frames per second of the drift; 0 keeps the network still between waves.
@@ -63,6 +69,8 @@ public:
     void setHour(qreal hour);
     QColor glowColor() const { return m_glowColor; }
     void setGlowColor(const QColor &colour);
+    QColor tint() const { return m_tint; }
+    void setTint(const QColor &colour);
     bool running() const { return m_running; }
     void setRunning(bool running);
     int driftRate() const { return m_driftRate; }
@@ -72,6 +80,7 @@ signals:
     void orbChanged();
     void hourChanged();
     void glowColorChanged();
+    void tintChanged();
     void runningChanged();
     void driftRateChanged();
 
@@ -94,6 +103,8 @@ private:
     QPointF m_orb{470, 570};
     qreal m_hour = 12;
     QColor m_glowColor;
+    QColor m_tint;
+    QColor m_baseTint;         // the tint m_base was painted with
     bool m_running = true;
     int m_driftRate = 10;
     Pace m_pace;

@@ -87,6 +87,8 @@ cp "$WORK/image/initrd.manifest" "$OUT/initrd-manifest.json"
 ARTIFACTS="$(find "$WORK/builddir" -mindepth 1 -maxdepth 2 -type d -name artifacts | head -n 1)"
 [ -n "$ARTIFACTS" ] || { echo "the build step left no artifacts" >&2; exit 1; }
 cp -a "$ARTIFACTS/games/." "$OUT/games/"
+# The shell's behaviour measurements (mkosi.build.chroot), with the logs.
+[ ! -f "$ARTIFACTS/shell-behaviour.json" ] || cp "$ARTIFACTS/shell-behaviour.json" "$OUT/logs/shell-behaviour.json"
 [ ! -f "$ARTIFACTS/recipes.json" ] || cp "$ARTIFACTS/recipes.json" "$OUT/recipes.json"
 python3 "$HERE/build_info.py" \
     --inputs "$SRC/os/inputs.json" --source-info "$SOURCE_INFO" --profile "$PROFILE" \

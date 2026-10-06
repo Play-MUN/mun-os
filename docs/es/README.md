@@ -21,10 +21,10 @@ Las páginas que todavía no tienen traducción enlazan a su original, en inglé
 - [Traer un juego a MUN](guides/port-a-game.md): perfiles de ejecución,
   bibliotecas, datos y partidas, recetas; por qué empaquetar un juego no es
   portarlo.
-- [Vestir la consola con tu juego](../guides/shape-your-game.md) (en inglés):
+- [Vestir la consola con tu juego](guides/shape-your-game.md):
   un paquete de MUN Shape desde un ejemplo hasta una tarjeta, comprobado,
   previsualizado en la consola, jugado y retirado.
-- [Ver MUN Shape en acción](../guides/see-shape-in-action.md) (en inglés): qué
+- [Ver MUN Shape en acción](guides/see-shape-in-action.md): qué
   lleva una tarjeta con MUN Shape, sea cual sea el juego, y una consola que
   toma su identidad desde la inserción hasta el apagado.
 
@@ -72,17 +72,17 @@ Los componentes documentan sus propios protocolos, unidades y privilegios:
 
 La versión inglesa es la referencia técnica. La española cubre, por ahora,
 el README, esta página, los primeros pasos, el glosario, la compatibilidad,
-las guías para crear una Game Card y traer un juego, cómo contribuir, la
-seguridad y los README de los ejemplos y de MUN Collect. Sigue solo en
-inglés:
+las guías para crear una Game Card, traer un juego y vestir la consola con
+MUN Shape, la de ver MUN Shape en acción, cómo contribuir, la seguridad y los
+README de los ejemplos, de MUN Collect y de los paquetes de MUN Shape de
+ejemplo. Sigue solo en inglés:
 
-- Las demás páginas de `docs/`: las guías y el contrato de MUN Shape, los
-  demás contratos, la arquitectura, los lenguajes, las licencias y la
-  publicación de versiones. Aquí aparecen marcadas «en inglés».
+- Las demás páginas de `docs/`: los contratos, el de MUN Shape incluido, la
+  arquitectura, los lenguajes, las licencias y la publicación de versiones.
+  Aquí aparecen marcadas «en inglés».
 - Los README de los componentes, de las herramientas, de las pruebas, del
-  laboratorio, de la construcción de la imagen, de la prueba gráfica
-  (`mun-gl-probe`) y de los paquetes de MUN Shape de ejemplo
-  (`examples/shape`).
+  laboratorio, de la construcción de la imagen y de la prueba gráfica
+  (`mun-gl-probe`).
 - Los textos de las licencias (`LICENSE`, `NOTICE`, `NAME-AND-LOGO.txt` y
   las licencias de las tipografías), que son los que valen.
 - El código, sus comentarios, los mensajes de los commits y la plantilla de

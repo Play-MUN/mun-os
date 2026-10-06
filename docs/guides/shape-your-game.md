@@ -1,5 +1,7 @@
 # Dress the console in your game (MUN Shape)
 
+**English** · [Español](../es/guides/shape-your-game.md)
+
 While your Game Card is in the console, MUN can take your game's identity:
 its colours on the menu, glass or paper under the words, the card object
 showing your art, a world moving behind Home, a transition that brings it

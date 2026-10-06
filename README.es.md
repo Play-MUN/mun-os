@@ -103,8 +103,8 @@ Jugar, hacer tarjetas y construir imágenes tienen cada uno sus requisitos:
   [compatibilidad](docs/es/compatibility.md)
 - [Crear una Game Card](docs/es/guides/create-game-card.md) y
   [traer un juego a MUN](docs/es/guides/port-a-game.md)
-- [Vestir la consola con tu juego](docs/guides/shape-your-game.md) con MUN
-  Shape, y [verlo en acción](docs/guides/see-shape-in-action.md) (en inglés)
+- [Vestir la consola con tu juego](docs/es/guides/shape-your-game.md) con MUN
+  Shape, y [verlo en acción](docs/es/guides/see-shape-in-action.md)
 - Para autores de tarjetas y juegos: [Game Cards](docs/game-cards.md),
   [partidas](docs/saves.md), [ejecutar un juego](docs/runtime.md),
   [MUN Shape](docs/shape.md) (en inglés)

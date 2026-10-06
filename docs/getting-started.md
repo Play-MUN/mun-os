@@ -1,5 +1,7 @@
 # Getting started
 
+**English** · [Español](es/getting-started.md)
+
 Run MUN™ OS on your computer as a virtual console, play the Game Card that
 comes with it, save, and continue later. No compiler is needed: you download
 the tools and a ready-made image. Where each step has been checked is in
@@ -44,11 +46,15 @@ Use the tools of the same release as the image when you can.
 
 A preview release carries the image, its record (`BUILD-INFO.json`), two
 Game Cards (MUN Collect and the MUN Test Card), the licence texts and
-`release.json`, which lists every file with its size and SHA-256. Give
-`./mun get` the address of that `release.json`:
+`release.json`, which lists every file with its size and SHA-256. These
+pages are for v0.1.0-dev.3; if it is not on the
+[releases page](https://github.com/Play-MUN/mun-os/releases) yet, use the
+latest preview there, with the pages of its own tag, or build this branch's
+image ([build the image yourself](#build-the-image-yourself)). Give
+`./mun get` the address of its `release.json`:
 
 ```sh
-./mun get https://github.com/Play-MUN/mun-os/releases/download/v0.1.0-dev.2/release.json
+./mun get https://github.com/Play-MUN/mun-os/releases/download/v0.1.0-dev.3/release.json
 ```
 
 It downloads every file, checks each one against `release.json`, installs
@@ -56,6 +62,22 @@ the image under `.local/mun/builds/` and the cards under `.local/gamecards/`.
 An interrupted download resumes when you run the same command again. A Game
 Card that already exists is never replaced (it may hold your saves). On
 Windows: `py mun get …`.
+
+If you played an earlier preview, its console (`play`) stays on that image:
+a console keeps the image it was made from, and a new one is made from the
+most recently built image you have, which need not be this download. Start
+this one by name, in a console of its own:
+`./mun dev list` shows the name it was installed under (`d<month><day>-<time>`
+of its build, unless you chose one with `./mun get … --name NAME`).
+
+```sh
+./mun play --build NAME --guest NAME --card collect
+```
+
+Use `--guest NAME` in the commands below as well, and `NAME` where they
+say `play` (`./mun dev vm NAME shell-log`, `.local/mun/guests/NAME/`). The
+earlier console stays as it was, with its own settings; your cards and
+their saves work in both.
 
 ## 4. Play
 

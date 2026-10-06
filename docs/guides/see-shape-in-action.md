@@ -1,10 +1,16 @@
 # See MUN Shape in action
 
+**English** · [Español](../es/guides/see-shape-in-action.md)
+
 How a Game Card that carries MUN Shape is laid out, whatever the game, and
 how to watch a console take that game's identity: start a console with no
 card, put the card in, play, come back, eject, turn off. To make a package
 of your own, follow [dress the console in your game](shape-your-game.md);
 the rules are in [MUN Shape](../shape.md).
+
+| MUN Collect, without a package | The same card with the `sea` sample |
+| --- | --- |
+| ![Home with the MUN Collect Game Card, in MUN's look with the colours read from its cover](../images/mun-shape-before.jpg) | ![The same Home with MUN Collect carrying the sea sample: a world under water, glass plates and the card object showing the sea](../images/mun-shape-after.jpg) |
 
 ## What a dressed card holds
 
@@ -57,15 +63,17 @@ cannot use is dropped block by block, and the card stays valid.
 ## The console must show MUN Shape
 
 An image records the MUN Shape its console reads in its `BUILD-INFO.json`
-(`"shape": {"format": "mun-shape/1"}`). Images built from this checkout
-record it; the published v0.1.0-dev.2 does not show MUN Shape. List what
-you have:
+(`"shape": {"format": "mun-shape/1"}`). v0.1.0-dev.3 records it, as do
+images built from this checkout; earlier previews, v0.1.0-dev.2 and before,
+do not show MUN Shape. List what you have:
 
 ```sh
 ./mun dev list        # each build and guest: "shape mun-shape/1" or "shape not recorded"
 ```
 
-Build one if none records it: `./mun dev build`
+If none records it, get v0.1.0-dev.3
+([getting started](../getting-started.md#3-the-image)) or build one with
+`./mun dev build`
 ([build the image yourself](../getting-started.md#build-the-image-yourself)).
 
 ## Watch it

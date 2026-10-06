@@ -1,5 +1,7 @@
 # Documentation
 
+**English** · [Español](es/README.md)
+
 ## Start here
 
 - [README](../README.md): what MUN™ OS is, what works today.

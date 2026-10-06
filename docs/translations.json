@@ -1,0 +1,104 @@
+{
+  "format": "mun-translations/1",
+  "about": "Each translation with its English original, the technical reference, and the SHA-256 of the original's text when the translation was last reviewed against it. scripts/check_foundation.py checks the pairs; source_sha256 is set by hand, only after the translation has been reviewed.",
+  "translations": [
+    {
+      "translation": "CONTRIBUTING.es.md",
+      "source": "CONTRIBUTING.md",
+      "language": "es",
+      "reviewed": "2026-10-05",
+      "source_sha256": "b906ef00fe42a8793e08c239094b8e547aaffbbc38abd64b4357f38e334f5a96"
+    },
+    {
+      "translation": "README.es.md",
+      "source": "README.md",
+      "language": "es",
+      "reviewed": "2026-10-06",
+      "source_sha256": "019049461ae77fa254f3ec13592c49bea59518860c060625ebfcc84510c725b1"
+    },
+    {
+      "translation": "SECURITY.es.md",
+      "source": "SECURITY.md",
+      "language": "es",
+      "reviewed": "2026-10-05",
+      "source_sha256": "c33513851dfba9c666b47f26f895d7cffc41885b76db463291ed169a92ac9358"
+    },
+    {
+      "translation": "docs/es/README.md",
+      "source": "docs/README.md",
+      "language": "es",
+      "reviewed": "2026-10-05",
+      "source_sha256": "2689d61f646452586593720c067d6294718b88acdffaee085e1cb0a5ee68594a"
+    },
+    {
+      "translation": "docs/es/compatibility.md",
+      "source": "docs/compatibility.md",
+      "language": "es",
+      "reviewed": "2026-10-06",
+      "source_sha256": "40179de825c1c50ffa9475ef18ec3c6d9be0834fb67d2d45cda8e7712754bf7a"
+    },
+    {
+      "translation": "docs/es/getting-started.md",
+      "source": "docs/getting-started.md",
+      "language": "es",
+      "reviewed": "2026-10-06",
+      "source_sha256": "72d4e6e4697eb163f9ec8ae6697766822bb6f437b66d0113426c6f446c1a451a"
+    },
+    {
+      "translation": "docs/es/glossary.md",
+      "source": "docs/glossary.md",
+      "language": "es",
+      "reviewed": "2026-10-05",
+      "source_sha256": "1ea2e6adb0da994efb04712270d9108e9d1a040e71c0299d185e2dfa2c4c204a"
+    },
+    {
+      "translation": "docs/es/guides/create-game-card.md",
+      "source": "docs/guides/create-game-card.md",
+      "language": "es",
+      "reviewed": "2026-10-05",
+      "source_sha256": "340b450194e342b6c20b4c0e685b29d400ccd7c45e2ba08f00d8f4dd28851823"
+    },
+    {
+      "translation": "docs/es/guides/port-a-game.md",
+      "source": "docs/guides/port-a-game.md",
+      "language": "es",
+      "reviewed": "2026-10-05",
+      "source_sha256": "f36a6f94a88bfb1cd2388c8eeba9ed40e0f8f391a54f15c0899c4a7696244cfd"
+    },
+    {
+      "translation": "docs/es/guides/see-shape-in-action.md",
+      "source": "docs/guides/see-shape-in-action.md",
+      "language": "es",
+      "reviewed": "2026-10-06",
+      "source_sha256": "81093fe71350558db042356f62fa12af57455b504ff098be52a7a5f37736c9f6"
+    },
+    {
+      "translation": "docs/es/guides/shape-your-game.md",
+      "source": "docs/guides/shape-your-game.md",
+      "language": "es",
+      "reviewed": "2026-10-06",
+      "source_sha256": "6d2d448fb90bc0c3c1814ee1c888163036cf2893d016136a5d87b986c6cbd9db"
+    },
+    {
+      "translation": "examples/README.es.md",
+      "source": "examples/README.md",
+      "language": "es",
+      "reviewed": "2026-10-05",
+      "source_sha256": "b0c01f896e42a04fe772adb92ec3017327eae44bccf69db9d8a06242554c8d80"
+    },
+    {
+      "translation": "examples/mun-collect/README.es.md",
+      "source": "examples/mun-collect/README.md",
+      "language": "es",
+      "reviewed": "2026-10-05",
+      "source_sha256": "136e76a3389dffae9f5fa2c377a15151697063adc505cec48ec99033d41892ea"
+    },
+    {
+      "translation": "examples/shape/README.es.md",
+      "source": "examples/shape/README.md",
+      "language": "es",
+      "reviewed": "2026-10-06",
+      "source_sha256": "9ee73d38823784c32b880270d491629f0bb3ef6168c6b774dc836e28dededebb"
+    }
+  ]
+}

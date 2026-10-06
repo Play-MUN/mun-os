@@ -1,5 +1,7 @@
 # MUN OS
 
+**English** · [Español](README.es.md)
+
 **BOP — Buy. Own. Play.** MUN™ is a game console in development, for games
 you own on Game Cards: insert a card, play offline, and your progress
 travels with the card. MUN OS is its open-source operating system.
@@ -30,6 +32,10 @@ identity, MUN Shape v1: colours, materials, the card object, a world behind
 the menus, transitions and sounds, read from a folder on the card and drawn
 by MUN. The examples are MUN Collect, a small game, a graphics and audio
 probe, and two MUN Shape packages.
+
+| MUN Collect, without a package | The same card with the `sea` sample |
+| --- | --- |
+| ![Home with the MUN Collect Game Card, in MUN's look with the colours read from its cover](docs/images/mun-shape-before.jpg) | ![The same Home with MUN Collect carrying the sea sample: a world under water, glass plates and the card object showing the sea](docs/images/mun-shape-after.jpg) |
 
 Not there yet: controllers, card and system updates, and any physical
 hardware. [Architecture](docs/architecture.md) says what exists and what is
@@ -68,9 +74,12 @@ the same console, slower.
 | Windows, x86_64 or ARM64 | Emulated | In CI (Windows Server 2025; Windows 11 ARM64), headless |
 
 "In CI" is the Hosts workflow: download a preview, start the console, play
-its card, power off, in GitHub's virtual machines. No Linux or Windows
-computer has been tried yet. Playing, making cards and building images each
-have their own requirements: [compatibility](docs/compatibility.md).
+its card, power off, in GitHub's virtual machines. It checks each preview
+once it is published, and that preview's release notes give the result:
+the checks in CI above are v0.1.0-dev.2's, and v0.1.0-dev.3 is pending
+there until its own run. No Linux or Windows computer has been tried yet.
+Playing, making cards and building images each have their own
+requirements: [compatibility](docs/compatibility.md).
 
 ## Principles
 
@@ -112,7 +121,7 @@ have their own requirements: [compatibility](docs/compatibility.md).
 | `mun` | The tools' entry point: `./mun get`, `./mun play`, `./mun card`, `./mun dev` |
 | `examples/` | Example games |
 | `tests/`, `scripts/` | Host regressions and the documentation check |
-| `docs/` | Guides, contracts, architecture and reference |
+| `docs/` | Guides, contracts, architecture and reference; Spanish translations in `docs/es/` |
 | `.local/` | Ignored: builds, guests, card images, downloads |
 
 `make check` (Python 3.9 or later, Make) runs the documentation check, the

@@ -12,8 +12,21 @@ hardware and a release that is not a preview.
 
 ## 1. The commit
 
-`dev` merged into `main` through a pull request (a merge commit), with its
-checks green and `make check` passing locally. Note the full hash of the
+Before `dev` goes into `main`, its pages already speak of the new release:
+a pull request to `dev` points the preview's address in
+[getting started](getting-started.md#3-the-image) and in the bug report
+template (`.github/ISSUE_TEMPLATE/bug_report.yml`) at the new release, in
+English and in Spanish, and says what changes for its players. Next to that
+address, getting started says which release its pages are for and what to
+use while that release is not on the releases page yet, so the pages hold
+before and after it is published. What earlier releases did or did not do
+stays, named as theirs. Where a release was
+checked is never carried over: until the Hosts workflow has run on the new
+release, its Linux and Windows checks are pending, in the pages and in its
+notes.
+
+Then `dev` merged into `main` through a pull request (a merge commit), with
+its checks green and `make check` passing locally. Note the full hash of the
 resulting commit on `main`; the tag goes on it at the end.
 
 ## 2. The image, from that commit
@@ -95,12 +108,6 @@ the sources. The Hosts workflow downloads the release on macOS, Linux
 (x86_64, ARM64) and Windows (x86_64, ARM64) and runs the same check there.
 If it fails, the release is marked as such in its notes and the fix goes
 into the next one.
-
-## After publishing
-
-Point the preview's address in [getting started](getting-started.md#3-the-image)
-and in the bug report template (`.github/ISSUE_TEMPLATE/bug_report.yml`) at the
-new release.
 
 ## Release notes
 

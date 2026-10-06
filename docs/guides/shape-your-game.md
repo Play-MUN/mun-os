@@ -1,5 +1,7 @@
 # Dress the console in your game (MUN Shape)
 
+**English** · [Español](../es/guides/shape-your-game.md)
+
 While your Game Card is in the console, MUN can take your game's identity:
 its colours on the menu, glass or paper under the words, the card object
 showing your art, a world moving behind Home, a transition that brings it
@@ -16,13 +18,13 @@ number, are the contract: [MUN Shape](../shape.md).
 
 ## Before you start
 
-- The tools, as in [getting started](../getting-started.md) (sections 1
-  and 2), and an image that shows MUN Shape, built from this checkout as in
+- The tools and an image that shows MUN Shape: v0.1.0-dev.3, as in
+  [getting started](../getting-started.md) (sections 1 to 3), or one built
+  from this checkout as in
   [build the image yourself](../getting-started.md#build-the-image-yourself)
-  (`./mun dev build`): the published v0.1.0-dev.2, which
-  `./mun get` downloads, does not show MUN Shape (a card with a package is
-  valid and playable there, in MUN's look). `./mun dev list` says which
-  images do: `shape mun-shape/1`.
+  (`./mun dev build`). Earlier previews, v0.1.0-dev.2 and before, do not
+  show MUN Shape (a card with a package is valid and playable there, in
+  MUN's look). `./mun dev list` says which images do: `shape mun-shape/1`.
 - e2fsprogs 1.47 or later for the card tool ([create a Game
   Card](create-game-card.md#before-you-start)).
 - A game on a card, or MUN Collect as in [create a Game

@@ -1,5 +1,7 @@
 # Contributing
 
+**English** · [Español](CONTRIBUTING.es.md)
+
 MUN™ OS is at an early stage: one development image for QEMU, no supported
 release and no selected hardware. Contributions are welcome: fixes, tests,
 documentation, card and game tooling, ports of the laboratory to more
@@ -34,7 +36,7 @@ The requirements to play and to build are in
 later and Make; a C compiler adds the example game's save tests.
 
 ```sh
-make check      # documentation links, Python syntax, host regressions, C save tests
+make check      # documentation links, anchors and translations, Python syntax, host regressions, C save tests
 make test       # the Python host regressions only
 ```
 
@@ -76,7 +78,34 @@ compiled binary in every image build (`./mun dev build`,
 Behaviour that only a running guest can show is described in the pull
 request with the commands used.
 
+## Documentation and translations
+
+Documentation is written in English, the technical reference. Some pages
+also have a Spanish translation: `docs/es/` mirrors `docs/`, a page elsewhere
+has `NAME.es.md` beside `NAME.md`, and each pair is linked both ways by an
+English / Español line. `docs/translations.json` lists every translation
+with the SHA-256 of the English text it was last reviewed against.
+
+When you change a page that has a translation, update the translation in the
+same change if you can, or say in the pull request that it needs one.
+`make check` fails until the translation has been reviewed against the new
+English text and its `source_sha256` set to the value the check prints; set
+it only after reading both. Commands, options, paths, file names, JSON and
+TOML fields and error codes stay as they are in a translation, and the
+output of a tool is quoted in the language the tool prints.
+
 ## Branches, commits and pull requests
+
+A change travels this way:
+
+1. A short-lived branch from `dev`.
+2. A pull request against `dev`, with its checks green, reviewed and
+   approved by the maintainer.
+3. Merged into `dev`, where changes stay until a preview is prepared.
+4. A pull request from `dev` to `main`, the candidate checked as
+   [releasing](docs/releasing.md) says, and the release tagged on `main`.
+
+In detail:
 
 - `dev` is where the work lands first. Fork the repository, or, with write
   access, work on a short-lived branch from `dev`: `feat/…`, `fix/…`,

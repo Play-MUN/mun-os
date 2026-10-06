@@ -1,5 +1,7 @@
 # Glossary
 
+**English** · [Español](es/glossary.md)
+
 Terms used across the MUN™ documentation and code.
 
 | Term | Meaning |

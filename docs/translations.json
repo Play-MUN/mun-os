@@ -13,8 +13,8 @@
       "translation": "README.es.md",
       "source": "README.md",
       "language": "es",
-      "reviewed": "2026-10-05",
-      "source_sha256": "62b4b7490c36bbc31f88f3a29b61de37e895a33846cd035407bf70d49dfee617"
+      "reviewed": "2026-10-06",
+      "source_sha256": "019049461ae77fa254f3ec13592c49bea59518860c060625ebfcc84510c725b1"
     },
     {
       "translation": "SECURITY.es.md",
@@ -34,15 +34,15 @@
       "translation": "docs/es/compatibility.md",
       "source": "docs/compatibility.md",
       "language": "es",
-      "reviewed": "2026-10-05",
-      "source_sha256": "ed160559d17761ee61a5ae8840d18fd0687b329cca62260b9827a40e84d71f50"
+      "reviewed": "2026-10-06",
+      "source_sha256": "40179de825c1c50ffa9475ef18ec3c6d9be0834fb67d2d45cda8e7712754bf7a"
     },
     {
       "translation": "docs/es/getting-started.md",
       "source": "docs/getting-started.md",
       "language": "es",
-      "reviewed": "2026-10-05",
-      "source_sha256": "6d86f8700537e61eb0737690ee6caa2b2d6eebef6f532db374f82ca5886378bd"
+      "reviewed": "2026-10-06",
+      "source_sha256": "72d4e6e4697eb163f9ec8ae6697766822bb6f437b66d0113426c6f446c1a451a"
     },
     {
       "translation": "docs/es/glossary.md",
@@ -70,14 +70,14 @@
       "source": "docs/guides/see-shape-in-action.md",
       "language": "es",
       "reviewed": "2026-10-06",
-      "source_sha256": "275dcf0445b9a0662b41d7e4bea110fb2578ec5e4133e9b1cdc8dd34bc1b8f2d"
+      "source_sha256": "81093fe71350558db042356f62fa12af57455b504ff098be52a7a5f37736c9f6"
     },
     {
       "translation": "docs/es/guides/shape-your-game.md",
       "source": "docs/guides/shape-your-game.md",
       "language": "es",
       "reviewed": "2026-10-06",
-      "source_sha256": "50cd9e03f43794839b5b3f9856c83d8bfc72265b8ab3045d3b81256d394a1b02"
+      "source_sha256": "6d2d448fb90bc0c3c1814ee1c888163036cf2893d016136a5d87b986c6cbd9db"
     },
     {
       "translation": "examples/README.es.md",

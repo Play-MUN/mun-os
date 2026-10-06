@@ -33,6 +33,10 @@ the menus, transitions and sounds, read from a folder on the card and drawn
 by MUN. The examples are MUN Collect, a small game, a graphics and audio
 probe, and two MUN Shape packages.
 
+| MUN Collect, without a package | The same card with the `sea` sample |
+| --- | --- |
+| ![Home with the MUN Collect Game Card, in MUN's look with the colours read from its cover](docs/images/mun-shape-before.jpg) | ![The same Home with MUN Collect carrying the sea sample: a world under water, glass plates and the card object showing the sea](docs/images/mun-shape-after.jpg) |
+
 Not there yet: controllers, card and system updates, and any physical
 hardware. [Architecture](docs/architecture.md) says what exists and what is
 planned.
@@ -70,9 +74,12 @@ the same console, slower.
 | Windows, x86_64 or ARM64 | Emulated | In CI (Windows Server 2025; Windows 11 ARM64), headless |
 
 "In CI" is the Hosts workflow: download a preview, start the console, play
-its card, power off, in GitHub's virtual machines. No Linux or Windows
-computer has been tried yet. Playing, making cards and building images each
-have their own requirements: [compatibility](docs/compatibility.md).
+its card, power off, in GitHub's virtual machines. It checks each preview
+once it is published, and that preview's release notes give the result:
+the checks in CI above are v0.1.0-dev.2's, and v0.1.0-dev.3 is pending
+there until its own run. No Linux or Windows computer has been tried yet.
+Playing, making cards and building images each have their own
+requirements: [compatibility](docs/compatibility.md).
 
 ## Principles
 

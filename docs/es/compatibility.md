@@ -25,7 +25,10 @@ con una imagen descargada, hacer Game Cards y construir una imagen.
 «Comprobado en CI» es el flujo de trabajo Hosts del repositorio
 (`.github/workflows/hosts.yml`) en las máquinas virtuales de GitHub:
 descarga una versión preliminar como lo haría un jugador, arranca la consola,
-inserta MUN Collect, lo juega y sale, retira la tarjeta y apaga. Dice que las
+inserta MUN Collect, lo juega y sale, retira la tarjeta y apaga. Se ejecuta
+sobre cada versión preliminar cuando se publica, y las notas de esa versión
+dan el resultado: «Comprobado en CI», arriba, es de la v0.1.0-dev.2, y la
+v0.1.0-dev.3 está pendiente ahí hasta su propia ejecución. Dice que las
 herramientas y la imagen funcionan en ese sistema; no mide la velocidad, y no
 se ha probado ningún ordenador físico con Linux o Windows. Las consolas
 emuladas son varias veces más lentas que las virtualizadas.

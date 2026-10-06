@@ -14,7 +14,7 @@ body:
       label: How to make it happen
       description: The commands you ran and the keys you pressed, in order.
       placeholder: |
-        ./mun get https://github.com/Play-MUN/mun-os/releases/download/v0.1.0-dev.2/release.json
+        ./mun get https://github.com/Play-MUN/mun-os/releases/download/v0.1.0-dev.3/release.json
         ./mun play --card collect
         Enter, Enter, …
     validations:
@@ -24,7 +24,7 @@ body:
     attributes:
       label: MUN OS version
       description: The preview release or commit, and the image's build id (`build_id` in its BUILD-INFO.json; `./mun dev list` shows it).
-      placeholder: v0.1.0-dev.2, build 20260930T073212Z-649c25f1ff32
+      placeholder: v0.1.0-dev.3, and the build_id its BUILD-INFO.json gives
     validations:
       required: true
   - type: input

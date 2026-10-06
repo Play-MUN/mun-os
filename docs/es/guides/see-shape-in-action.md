@@ -8,6 +8,10 @@ sin tarjeta, meter la tarjeta, jugar, volver, retirarla y apagar. Para hacer
 un paquete propio, sigue [vestir la consola con tu juego](shape-your-game.md);
 las reglas están en [MUN Shape](../../shape.md), en inglés.
 
+| MUN Collect, sin paquete | La misma tarjeta con el ejemplo `sea` |
+| --- | --- |
+| ![La pantalla principal con la Game Card de MUN Collect, con el aspecto de MUN y los colores leídos de su portada](../../images/mun-shape-before.jpg) | ![La misma pantalla con MUN Collect llevando el ejemplo sea: un mundo bajo el agua, placas de cristal y el objeto de la tarjeta mostrando el mar](../../images/mun-shape-after.jpg) |
+
 Esta guía cita los menús de la consola en español; arranca en inglés y se
 cambia en *Settings* › *Account and language* › *Language*
 ([glosario](../glossary.md#las-palabras-de-la-consola)).
@@ -66,15 +70,18 @@ válida.
 ## La consola tiene que mostrar MUN Shape
 
 Una imagen registra en su `BUILD-INFO.json` el MUN Shape que lee su consola
-(`"shape": {"format": "mun-shape/1"}`). Las imágenes construidas desde tu
-copia del repositorio lo registran; la v0.1.0-dev.2 publicada no muestra MUN
-Shape. Mira lo que tienes:
+(`"shape": {"format": "mun-shape/1"}`). La v0.1.0-dev.3 lo registra, igual
+que las imágenes construidas desde tu copia del repositorio;
+las versiones preliminares anteriores, la v0.1.0-dev.2 y las de antes, no
+muestran MUN Shape. Mira lo que tienes:
 
 ```sh
 ./mun dev list        # cada build e invitado: "shape mun-shape/1" o "shape not recorded"
 ```
 
-Construye una si ninguna lo registra: `./mun dev build`
+Si ninguna lo registra, descarga la v0.1.0-dev.3
+([primeros pasos](../getting-started.md#3-la-imagen)) o construye una con
+`./mun dev build`
 ([construir la imagen tú mismo](../getting-started.md#construir-la-imagen-tú-mismo)).
 
 ## Míralo

@@ -22,14 +22,14 @@ cambia en *Settings* › *Account and language* › *Language*
 
 ## Antes de empezar
 
-- Las herramientas, como en [primeros pasos](../getting-started.md)
-  (secciones 1 y 2), y una imagen que muestre MUN Shape, construida desde tu
-  copia del repositorio como en
+- Las herramientas y una imagen que muestre MUN Shape: la v0.1.0-dev.3, como
+  en [primeros pasos](../getting-started.md) (secciones 1 a 3), o una
+  construida desde tu copia del repositorio como en
   [construir la imagen tú mismo](../getting-started.md#construir-la-imagen-tú-mismo)
-  (`./mun dev build`): la v0.1.0-dev.2 publicada, la que descarga
-  `./mun get`, no muestra MUN Shape (una tarjeta con paquete es válida y se
-  juega en ella, con el aspecto de MUN). `./mun dev list` dice qué imágenes
-  lo muestran: `shape mun-shape/1`.
+  (`./mun dev build`). Las versiones preliminares anteriores, la
+  v0.1.0-dev.2 y las de antes, no muestran MUN Shape (una tarjeta con paquete
+  es válida y se juega en ellas, con el aspecto de MUN). `./mun dev list`
+  dice qué imágenes lo muestran: `shape mun-shape/1`.
 - e2fsprogs 1.47 o posterior para la herramienta de tarjetas
   ([crear una Game Card](create-game-card.md#antes-de-empezar)).
 - Un juego en una tarjeta, o MUN Collect como en

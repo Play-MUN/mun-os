@@ -19,8 +19,10 @@ belongs to the hardware integration, which is not selected yet.
   directory, `saves/` by default.
 - `mun-card` ([tools/mun-card](../tools/mun-card/README.md)) builds images on
   the host with e2fsprogs (`mke2fs -d`), fixed timestamps, a null UUID and a
-  fixed hash seed, so the same content yields the same bytes. Label
-  `MUNCARD`, 64 MiB unless a size is given.
+  fixed hash seed. The image also records each file's permissions, user and
+  group, so the same content yields the same bytes when those, and the
+  e2fsprogs version and configuration, are the same too. Label `MUNCARD`,
+  64 MiB unless a size is given.
 - Before mounting, the console requires a whole-image ext4 with a clean
   superblock: an image that needs journal recovery (`image_needs_recovery`)
   or is marked with errors (`image_has_errors`) is refused and never

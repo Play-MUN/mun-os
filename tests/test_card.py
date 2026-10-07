@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import unittest.mock
 import zlib
@@ -394,6 +395,21 @@ class ImageTests(unittest.TestCase):
     def test_reproducible_build(self):
         a, b = self.build("valid"), self.build("valid")
         self.assertEqual(image.sha256_file(a), image.sha256_file(b))
+
+    def test_reproducible_build_in_different_seconds(self):
+        # A staged file's ctime is when it last changed, and no call sets it
+        # back. Staging the second tree in a later second makes any time the
+        # image takes from the staging tree or the clock, instead of the
+        # fixed epoch, show up as a difference.
+        first = self.build("valid")
+        staged = [first.parent / "stage", *(first.parent / "stage").rglob("*")]
+        last_change = max(os.lstat(path).st_ctime for path in staged)
+        time.sleep(max(0.0, int(last_change) + 1.05 - time.time()))
+        second = self.build("valid")
+        restaged = [second.parent / "stage", *(second.parent / "stage").rglob("*")]
+        self.assertGreater(int(min(os.lstat(path).st_ctime for path in restaged)), int(last_change),
+                           "the two trees must be staged in different seconds")
+        self.assertEqual(image.sha256_file(first), image.sha256_file(second))
 
     def test_non_ext4_and_recovery_flag_are_rejected(self):
         tmp = Path(tempfile.mkdtemp(prefix="cardimg-"))

@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import unittest.mock
 import zlib
@@ -394,6 +395,91 @@ class ImageTests(unittest.TestCase):
     def test_reproducible_build(self):
         a, b = self.build("valid"), self.build("valid")
         self.assertEqual(image.sha256_file(a), image.sha256_file(b))
+
+    def test_reproducible_build_in_different_seconds(self):
+        # A staged file's ctime is when it last changed, and no call sets it
+        # back. Staging the second tree in a later second makes any time the
+        # image takes from the staging tree or the clock, instead of the
+        # fixed epoch, show up as a difference.
+        first = self.build("valid")
+        staged = [first.parent / "stage", *(first.parent / "stage").rglob("*")]
+        last_change = max(os.lstat(path).st_ctime for path in staged)
+        time.sleep(max(0.0, int(last_change) + 1.05 - time.time()))
+        second = self.build("valid")
+        restaged = [second.parent / "stage", *(second.parent / "stage").rglob("*")]
+        self.assertGreater(int(min(os.lstat(path).st_ctime for path in restaged)), int(last_change),
+                           "the two trees must be staged in different seconds")
+        self.assertEqual(image.sha256_file(first), image.sha256_file(second))
+
+    def test_the_same_card_built_in_another_language_is_the_same_image(self):
+        # dumpe2fs translates each group's rows, "Free inodes:" among them,
+        # but not the superblock summary. The image must not depend on the
+        # language the host speaks.
+        reference = self.build("valid")
+        spanish = self.translating_environment(reference)
+        with unittest.mock.patch.dict(os.environ, spanish):
+            in_spanish = self.build("valid")
+        with unittest.mock.patch.dict(os.environ, {"LC_ALL": "C", "LANGUAGE": "C"}):
+            in_c = self.build("valid")
+        self.assertEqual(image.sha256_file(in_spanish), image.sha256_file(in_c))
+        self.assertEqual(image.sha256_file(in_spanish), image.sha256_file(reference))
+
+    def translating_environment(self, card: Path) -> dict:
+        """An environment in which this host's dumpe2fs prints Spanish, or a skip."""
+        dumpe2fs = image.find_tool("dumpe2fs")
+
+        def report(env):
+            return subprocess.run([dumpe2fs, str(card)], capture_output=True, text=True,
+                                  env=dict(os.environ, **env)).stdout
+
+        self.assertIn("\n  Free inodes:", report({"LC_ALL": "C", "LANGUAGE": "C"}))
+        for env in ({"LC_ALL": "es_ES.UTF-8", "LANG": "es_ES.UTF-8", "LANGUAGE": "es"},
+                    {"LC_ALL": "C.UTF-8", "LANGUAGE": "es"}):
+            if "\n  Free inodes:" not in report(env):
+                return env
+        self.skipTest("this host's dumpe2fs prints no Spanish (no Spanish locale or translations)")
+
+    def test_an_inode_map_that_cannot_be_read_is_refused_not_taken_as_empty(self):
+        # What dumpe2fs prints for one group, in English and in Spanish; the
+        # superblock summary is English in both.
+        summary = "Inode count:              2048\nFree inodes:              2028\nFirst inode:              11\n\n"
+        english = (summary + "Group 0: (Blocks 1-8191) csum 0x39e7\n"
+                   "  6530 free blocks, 2028 free inodes, 5 directories, 2028 unused inodes\n"
+                   "  Free blocks: 1662-8191\n  Free inodes: 21-2048\n")
+        spanish = (summary + "Grupo 0: (Bloques 1-8191) csum 0x39e7\n"
+                   "  6530 bloques libres, 2028 nodos-i libres, 5 directorios, 2028 nodos-i sin usar\n"
+                   "  Bloques libres: 1662-8191\n  Nodos-i libres: 21-2048\n")
+        self.assertEqual(image.allocated_inodes(english), list(range(11, 21)))
+        # Rows it does not recognise, or a group's row missing, must not read
+        # as "no inode free": every free inode would become a target.
+        two_groups = english.replace("Inode count:              2048", "Inode count:              4096").replace(
+            "Free inodes:              2028", "Free inodes:              4076")
+        for report in (spanish, two_groups, two_groups + "Group 1: (Blocks 8193-16383)\n  Free inodes: 2049-4095\n"):
+            with self.assertRaises(CardError) as ctx:
+                image.allocated_inodes(report)
+            self.assertEqual(ctx.exception.code, "dumpe2fs_failed")
+        complete = two_groups + "Group 1: (Blocks 8193-16383)\n  Free inodes: 2049-4096\n"
+        self.assertEqual(image.allocated_inodes(complete), list(range(11, 21)))
+
+    def test_a_debugfs_complaint_fails_the_build_and_leaves_no_image(self):
+        # debugfs exits 0 when one of its requests fails; what it prints on
+        # stderr besides its version line is the only sign.
+        tmp = Path(tempfile.mkdtemp(prefix="cardimg-"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        fake = tmp / "debugfs"
+        fake.write_text('#!/bin/sh\necho "debugfs 1.47.0 (5-Feb-2023)" >&2\n'
+                        'echo "<13>: File not found by ext2_lookup" >&2\n')
+        fake.chmod(0o755)
+        staging = tmp / "stage"
+        staging.mkdir()
+        image.populate(staging, "valid")
+        real = image.find_tool
+        with unittest.mock.patch.object(image, "find_tool", lambda name: str(fake) if name == "debugfs" else real(name)):
+            with self.assertRaises(CardError) as ctx:
+                image.create_image(tmp / "x.img", staging, 8)
+        self.assertEqual(ctx.exception.code, "debugfs_failed")
+        self.assertIn("File not found", ctx.exception.detail)
+        self.assertEqual(sorted(path.name for path in tmp.iterdir()), ["debugfs", "stage"])
 
     def test_non_ext4_and_recovery_flag_are_rejected(self):
         tmp = Path(tempfile.mkdtemp(prefix="cardimg-"))

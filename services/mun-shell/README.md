@@ -86,12 +86,15 @@ cold at night, pale at dawn, grey-white by day, copper at dusk.
 
 Motion: the start-up plays once per boot, over the start-up sound (13.05
 s): the console waking in the dark, under the lines and vignette of a
-tube. At 0.3 s a pim lights the amber LED, a point that breathes once and
+tube, its LED and lid centred on the screen and the U of MUN above them
+(the moon reaches out to the right). At 0.3 s a pim lights the amber LED, a point that breathes once and
 grows into the console's long oval, two sweeps of light running along it;
 at 3.45 s a hit shakes the screen and flashes, a faint light behind the
 console shows only the top of its lid, and a gleam runs along the MUN
 engraved on its dome; at 6.65 s MUN arrives higher up with a ding and a
-discharge from the LED that makes its strokes tremble, a warm glow rising;
+discharge from the LED that makes its strokes tremble, a warm glow rising,
+and the whole picture eases down in 1.4 s until the logo and the LED under
+it are centred;
 from 7.85 s the moon comes out of an eclipse, copper, then silver as the
 shadow withdraws; from 10.05 s the LED melts away in silence and the logo
 fades while the sound rings on. The system loads meanwhile: once the card
@@ -103,7 +106,8 @@ s after the start whatever they do. The picture keeps time with the sound:
 on every frame its clock is what has been heard of it, the samples written
 to the device less what the device still holds; with System sounds off, or
 no device, it plays silent on its own clock. *Reduce motion* takes out the
-shake, the tremor and the flicker; every time stays. Moving to another entry: the chosen bar
+shake, the tremor, the flicker and the glide (the picture stays where the
+logo is centred); every time stays. Moving to another entry: the chosen bar
 turns light at once while its copper edge, glow and text colour settle in
 0.3 s and it slides 4 px out; the new object loads in 0.9 s, a radar-like
 sweep drawing its glowing wireframe with a copper line and its face

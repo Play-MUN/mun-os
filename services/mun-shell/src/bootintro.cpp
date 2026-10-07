@@ -531,6 +531,21 @@ QRectF BootIntro::area() const
     return QRectF();
 }
 
+QPointF BootIntro::placement() const
+{
+    // In canvas pixels of the design's place: the LED's centre is at x 932.5
+    // (the view's x 850), so the axis moves 27.5 px right. The lid's visible
+    // top (y 666) and the LED's bottom (832) centre at 749: 209 px up while
+    // they are alone. The arc's top (274) and the LED's bottom centre at
+    // 553: 13 px up once the logo is there.
+    static const qreal axis = 960 - viewTransform().map(QPointF(850, 762.5)).x();
+    constexpr qreal alone = 540 - (666.3 + 832.0) / 2, logo = 540 - (274.3 + 832.0) / 2;
+    if (m_reduceMotion)
+        return QPointF(axis, logo);
+    const qreal glide = io(sp(m_t + kLead, 7.0, 8.4));
+    return QPointF(axis, alone + (logo - alone) * glide);
+}
+
 QPointF BootIntro::shake() const
 {
     const qreal s = m_t + kLead;

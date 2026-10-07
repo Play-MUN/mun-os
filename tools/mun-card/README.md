@@ -55,8 +55,13 @@ not at all, and `inspect` prints them.
 Requires Python 3.9+ and e2fsprogs (`brew install e2fsprogs`, keg-only; the
 tool finds `mke2fs`/`debugfs` through `brew --prefix`, no PATH changes).
 Images are 64 MiB ext4 by default, built with `mke2fs -d` from a temporary
-staging tree, fixed timestamps, null UUID and fixed hash seed: the same
-content yields the same bytes. Only regular image files are ever written.
+staging tree, fixed timestamps, null UUID and fixed hash seed. The image also
+records each file's permissions, user and group as the staging tree has them:
+the user who runs the tool, permissions from the umask for the files it
+writes (game executables are 0755), and a group that can come from the
+folder holding the staging tree (`TMPDIR`), as on macOS. The same content
+yields the same bytes when those, and the e2fsprogs version and
+configuration, are the same too. Only regular image files are ever written.
 
 `inspect` reads the image through `debugfs`, never mounts it, and prints
 whether the SHA-256 changed during inspection (it must not).

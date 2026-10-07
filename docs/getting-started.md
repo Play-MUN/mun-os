@@ -2,15 +2,16 @@
 
 **English** · [Español](es/getting-started.md)
 
-Run MUN™ OS on your computer as a virtual console, play the Game Card that
-comes with it, save, and continue later. No compiler is needed: you download
-the tools and a ready-made image. Where each step has been checked is in
-[compatibility](compatibility.md).
+Run MUN™ OS on your computer as a virtual console: look around its
+interface, insert a Game Card, play, save, eject the card safely and continue
+later, then see a game dress the console with MUN Shape. No compiler is
+needed: you download the tools and a ready-made image. Where each step has
+been checked is in [compatibility](compatibility.md).
 
 ## 1. What you need
 
-Python 3.9 or later, QEMU 8.2 or later (its `qemu-system-aarch64`, `qemu-img`
-and the ARM64 UEFI firmware) and about 1.5 GB of free disk.
+To play: Python 3.9 or later, QEMU 8.2 or later (its `qemu-system-aarch64`,
+`qemu-img` and the ARM64 UEFI firmware) and about 1.5 GB of free disk.
 
 - **macOS**: `brew install qemu` ([Homebrew](https://brew.sh)). The system
   `python3` works.
@@ -28,6 +29,11 @@ and the ARM64 UEFI firmware) and about 1.5 GB of free disk.
   build: in its CLANGARM64 shell, `pacman -S mingw-w64-clang-aarch64-qemu
   mingw-w64-clang-aarch64-qemu-image-util` (the tools also look in
   `C:\msys64\clangarm64\bin`), and Python from python.org.
+
+Sections 2 to 6 need nothing else. Section 7, MUN Shape, makes a card, and
+the card tools also need e2fsprogs 1.47 or later: `brew install e2fsprogs`
+on macOS, the `e2fsprogs` package on Linux; on Windows, WSL 2 (not tried).
+Building the image needs more again ([below](#build-the-image-yourself)).
 
 ## 2. The tools
 
@@ -71,24 +77,24 @@ this one by name, in a console of its own:
 of its build, unless you chose one with `./mun get … --name NAME`).
 
 ```sh
-./mun play --build NAME --guest NAME --card collect
+./mun play --build NAME --guest NAME
 ```
 
 Use `--guest NAME` in the commands below as well, and `NAME` where they
-say `play` (`./mun dev vm NAME shell-log`, `.local/mun/guests/NAME/`). The
-earlier console stays as it was, with its own settings; your cards and
-their saves work in both.
+say `play` (`./mun dev vm NAME card-attach collect`,
+`./mun dev vm NAME shell-log`, `.local/mun/guests/NAME/`). The earlier
+console stays as it was, with its own settings; your cards and their saves
+work in both.
 
-## 4. Play
+## 4. Start the console and look around
 
 ```sh
-./mun play --card collect
+./mun play
 ```
 
 The console opens in a window, with sound on the computer's own output
-(window and sound have been checked on macOS so far), and MUN Collect goes in
-once it is up. The window has the keyboard while it is in
-front:
+(window, keyboard and sound have been checked on macOS so far). The window
+has the keyboard while it is in front:
 
 | Key | In MUN Shell |
 | --- | --- |
@@ -97,17 +103,44 @@ front:
 | Esc (or B) | Go back |
 | Left, Right | Change a setting |
 
-Home opens on Game Card: **Enter, Enter** is Play. In MUN Collect the arrows
-move the square, **S** saves on the card ("GUARDADO EN LA GAME CARD"; the
-game's own texts are Spanish) and **Esc** ends the game; the console comes
-back with "Session ended": **Enter** for OK.
+Home has four entries, each with its panel on the right:
 
-Settings has the language (English or Spanish), the resolution (the window
-follows it), the menus' sounds and more. **Turn off** (Up from Game Card)
-shuts the console down cleanly and closes the window; closing the window
-yourself is pulling the plug.
+- **Game Card**: the slot. It is empty for now: "Slot empty".
+- **My games**: "There are no games on the console. Your games live on their
+  Game Cards."
+- **Settings**: the language (English or Spanish), the resolution (the
+  window follows it), the menus' sounds, MUN Shape and more.
+- **Turn off**: shuts the console down cleanly and closes the window; closing
+  the window yourself is pulling the plug.
 
-## 5. Continue later
+The line at the top says which card is in, the network (*Offline*: the
+console needs none) and the time.
+
+## 5. Insert a Game Card and play
+
+With Home on screen, from a second terminal in the same folder:
+
+```sh
+./mun dev vm play card-attach collect
+```
+
+That puts `.local/gamecards/collect.img` in the console's slot, as a hand
+would. The console reads the card and checks it, and Game Card shows MUN
+Collect, its panel saying the card is ready. **Enter, Enter** is Play.
+
+In MUN Collect the arrows move the square, **S** saves on the card
+("GUARDADO EN LA GAME CARD"; the game's own texts are Spanish) and **Esc**
+ends the game. The console comes back with "Session ended": **Enter** for
+OK.
+
+## 6. Eject it safely, and continue later
+
+On the Game Card panel choose **Eject safely**: the console finishes with the
+card and releases it ("You can remove the Game Card"), and the window takes
+it out of the slot at once: Game Card is empty again. Then **Turn off**: Up
+from Game Card, Enter, Enter.
+
+Later, the card goes in as the console starts:
 
 ```sh
 ./mun play --card collect
@@ -117,8 +150,32 @@ Enter, Enter: MUN Collect says "PARTIDA RECUPERADA" and the square is where
 you saved it. The save is on the card (`.local/gamecards/collect.img`), not
 in the console: another console, or another build, continues from it.
 
-To eject a card while the console runs, choose **Eject safely** on its
-panel: the console finishes with it and the card leaves the slot.
+When you are done, **Esc** ends the game, **Enter** is OK on "Session
+ended", and **Turn off** (Up from Game Card, Enter, Enter) closes the
+console. The next section starts a console of its own.
+
+## 7. See MUN Shape
+
+While its card is in, a game can dress the console in its own identity:
+colours, materials, the card object, a world behind the menus, transitions
+and sounds, from a package of resources on the card that the console draws
+with its own code. With e2fsprogs (section 1), one command shows a sample:
+
+```sh
+./mun dev shape examples/shape/sea --window
+```
+
+A console of its own (the guest `shape`, made the first time from your
+latest image) opens in a window with a disposable card: your MUN Collect
+dressed in the `sea` sample, put in once Home is up so you see it arrive.
+Play it, come back, eject it; *Turn off* ends the preview. Your own cards
+are only read. The other sample is `examples/shape/paper`.
+
+*Settings* › *Picture and sound* › *MUN Shape* (Full, Colours only, Off)
+and *Reduce motion* change how much of it you see.
+[See MUN Shape in action](guides/see-shape-in-action.md) shows how such a
+card is made and what to look at; [dress the console in your
+game](guides/shape-your-game.md) makes one of your own.
 
 ## Where things are
 
@@ -142,6 +199,9 @@ bound to the image it was created from.
   MSYS2's ARM64 build, above.
 - The console's own logs: `./mun dev vm play shell-log`, `launchd-log`,
   `cardd-log`; its serial console: `.local/mun/guests/play/console.log`.
+- Something unclear or wrong in these steps: say so in an
+  [issue](https://github.com/Play-MUN/mun-os/issues/new/choose); that helps
+  too.
 
 ## Build the image yourself
 

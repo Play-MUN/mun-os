@@ -6,15 +6,15 @@
       "translation": "CONTRIBUTING.es.md",
       "source": "CONTRIBUTING.md",
       "language": "es",
-      "reviewed": "2026-10-05",
-      "source_sha256": "b906ef00fe42a8793e08c239094b8e547aaffbbc38abd64b4357f38e334f5a96"
+      "reviewed": "2026-10-07",
+      "source_sha256": "36c6eced8104a47687b54b3e89a4b9e6196ba71ee075e50810555b4c1c5f89d4"
     },
     {
       "translation": "README.es.md",
       "source": "README.md",
       "language": "es",
       "reviewed": "2026-10-06",
-      "source_sha256": "019049461ae77fa254f3ec13592c49bea59518860c060625ebfcc84510c725b1"
+      "source_sha256": "88521e4ae5d3c10b8cc92e314d2d40313dd9b7a2c1f112a3821c25a8a3345ecf"
     },
     {
       "translation": "SECURITY.es.md",
@@ -35,14 +35,14 @@
       "source": "docs/compatibility.md",
       "language": "es",
       "reviewed": "2026-10-06",
-      "source_sha256": "40179de825c1c50ffa9475ef18ec3c6d9be0834fb67d2d45cda8e7712754bf7a"
+      "source_sha256": "117eb450d8ab36ca448af24397162e0ccc26efd1844435295768b012d5f40fd4"
     },
     {
       "translation": "docs/es/getting-started.md",
       "source": "docs/getting-started.md",
       "language": "es",
-      "reviewed": "2026-10-06",
-      "source_sha256": "72d4e6e4697eb163f9ec8ae6697766822bb6f437b66d0113426c6f446c1a451a"
+      "reviewed": "2026-10-07",
+      "source_sha256": "8fbff8e18efb60b4065f2836a860b0ab461e12cf10461f1ffb896262ab8e702a"
     },
     {
       "translation": "docs/es/glossary.md",

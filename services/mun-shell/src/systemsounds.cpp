@@ -8,6 +8,8 @@
 #include <alsa/asoundlib.h>
 
 #include <algorithm>
+#include <cmath>
+#include <limits>
 
 namespace {
 
@@ -179,10 +181,28 @@ void SystemSounds::play(const QString &name)
     }
     for (const SoundPtr &sound : m_sounds) {
         if (sound->name == name) {
+            {
+                std::lock_guard lock(m_progressMutex);
+                m_progress.erase(name);   // a new play starts from nothing heard
+            }
             queue(sound);
             return;
         }
     }
+}
+
+double SystemSounds::heard(const QString &name) const
+{
+    std::lock_guard lock(m_progressMutex);
+    const auto it = m_progress.find(name);
+    if (it == m_progress.end())
+        return std::numeric_limits<double>::quiet_NaN();
+    const Progress &progress = it->second;
+    const double since = std::chrono::duration<double>(std::chrono::steady_clock::now() - progress.at).count();
+    const double frames = std::min(double(progress.written), double(progress.heard) + since * kRate);
+    if (progress.done && frames >= double(progress.written))
+        return std::numeric_limits<double>::quiet_NaN();
+    return frames / kRate;
 }
 
 void SystemSounds::stop(const QString &name)
@@ -206,6 +226,12 @@ void SystemSounds::run()
     std::vector<int> mix(size_t(kPeriodFrames * kChannels));
     std::vector<qint16> period(mix.size());
     std::vector<QString> begun;  // sounds whose first samples this period holds
+    struct Moved {
+        QString name;
+        qint64 written;
+        bool done;
+    };
+    std::vector<Moved> moved;    // how far each sound in this period has gone
     std::chrono::steady_clock::time_point retryAt{}, lastSound{};
     bool reported = false;
     int failures = 0;  // writes failed in a row
@@ -284,6 +310,7 @@ void SystemSounds::run()
         // failed to resume from (EIO), where a fresh device plays.
         std::fill(mix.begin(), mix.end(), 0);
         begun.clear();
+        moved.clear();
         for (Voice &voice : voices) {
             const std::vector<qint16> &samples = voice.sound->samples;
             if (voice.sample == 0)
@@ -298,8 +325,10 @@ void SystemSounds::run()
                 mix[i] += value;
             }
             voice.sample += count;
+            const qint64 reached = qint64(voice.sample / kChannels);
             if (voice.fade > 0 && (voice.fade -= count / kChannels) == 0)
                 voice.sample = samples.size();  // faded out
+            moved.push_back({voice.sound->name, reached, voice.sample >= samples.size()});
         }
         voices.erase(std::remove_if(voices.begin(), voices.end(),
                                     [](const Voice &voice) { return voice.sample >= voice.sound->samples.size(); }),
@@ -330,6 +359,16 @@ void SystemSounds::run()
         if (left == 0) {
             failures = 0;
             reported = false;
+            if (!moved.empty()) {
+                // What the device still holds is not heard yet.
+                snd_pcm_sframes_t held = 0;
+                if (snd_pcm_delay(pcm, &held) < 0 || held < 0)
+                    held = snd_pcm_sframes_t(qint64(kLatencyMicroseconds) * kRate / 1000000);
+                const auto now = std::chrono::steady_clock::now();
+                std::lock_guard lock(m_progressMutex);
+                for (const Moved &m : moved)
+                    m_progress[m.name] = {m.written, m.written - qint64(held), now, m.done};
+            }
             for (const QString &name : begun)
                 QMetaObject::invokeMethod(this, [this, name] { emit started(name); }, Qt::QueuedConnection);
         }

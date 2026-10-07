@@ -15,22 +15,22 @@ con una imagen descargada, hacer Game Cards y construir una imagen.
 | Ordenador | Procesador de la consola | Sin pantalla (descarga, arranque, tarjeta, juego, apagado) | Ventana, teclado, sonido |
 | --- | --- | --- | --- |
 | macOS 27, Apple Silicon | Virtualizado (HVF) | Comprobado en un Mac (v0.1.0-dev.3) | Comprobado en un Mac (v0.1.0-dev.3; Cocoa, CoreAudio) |
-| macOS 15, ARM64 (la máquina virtual de GitHub) | Emulado: no hay HVF dentro de una VM | Comprobado en CI | Sin probar |
-| Linux x86_64, Ubuntu 24.04 | Emulado | Comprobado en CI y en una máquina virtual | Sin probar (GTK o SDL) |
-| Linux ARM64, Ubuntu 24.04 | Emulado (sin `/dev/kvm` en ninguno de los dos) | Comprobado en CI y en una máquina virtual | Sin probar |
+| macOS 15, ARM64 (la máquina virtual de GitHub) | Emulado: no hay HVF dentro de una VM | Comprobado en CI (v0.1.0-dev.3) | Sin probar |
+| Linux x86_64, Ubuntu 24.04 | Emulado | Comprobado en CI (v0.1.0-dev.3) y en una máquina virtual (v0.1.0-dev.2) | Sin probar (GTK o SDL) |
+| Linux ARM64, Ubuntu 24.04 | Emulado (sin `/dev/kvm` en ninguno de los dos) | Comprobado en CI (v0.1.0-dev.3) y en una máquina virtual (v0.1.0-dev.2) | Sin probar |
 | Linux ARM64 con KVM | Virtualizado (KVM) | Sin probar | Sin probar |
-| Windows Server 2025, x86_64 | Emulado, QEMU para Windows | Comprobado en CI | Sin probar |
-| Windows 11, ARM64 | Emulado, el QEMU ARM64 de MSYS2 | Comprobado en CI | Sin probar |
+| Windows Server 2025, x86_64 | Emulado, QEMU para Windows | Comprobado en CI (v0.1.0-dev.3) | Sin probar |
+| Windows 11, ARM64 | Emulado, el QEMU ARM64 de MSYS2 | Comprobado en CI (v0.1.0-dev.3) | Sin probar |
 
 «Comprobado en CI» es el flujo de trabajo Hosts del repositorio
 (`.github/workflows/hosts.yml`) en las máquinas virtuales de GitHub:
 descarga una versión preliminar como lo haría un jugador, arranca la consola,
 inserta MUN Collect, lo juega y sale, retira la tarjeta y apaga. Se ejecuta
 sobre cada versión preliminar cuando se publica, y las notas de esa versión
-dan el resultado: «Comprobado en CI», arriba, es de la v0.1.0-dev.2, y la
-v0.1.0-dev.3 está pendiente ahí hasta su propia ejecución. Dice que las
-herramientas y la imagen funcionan en ese sistema; no mide la velocidad, y no
-se ha probado ningún ordenador físico con Linux o Windows. Las consolas
+dan el resultado: la v0.1.0-dev.3 pasó en los cinco
+([su ejecución](https://github.com/Play-MUN/mun-os/actions/runs/37493429263)). Dice que las herramientas y la imagen funcionan en
+ese sistema; no mide la velocidad, y no se ha probado ningún ordenador físico
+con Linux o Windows. Las consolas
 emuladas son varias veces más lentas que las virtualizadas.
 
 Dentro de la consola, los juegos arrancan en la resolución de la consola si

@@ -411,6 +411,26 @@ class ImageTests(unittest.TestCase):
                            "the two trees must be staged in different seconds")
         self.assertEqual(image.sha256_file(first), image.sha256_file(second))
 
+    def test_a_debugfs_complaint_fails_the_build_and_leaves_no_image(self):
+        # debugfs exits 0 when one of its requests fails; what it prints on
+        # stderr besides its version line is the only sign.
+        tmp = Path(tempfile.mkdtemp(prefix="cardimg-"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        fake = tmp / "debugfs"
+        fake.write_text('#!/bin/sh\necho "debugfs 1.47.0 (5-Feb-2023)" >&2\n'
+                        'echo "<13>: File not found by ext2_lookup" >&2\n')
+        fake.chmod(0o755)
+        staging = tmp / "stage"
+        staging.mkdir()
+        image.populate(staging, "valid")
+        real = image.find_tool
+        with unittest.mock.patch.object(image, "find_tool", lambda name: str(fake) if name == "debugfs" else real(name)):
+            with self.assertRaises(CardError) as ctx:
+                image.create_image(tmp / "x.img", staging, 8)
+        self.assertEqual(ctx.exception.code, "debugfs_failed")
+        self.assertIn("File not found", ctx.exception.detail)
+        self.assertEqual(sorted(path.name for path in tmp.iterdir()), ["debugfs", "stage"])
+
     def test_non_ext4_and_recovery_flag_are_rejected(self):
         tmp = Path(tempfile.mkdtemp(prefix="cardimg-"))
         self.addCleanup(shutil.rmtree, tmp, True)

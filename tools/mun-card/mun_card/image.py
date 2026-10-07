@@ -70,8 +70,9 @@ def create_image(destination: Path, staging: Path, size_mib: int = DEFAULT_SIZE_
     partial = destination.with_suffix(destination.suffix + ".part")
     if partial.exists():
         partial.unlink()
-    # Deterministic-enough for a lab: fixed uuid/hash seed and epoch make two
-    # builds of the same staging tree byte-identical except for timestamps.
+    # A fixed uuid, hash seed and epoch, and the pinned times of the staging
+    # tree, make two builds of the same tree with the same e2fsprogs
+    # byte-identical, whatever second each one runs in.
     env = dict(os.environ, E2FSPROGS_FAKE_TIME=str(FIXED_EPOCH), SOURCE_DATE_EPOCH=str(FIXED_EPOCH))
     cmd = [mke2fs, "-q", "-F", "-t", "ext4", "-L", label[:16], "-d", str(staging),
            "-E", "root_owner=0:0,hash_seed=6d756e63-6172-6430-8000-000000000001",
@@ -81,6 +82,11 @@ def create_image(destination: Path, staging: Path, size_mib: int = DEFAULT_SIZE_
         if partial.exists():
             partial.unlink()
         raise CardError("mke2fs_failed", "mke2fs no pudo crear la imagen", (result.stderr or result.stdout).strip())
+    try:
+        _pin_ctimes(partial, env)
+    except CardError:
+        partial.unlink()
+        raise
     partial.replace(destination)
     return {"tool": mke2fs, "version": tool_version(mke2fs), "sha256": sha256_file(destination)}
 
@@ -95,6 +101,51 @@ def _normalise_times(staging: Path) -> None:
             os.utime(path, (FIXED_EPOCH, FIXED_EPOCH), follow_symlinks=False)
         except (NotImplementedError, OSError):
             os.utime(path, (FIXED_EPOCH, FIXED_EPOCH))
+
+
+_DEBUGFS_BANNER = re.compile(r"^debugfs \d+\.\d+")
+
+
+def _pin_ctimes(image_path: Path, env: Dict[str, str]) -> None:
+    """Give every inode `mke2fs -d` populated the ctime FIXED_EPOCH.
+
+    mke2fs before 1.47.1 (Ubuntu 24.04 ships 1.47.0) copies each staged
+    file's ctime into its inode as it is. _normalise_times pins atime and
+    mtime, but a ctime is the moment the file last changed and no call sets
+    it, so two builds staged in different seconds differed in those inodes
+    and their checksums. Later versions clamp it to SOURCE_DATE_EPOCH; for
+    them this writes the value already there and the image does not change.
+
+    The inodes are the allocated ones from the first non-reserved inode on,
+    read from the inode bitmap, so no file name is parsed. debugfs reports a
+    failed request on stderr and still exits 0, so anything there besides
+    its version line is a failure.
+    """
+    report = subprocess.run([find_tool("dumpe2fs"), str(image_path)], capture_output=True, text=True,
+                            check=False, env=env)
+    count = first = None
+    free = set()
+    for line in report.stdout.splitlines():
+        key, _, value = line.partition(":")
+        if key == "Inode count":
+            count = int(value)
+        elif key == "First inode":
+            first = int(value)
+        elif key.startswith(" ") and key.strip() == "Free inodes":
+            # Per group: "21-2048", "12, 15-20" or nothing.
+            for span in filter(None, (part.strip() for part in value.split(","))):
+                low, _, high = span.partition("-")
+                free.update(range(int(low), int(high or low) + 1))
+    if report.returncode != 0 or count is None or first is None:
+        raise CardError("dumpe2fs_failed", "dumpe2fs no pudo leer la imagen nueva", report.stderr.strip())
+    requests = "".join(f"set_inode_field <{inode}> ctime @{FIXED_EPOCH}\n"
+                       for inode in range(first, count + 1) if inode not in free)
+    result = subprocess.run([find_tool("debugfs"), "-w", "-f", "-", str(image_path)], input=requests,
+                            capture_output=True, text=True, check=False, env=env)
+    problems = [line for line in result.stderr.splitlines() if line.strip() and not _DEBUGFS_BANNER.match(line)]
+    if result.returncode != 0 or problems:
+        raise CardError("debugfs_failed", "debugfs no pudo fijar las fechas de la imagen",
+                        "\n".join(problems) or result.stderr.strip())
 
 
 def sha256_file(path: Path) -> str:

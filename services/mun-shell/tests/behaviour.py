@@ -40,6 +40,13 @@ come from CardClient. The cases:
   measured (wait4) against the engine's estimate at 1080p and 1440p, for
   worlds that keep every limit but scale large or decode larger, and a
   sample stepped down to still; how the extreme ones look.
+- boot: the start-up as the first start of a boot plays it (boot.qml), the
+  shell's own Main.qml against stand-ins for the card service and the
+  launcher: with both answering at once, "A Skip" shows and A ends it while
+  another key does nothing; with them answering late, nothing skips it, the
+  LED waits for them once the picture has faded and Home follows them; with
+  neither, Home comes after its 20 s; with the interface sounds off its
+  clock runs from the start.
 - home: the shell's own Main.qml (home.qml) against stand-ins for the card
   service and the launcher: an arrival, dialogs, a return, removal, Eject
   safely confirmed and refused, another card, the player's choices, a
@@ -1345,11 +1352,70 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
     whole_when_dressed("home-dialog-closed", out)
 
 
+def boot_cases(shell: Shell, checks: Checks):
+    """The start-up as the first start of a boot plays it (boot.qml)."""
+    def run(name, ready_at=None, steps=(), end=16000, settings=""):
+        cardd = launchd = None
+        if ready_at is not None:
+            cardd = Service(shell.work / f"{name}.sock", [[(ready_at, snapshot())]])
+            launchd = Service(shell.work / f"{name}-launch.sock", [[(ready_at, {"type": "snapshot", "state": "idle"})]])
+        try:
+            output = shell.run(name, "boot.qml", {"steps": list(steps) + [{"at": end, "quit": True}]},
+                               socket_path=cardd.path if cardd else None, launcher=launchd.path if launchd else None,
+                               settings=settings, timeout=end / 1000 + 60)
+        finally:
+            for service in (cardd, launchd):
+                if service:
+                    service.close()
+        return lines(output, "BOOT"), lines(output, "KEY")
+
+    def first(states, **match):
+        return next((s for s in states if all(s[k] == v for k, v in match.items())), None)
+
+    # Both services answer at once: the hint shows; Down does nothing, A ends it.
+    states, keys = run("boot-ready", ready_at=0, steps=[{"at": 2000, "key": "Down"}, {"at": 3000, "key": "A"}], end=5000)
+    hinted = first(states, hint=1)
+    checks.expect("boot-ready", "the system ready, the Skip hint shows before any key",
+                  hinted is not None and hinted["at"] < 2000 and hinted["canSkip"], hinted)
+    checks.expect("boot-ready", "another key (Down) does nothing: the start-up plays on",
+                  all(s["playing"] and not s["powered"] for s in states if 2000 <= s["at"] < 3000), keys)
+    home = first(states, powered=True)
+    checks.expect("boot-ready", "A skips it: Home within 0.7 s, the layer leaving",
+                  home is not None and 3000 <= home["at"] < 3700 and not home["playing"] and not home["shown"], home)
+    played = [s["t"] for s in states if s["at"] < 3000 and s["playing"]]
+    checks.expect("boot-ready", "its clock ran before the skip", played and max(played) > 1.0, played[-3:])
+
+    # The services answer at 15 s: nothing skips it before; the picture
+    # fades (11.75 s of the sound) and the LED waits for them; Home follows.
+    states, keys = run("boot-late", ready_at=15.0, steps=[{"at": 5000, "key": "A"}, {"at": 14000, "key": "A"}], end=17000)
+    checks.expect("boot-late", "before the system is ready no Skip shows and A does nothing",
+                  all(not s["canSkip"] and s["hint"] == 0 for s in states if s["at"] < 15000)
+                  and all(s["playing"] for s in states if 5000 <= s["at"] < 14900), keys)
+    waiting = first(states, waiting=True)
+    checks.expect("boot-late", "once the picture has faded, the LED waits for the system",
+                  waiting is not None and waiting["t"] >= 11.7 and waiting["playing"] and not waiting["powered"], waiting)
+    home = first(states, powered=True)
+    checks.expect("boot-late", "Home follows the system's answer",
+                  home is not None and 15000 <= home["at"] < 16500, home)
+
+    # Neither answers: Home after the start-up's 20 s, whatever they do.
+    states, _ = run("boot-never", steps=[], end=23000)
+    home = first(states, powered=True)
+    checks.expect("boot-never", "no Skip ever shows", all(not s["canSkip"] and s["hint"] == 0 for s in states), "")
+    checks.expect("boot-never", "Home after 20 s without the system", home is not None and 20000 <= home["at"] < 21500, home)
+
+    # The interface sounds off: the picture's clock runs from the start.
+    states, _ = run("boot-silent", ready_at=0, steps=[], end=3000, settings="[audio]\nsystem-sounds=off\n")
+    early = next((s for s in states if s["at"] >= 1300), None)
+    checks.expect("boot-silent", "without the sound, its clock runs from the start (no wait for a device)",
+                  early is not None and early["t"] >= 0.8, early)
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("binary", type=Path)
     parser.add_argument("--work", type=Path, help="keep the scenes, logs, grabs and report here")
-    parser.add_argument("--only", choices=("card", "cue", "surfaces", "presence", "world", "memory", "home"), action="append")
+    parser.add_argument("--only", choices=("card", "cue", "surfaces", "presence", "world", "memory", "boot", "home"), action="append")
     args = parser.parse_args(argv)
     binary = args.binary.resolve()
     if not os.access(binary, os.X_OK):
@@ -1364,7 +1430,7 @@ def main(argv=None) -> int:
     exports.mkdir()
     packages.mkdir()
     shell, checks, report = Shell(binary, work), Checks(), {}
-    only = set(args.only or ("card", "cue", "surfaces", "presence", "world", "memory", "home"))
+    only = set(args.only or ("card", "cue", "surfaces", "presence", "world", "memory", "boot", "home"))
     try:
         if "card" in only:
             print("MUN Shell behaviour: the card object")
@@ -1384,6 +1450,9 @@ def main(argv=None) -> int:
         if "memory" in only:
             print("MUN Shell behaviour: the world's memory at 1080p and 1440p")
             memory_cases(shell, checks, exports, packages, report)
+        if "boot" in only:
+            print("MUN Shell behaviour: the start-up, as a boot plays it")
+            boot_cases(shell, checks)
         if "home" in only:
             print("MUN Shell behaviour: Home, as a player meets it")
             home_cases(shell, checks, exports, packages, report)

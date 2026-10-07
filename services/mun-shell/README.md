@@ -32,10 +32,11 @@ display, and a game drawing on `/dev/fb0` has it (see *Display path*).
 | `src/cssbox.*`, `src/blur.*` | Surfaces with CSS semantics (radii, gradients at any angle, outer and inset box shadows) and the blur they and the glows use |
 | `src/projectedview.*` | Shows an item through a perspective transform, projected once per change |
 | `src/sceneclock.*` | One frame clock for the painted layers |
+| `src/bootintro.*`, `src/bootintroshapes.h`, `images/boot-*.png` | The start-up's picture, part by part, as a function of the sound's time; its shapes (the MUN letters, the moon's arc, the LED) and its two images of the console's lid |
 | `qml/Main.qml` | The scene, the navigation, the actions and the key handling |
 | `qml/Panels.qml` | What each entry's panel and each dialog says, from the real state |
 | `qml/Theme.qml`, `qml/I18n.qml` | Design tokens and motion; the two languages |
-| `qml/ArcMenu.qml`, `ArcNode`, `DetailPanel`, `OptionRow`, `StatusBar`, `MoonPhase`, `ModalLayer`, `BootLayer`, `UiText`, `MarkText`, `Shadow`, `Material`, `Logo.js`, `PlayMun.js` | Components: the arcs and their entries, the panel and its options, the status line, dialogs, the start-up and power-off screen, text and shadows; the MUN and Play MUN logos |
+| `qml/ArcMenu.qml`, `ArcNode`, `DetailPanel`, `OptionRow`, `StatusBar`, `MoonPhase`, `ModalLayer`, `BootLayer`, `UiText`, `MarkText`, `Shadow`, `Material`, `Logo.js` | Components: the arcs and their entries, the panel and its options, the status line, dialogs, the start-up and power-off screen, text and shadows; the MUN logo |
 | `tests/behaviour.py`, `tests/scenes/` | Behaviour regressions run on the compiled binary, offscreen (*A Game Card's identity*) |
 | `fonts/` | Archivo and Michroma, compiled in, with their licences |
 | `sounds/` | The interface's sounds, compiled in: the menus' `move.wav`, `enter.wav`, `back.wav` and the start-up's `startup.wav` |
@@ -83,19 +84,26 @@ the keys (A Select, B Back). The card's crescent on the Game Card object
 (the logo's moon) fills while a card is in the slot. The ambient light at the orb follows the local hour:
 cold at night, pale at dawn, grey-white by day, copper at dusk.
 
-Motion: the start-up plays once per boot, over the start-up sound, in two
-acts. The house: an ivory dawn, and on it PLAY, then MUN, then the copper
-stroke under them, each with one of the sound's three notes (2.30, 3.24 and
-3.86 s into it), and a sheen across the letters. The console: the night,
-the MUN letters written and filled, the arc drawing itself from its tip and
-its light rising, each on one of the sound's later cues (6.15, 6.70 and
-7.25 s), moon dust rising. Each logo stays a while before the next. From
-10.3 s, once the
-card service and the launcher have answered (20 s after the start at the
-latest), the screen fades into Home; any key skips to the console's logo.
-The picture keeps time with the sound: its clock starts when the sound's
-first samples reach the device, less the 40 ms the device holds ahead; with
-System sounds off it plays silent. Moving to another entry: the chosen bar
+Motion: the start-up plays once per boot, over the start-up sound (13.05
+s): the console waking in the dark, under the lines and vignette of a
+tube. At 0.3 s a pim lights the amber LED, a point that breathes once and
+grows into the console's long oval, two sweeps of light running along it;
+at 3.45 s a hit shakes the screen and flashes, a faint light behind the
+console shows only the top of its lid, and a gleam runs along the MUN
+engraved on its dome; at 6.65 s MUN arrives higher up with a ding and a
+discharge from the LED that makes its strokes tremble, a warm glow rising;
+from 7.85 s the moon comes out of an eclipse, copper, then silver as the
+shadow withdraws; from 10.05 s the LED melts away in silence and the logo
+fades while the sound rings on. The system loads meanwhile: once the card
+service and the launcher have answered, "A Skip" shows at the bottom right
+and A (or Enter) ends the start-up; until then no key does anything. When
+the picture has faded (11.75 s), Home comes in if they have answered, while
+the sound rings on; if not, the LED waits, breathing, until they do, or 20
+s after the start whatever they do. The picture keeps time with the sound:
+on every frame its clock is what has been heard of it, the samples written
+to the device less what the device still holds; with System sounds off, or
+no device, it plays silent on its own clock. *Reduce motion* takes out the
+shake, the tremor and the flicker; every time stays. Moving to another entry: the chosen bar
 turns light at once while its copper edge, glow and text colour settle in
 0.3 s and it slides 4 px out; the new object loads in 0.9 s, a radar-like
 sweep drawing its glowing wireframe with a copper line and its face
@@ -419,14 +427,14 @@ console: games and saves live on their Game Cards.
 Moving the focus or changing a choice plays `move`, going in or running an
 action `enter`, going back or closing a dialog `back`: only when a key or
 the pointer changed something, never for the console's own changes (a card
-arriving, a result shown). The start-up sound, `startup` (10.1 s), plays
+arriving, a result shown). The start-up sound, `startup` (13.05 s), plays
 once per boot with the start-up (*Motion*), at the level it was mastered at
-rather than the menus' 3/4; a key that skips the start-up fades it out in
-0.1 s. They are MUN's own, compiled in from `sounds/`, all in one chosen
+rather than the menus' 3/4; skipping the start-up fades it out in 0.1 s. They are MUN's own, compiled in from `sounds/`, all in one chosen
 format: PCM, 16-bit, 48 kHz, stereo, only the format and the samples (no
 metadata chunks), the menus' under a second each and the start-up's under
-twelve (`tests/test_os.py` checks all of that); the start-up's was made
-from its 96 kHz, 24-bit master, resampled and dithered to 16 bits. The shell asks ALSA for that format and lets it convert
+13.1 (`tests/test_os.py` checks all of that); the start-up's was made from
+its 96 kHz, 24-bit master, resampled with a linear-phase filter (no sample
+moves in time) and dithered to 16 bits. The shell asks ALSA for that format and lets it convert
 when a device plays another; it has been heard only through the virtual
 console's sound device, and physical outputs are tested on the chosen board.
 

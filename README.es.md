@@ -115,15 +115,15 @@ lenta.
 
 | Tu ordenador | El procesador de la consola | Comprobado |
 | --- | --- | --- |
-| macOS, Apple Silicon | Virtualizado (HVF) | La v0.1.0-dev.3 en un Mac (macOS 27), con ventana, teclado y sonido; la v0.1.0-dev.2 en CI en macOS 15, sin pantalla y emulado (no hay HVF dentro de una VM) |
-| Linux, x86_64 o ARM64 | Emulado; KVM en ARM64 aún sin probar | La v0.1.0-dev.2 en CI y en máquinas virtuales Ubuntu 24.04, sin pantalla |
-| Windows, x86_64 o ARM64 | Emulado | La v0.1.0-dev.2 en CI (Windows Server 2025; Windows 11 ARM64), sin pantalla |
+| macOS, Apple Silicon | Virtualizado (HVF) | La v0.1.0-dev.3 en un Mac (macOS 27), con ventana, teclado y sonido, y en CI en macOS 15, sin pantalla y emulado (no hay HVF dentro de una VM) |
+| Linux, x86_64 o ARM64 | Emulado; KVM en ARM64 aún sin probar | La v0.1.0-dev.3 en CI, sin pantalla; la v0.1.0-dev.2, además, en máquinas virtuales Ubuntu 24.04 |
+| Windows, x86_64 o ARM64 | Emulado | La v0.1.0-dev.3 en CI (Windows Server 2025; Windows 11 ARM64), sin pantalla |
 
 «En CI» es el flujo de trabajo Hosts: descargar una versión preliminar,
 arrancar la consola, jugar su tarjeta y apagar, en las máquinas virtuales de
 GitHub, sin ventana. Comprueba cada versión preliminar cuando se publica, y
-las notas de esa versión dan el resultado: la v0.1.0-dev.3 está pendiente ahí
-hasta su propia ejecución. Todavía no se ha probado en ningún ordenador con
+las notas de esa versión dan el resultado: la v0.1.0-dev.3 pasó en los cinco
+([su ejecución](https://github.com/Play-MUN/mun-os/actions/runs/37493429263)). Todavía no se ha probado en ningún ordenador con
 Linux o Windows, ni con ventana, teclado y sonido fuera de macOS.
 
 ## Principios

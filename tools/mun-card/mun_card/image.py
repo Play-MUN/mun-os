@@ -105,6 +105,42 @@ def _normalise_times(staging: Path) -> None:
 
 _DEBUGFS_BANNER = re.compile(r"^debugfs \d+\.\d+")
 
+# dumpe2fs prints the superblock summary in English whatever the language,
+# but translates each group's rows ("  Free inodes:" becomes "  Nodos-i
+# libres:" in Spanish). Its output is parsed only in the C locale.
+UNTRANSLATED = {"LC_ALL": "C", "LANGUAGE": "C"}
+
+
+def allocated_inodes(report: str) -> List[int]:
+    """The allocated inodes from the first non-reserved one on, from what
+    `dumpe2fs` prints in the C locale.
+
+    The free inodes listed group by group must add up to the superblock's
+    free inode count. A report that does not (rows in another language or
+    format, a group missing) is refused: read as "none free", it would make
+    every free inode a target.
+    """
+    summary: Dict[str, str] = {}
+    free = set()
+    try:
+        for line in report.splitlines():
+            key, _, value = line.partition(":")
+            if not key.startswith(" "):
+                summary.setdefault(key, value.strip())
+            elif key.strip() == "Free inodes":
+                # Per group: "21-2048", "12, 15-20" or nothing.
+                for span in filter(None, (part.strip() for part in value.split(","))):
+                    low, _, high = span.partition("-")
+                    free.update(range(int(low), int(high or low) + 1))
+        count, first = int(summary["Inode count"]), int(summary["First inode"])
+        free_count = int(summary["Free inodes"])
+    except (KeyError, ValueError) as exc:
+        raise CardError("dumpe2fs_failed", "No se reconoció el mapa de inodos de la imagen nueva", repr(exc))
+    if len(free) != free_count:
+        raise CardError("dumpe2fs_failed", "No se reconoció el mapa de inodos de la imagen nueva",
+                        f"los grupos listan {len(free)} inodos libres y el superbloque, {free_count}")
+    return [inode for inode in range(first, count + 1) if inode not in free]
+
 
 def _pin_ctimes(image_path: Path, env: Dict[str, str]) -> None:
     """Give every inode `mke2fs -d` populated the ctime FIXED_EPOCH.
@@ -119,27 +155,15 @@ def _pin_ctimes(image_path: Path, env: Dict[str, str]) -> None:
     The inodes are the allocated ones from the first non-reserved inode on,
     read from the inode bitmap, so no file name is parsed. debugfs reports a
     failed request on stderr and still exits 0, so anything there besides
-    its version line is a failure.
+    its version line is a failure. Both tools run in the C locale.
     """
+    env = dict(env, **UNTRANSLATED)
     report = subprocess.run([find_tool("dumpe2fs"), str(image_path)], capture_output=True, text=True,
                             check=False, env=env)
-    count = first = None
-    free = set()
-    for line in report.stdout.splitlines():
-        key, _, value = line.partition(":")
-        if key == "Inode count":
-            count = int(value)
-        elif key == "First inode":
-            first = int(value)
-        elif key.startswith(" ") and key.strip() == "Free inodes":
-            # Per group: "21-2048", "12, 15-20" or nothing.
-            for span in filter(None, (part.strip() for part in value.split(","))):
-                low, _, high = span.partition("-")
-                free.update(range(int(low), int(high or low) + 1))
-    if report.returncode != 0 or count is None or first is None:
+    if report.returncode != 0:
         raise CardError("dumpe2fs_failed", "dumpe2fs no pudo leer la imagen nueva", report.stderr.strip())
     requests = "".join(f"set_inode_field <{inode}> ctime @{FIXED_EPOCH}\n"
-                       for inode in range(first, count + 1) if inode not in free)
+                       for inode in allocated_inodes(report.stdout))
     result = subprocess.run([find_tool("debugfs"), "-w", "-f", "-", str(image_path)], input=requests,
                             capture_output=True, text=True, check=False, env=env)
     problems = [line for line in result.stderr.splitlines() if line.strip() and not _DEBUGFS_BANNER.match(line)]

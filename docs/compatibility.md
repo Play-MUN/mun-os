@@ -14,22 +14,22 @@ QEMU 8.2 or later with its ARM64 UEFI firmware ([getting started](getting-starte
 | Computer | Console's processor | Headless (download, start, card, game, power-off) | Window, keyboard, sound |
 | --- | --- | --- | --- |
 | macOS 27, Apple Silicon | Virtualized (HVF) | Checked on a Mac (v0.1.0-dev.3) | Checked on a Mac (v0.1.0-dev.3; Cocoa, CoreAudio) |
-| macOS 15, ARM64 (GitHub's virtual machine) | Emulated: no HVF inside a VM | Checked in CI | Not tried |
-| Linux x86_64, Ubuntu 24.04 | Emulated | Checked in CI and in a virtual machine | Not tried (GTK or SDL) |
-| Linux ARM64, Ubuntu 24.04 | Emulated (no `/dev/kvm` in either) | Checked in CI and in a virtual machine | Not tried |
+| macOS 15, ARM64 (GitHub's virtual machine) | Emulated: no HVF inside a VM | Checked in CI (v0.1.0-dev.3) | Not tried |
+| Linux x86_64, Ubuntu 24.04 | Emulated | Checked in CI (v0.1.0-dev.3) and in a virtual machine (v0.1.0-dev.2) | Not tried (GTK or SDL) |
+| Linux ARM64, Ubuntu 24.04 | Emulated (no `/dev/kvm` in either) | Checked in CI (v0.1.0-dev.3) and in a virtual machine (v0.1.0-dev.2) | Not tried |
 | Linux ARM64 with KVM | Virtualized (KVM) | Not tried | Not tried |
-| Windows Server 2025, x86_64 | Emulated, QEMU for Windows | Checked in CI | Not tried |
-| Windows 11, ARM64 | Emulated, MSYS2's ARM64 QEMU | Checked in CI | Not tried |
+| Windows Server 2025, x86_64 | Emulated, QEMU for Windows | Checked in CI (v0.1.0-dev.3) | Not tried |
+| Windows 11, ARM64 | Emulated, MSYS2's ARM64 QEMU | Checked in CI (v0.1.0-dev.3) | Not tried |
 
 "Checked in CI" is the repository's Hosts workflow
 (`.github/workflows/hosts.yml`) on GitHub's hosted virtual machines: it
 downloads a preview release as a player would, starts the console, inserts
 MUN Collect, plays and exits it, ejects the card and powers off. It runs on
 each preview once it is published, and that preview's release notes give
-the result: "Checked in CI" above is v0.1.0-dev.2's, and v0.1.0-dev.3 is
-pending there until its own run. It says the tools and the image work on
-that system; it does not measure speed, and no physical Linux or Windows
-computer has been tried. Emulated consoles are several times slower than
+the result: v0.1.0-dev.3 passed on all five
+([its run](https://github.com/Play-MUN/mun-os/actions/runs/37493429263)). It says the tools and the image work on that system; it
+does not measure speed, and no physical Linux or Windows computer has been
+tried. Emulated consoles are several times slower than
 virtualized ones.
 
 Inside the console, games start in the console's resolution when they use

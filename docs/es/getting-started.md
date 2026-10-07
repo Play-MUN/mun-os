@@ -164,6 +164,10 @@ Intro, Intro: MUN Collect dice «PARTIDA RECUPERADA» y el cuadrado está donde
 lo guardaste. La partida está en la tarjeta (`.local/gamecards/collect.img`),
 no en la consola: otra consola, u otra build, continúa desde ella.
 
+Cuando termines, **Esc** acaba el juego, **Intro** es *Aceptar* en *Sesión
+terminada* y **Apagar** (Arriba desde *Game Card*, Intro, Intro) cierra la
+consola. La sección siguiente arranca una consola propia.
+
 ## 7. Mira MUN Shape
 
 Mientras su tarjeta está dentro, un juego puede vestir la consola con su

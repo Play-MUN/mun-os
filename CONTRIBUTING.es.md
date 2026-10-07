@@ -32,11 +32,13 @@ o una pull request contra `dev`, como explica el resto de esta página:
   a todos los jugadores. Un idioma nuevo empieza como propuesta en una
   incidencia.
 - **Paquetes de MUN Shape y juegos de ejemplo.** Un paquete con tu propio
-  arte, comprobado con `./mun card shape check --report`, enseña lo que
+  arte, comprobado con `./mun card shape check DIR --report` (por ejemplo,
+  `./mun card shape check examples/shape/sea --report`), enseña lo que
   puede hacer MUN Shape; un juego de ejemplo enseña lo que puede llevar una
-  tarjeta. Todo tiene que ser tuyo para poder licenciarlo
-  ([derechos](#derechos-y-firma)): por eso los ejemplos de `examples/shape/`
-  se generan con código.
+  tarjeta. Aporta obra tuya, o material que tengas derecho a aportar con la
+  licencia del proyecto, y di de dónde viene lo que no sea tuyo
+  ([derechos](#derechos-y-firma)). Los ejemplos de `examples/shape/` son obra
+  propia de este repositorio, generada con código.
 - **Servicios, herramientas e integración de hardware.** El shell, el
   servicio de tarjetas, el lanzador, las herramientas de tarjetas y el
   laboratorio: la [arquitectura](docs/architecture.md) y los

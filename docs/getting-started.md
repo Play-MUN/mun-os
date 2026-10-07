@@ -150,6 +150,10 @@ Enter, Enter: MUN Collect says "PARTIDA RECUPERADA" and the square is where
 you saved it. The save is on the card (`.local/gamecards/collect.img`), not
 in the console: another console, or another build, continues from it.
 
+When you are done, **Esc** ends the game, **Enter** is OK on "Session
+ended", and **Turn off** (Up from Game Card, Enter, Enter) closes the
+console. The next section starts a console of its own.
+
 ## 7. See MUN Shape
 
 While its card is in, a game can dress the console in its own identity:

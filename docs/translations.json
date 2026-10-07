@@ -6,8 +6,8 @@
       "translation": "CONTRIBUTING.es.md",
       "source": "CONTRIBUTING.md",
       "language": "es",
-      "reviewed": "2026-10-06",
-      "source_sha256": "6f0115955d97b09ee865c1c4f5d4b3808d6a31daf89d46ce8e246d3a9afdfcec"
+      "reviewed": "2026-10-07",
+      "source_sha256": "36c6eced8104a47687b54b3e89a4b9e6196ba71ee075e50810555b4c1c5f89d4"
     },
     {
       "translation": "README.es.md",
@@ -41,8 +41,8 @@
       "translation": "docs/es/getting-started.md",
       "source": "docs/getting-started.md",
       "language": "es",
-      "reviewed": "2026-10-06",
-      "source_sha256": "822aae32063888275efea704c9a04af26c8f2d6f0bee128058c157dfa2e952fe"
+      "reviewed": "2026-10-07",
+      "source_sha256": "8fbff8e18efb60b4065f2836a860b0ab461e12cf10461f1ffb896262ab8e702a"
     },
     {
       "translation": "docs/es/glossary.md",

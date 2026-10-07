@@ -35,13 +35,17 @@ qreal sp(qreal t, qreal a, qreal b) { return cl((t - a) / (b - a)); }
 qreal io(qreal u) { return u < 0.5 ? 4 * u * u * u : 1 - std::pow(-2 * u + 2, 3) / 2; }
 qreal o3(qreal u) { return 1 - std::pow(1 - u, 3); }
 
-// Canvas <- view.
+// Canvas <- view. The design's view is placed so that the LED, the lid and
+// the U of MUN (x 850) stand on the canvas's vertical centre line, the moon
+// reaching out to the right as the logo draws it, and the finished picture
+// is centred: midway between the moon's top (y 109.66) and the LED's bottom
+// (777.9), y 443.78, is the canvas's middle. Still from start to end.
 QTransform viewTransform()
 {
     QTransform m;
-    m.translate(960 - 590, 540 - 900 * kView / 2);
+    m.translate(960, 540);
     m.scale(kView, kView);
-    m.translate(-176, 22);
+    m.translate(-850, -443.78);
     return m;
 }
 
@@ -529,21 +533,6 @@ QRectF BootIntro::area() const
         return (ledTransform() * view).mapRect(QRectF(-280, -150, 560, 300)).toAlignedRect();
     }
     return QRectF();
-}
-
-QPointF BootIntro::placement() const
-{
-    // In canvas pixels of the design's place: the LED's centre is at x 932.5
-    // (the view's x 850), so the axis moves 27.5 px right. The lid's visible
-    // top (y 666) and the LED's bottom (832) centre at 749: 209 px up while
-    // they are alone. The arc's top (274) and the LED's bottom centre at
-    // 553: 13 px up once the logo is there.
-    static const qreal axis = 960 - viewTransform().map(QPointF(850, 762.5)).x();
-    constexpr qreal alone = 540 - (666.3 + 832.0) / 2, logo = 540 - (274.3 + 832.0) / 2;
-    if (m_reduceMotion)
-        return QPointF(axis, logo);
-    const qreal glide = io(sp(m_t + kLead, 7.0, 8.4));
-    return QPointF(axis, alone + (logo - alone) * glide);
 }
 
 QPointF BootIntro::shake() const

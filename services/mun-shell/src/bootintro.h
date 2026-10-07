@@ -27,24 +27,20 @@
 // the dome; Mark, the letters and the moon; Led; Tube, the screen's lines and
 // vignette over everything. Between Screen and Tube the parts shake together
 // (`shake`), fade together at the end (`fade`), and a white flash covers
-// them (`flash`); the picture (all but Screen) is placed by `placement`:
-// QML applies those four, read from any part.
+// them (`flash`): QML applies those three, read from any part.
 //
-// The placement: the console, its LED and the U of MUN on the screen's
-// vertical centre line (the moon reaches out to the right, as the logo
-// draws it). While the lid and the LED are alone they are centred on the
-// screen; as MUN arrives (the ding) the whole picture eases down over 1.4 s
-// until the logo and the LED below it are centred: the LED born at the
-// centre settles under the logo.
+// The picture stands still from start to end: the console, its LED and the
+// U of MUN on the screen's vertical centre line (the moon reaches out to the
+// right, as the logo draws it), and the finished logo with the LED under it
+// centred on the screen.
 //
 // With `breath` at 0 or more, a Led part draws the LED waiting for the
 // system instead, at full length and as bright as `breath` (0 to 1) says.
-// `reduceMotion` takes out the screen's shake, the letters' tremor, the
-// flicker and the glide (the picture stays where the logo is centred); every
-// time stays.
+// `reduceMotion` takes out the screen's shake, the letters' tremor and the
+// flicker; every time stays.
 //
-// The design's units: an SVG view "176 -22 1414 900", 1180 px wide at the
-// centre of the 1920 x 1080 canvas; `area` and the item's geometry are in
+// The design's units: an SVG view "176 -22 1414 900", drawn 1180 px wide on
+// the 1920 x 1080 canvas; `area` and the item's geometry are in
 // canvas coordinates (the item's parent spans the canvas). Its random
 // tremor and flicker are drawn from t, so a given t always looks the same.
 // GUI thread only.
@@ -74,9 +70,6 @@ class BootIntro : public QQuickPaintedItem {
     // At t, for the layers QML moves: the screen's offset in canvas pixels,
     // the flash's opacity and the picture's opacity as it fades at the end.
     Q_PROPERTY(QPointF shake READ shake NOTIFY tChanged)
-    // Where the picture is, as an offset in canvas pixels from the design's
-    // own place.
-    Q_PROPERTY(QPointF placement READ placement NOTIFY tChanged)
     Q_PROPERTY(qreal flash READ flash NOTIFY tChanged)
     Q_PROPERTY(qreal fade READ fade NOTIFY tChanged)
     // When the picture has faded (the sound rings on), and the sound's end.
@@ -104,7 +97,6 @@ public:
     void setBreath(qreal breath);
     QRectF area() const;
     QPointF shake() const;
-    QPointF placement() const;
     qreal flash() const;
     qreal fade() const;
     qreal faded() const { return kFaded; }

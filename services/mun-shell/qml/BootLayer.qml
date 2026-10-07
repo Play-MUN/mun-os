@@ -163,9 +163,8 @@ Rectangle {
     Behavior on opacity { NumberAnimation { duration: 500; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.ease } }
 
     // The screen: its gradient and the picture on it shake together on the
-    // hit; the picture is placed (BootIntro's `placement`: centred, then
-    // gliding down as MUN arrives) and fades at the end. Parts paint over
-    // their own areas, in canvas coordinates.
+    // hit; the picture fades at the end. Parts paint over their own areas,
+    // in canvas coordinates.
     Item {
         id: screen
         width: Theme.canvasWidth
@@ -183,7 +182,6 @@ Rectangle {
             anchors.fill: parent
             opacity: background.fade
             visible: opacity > 0 && root.t >= 0
-            transform: Translate { x: background.placement.x; y: background.placement.y }
             Repeater {
                 model: [BootIntro.Silhouette, BootIntro.Engraving, BootIntro.Mark, BootIntro.Led]
                 BootIntro {
@@ -204,7 +202,6 @@ Rectangle {
             Behavior on opacity { NumberAnimation { duration: 600 } }
             breath: -1
             x: area.x; y: area.y; width: area.width; height: area.height
-            transform: Translate { x: background.placement.x; y: background.placement.y }
             SequentialAnimation on breath {
                 running: root.waiting
                 loops: Animation.Infinite

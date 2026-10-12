@@ -4,12 +4,12 @@ import MUN.Shell
 // A scene of tests/behaviour.py: the shell's own Main.qml, compiled in, made
 // here as the binary makes it on the first start of a boot (the start-up
 // plays), against the stand-ins for the card service and the launcher the
-// test runs. Every 100 ms it prints a BOOT line:
-// the start-up's clock (t), whether it plays, waits for the system (the
-// LED breathing), may be skipped and shows its hint (-1: the layer's drawing
-// is gone), and whether Home is powered. CONFIG's steps press a key at a
-// time ({"at": ms, "key": "A"}: the key goes through Main's own handling) or
-// end the scene.
+// test runs. Every 100 ms it prints a BOOT line: the start-up's clock (t),
+// whether it plays, waits for the system (the LED breathing), may be skipped
+// and shows its hint (-1: the layer's drawing is gone), whether Home is
+// powered and whether the memory has settled (src/memory.h). CONFIG's steps
+// press a key at a time ({"at": ms, "key": "A"}: the key goes through Main's
+// own handling) or end the scene.
 Item {
     id: scene
     readonly property var config: CONFIG
@@ -40,7 +40,7 @@ Item {
         const hint = find(boot, it => it.objectName === "skipHint")
         return { t: Math.round(boot.t * 100) / 100, playing: boot.playing, waiting: boot.waiting, canSkip: boot.canSkip,
                  hint: hint ? Math.round(hint.opacity * 100) / 100 : -1, shown: boot.shown,
-                 ready: boot.ready, powered: main.powered }
+                 ready: boot.ready, powered: main.powered, settled: Memory.settled }
     }
     function report() {
         console.log("BOOT " + JSON.stringify(Object.assign({ at: now() }, state())))

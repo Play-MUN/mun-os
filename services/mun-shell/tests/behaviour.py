@@ -1390,6 +1390,9 @@ def boot_cases(shell: Shell, checks: Checks):
     gone = [s for s in states if home and s["at"] >= home["at"] + 1000]
     checks.expect("boot-ready", "once it has faded out, its drawing is let go",
                   gone and all(s["hint"] == -1 for s in gone), gone[:2])
+    checks.expect("boot-ready", "the memory settles once it is over, not while it plays",
+                  home is not None and not any(s["settled"] for s in states if s["at"] < home["at"] and s["playing"])
+                  and all(s["settled"] for s in states if s["at"] >= home["at"]), home)
     early = next((s for s in states if s["at"] >= 1500), None)
     checks.expect("boot-ready", "without a sound device the picture does not wait for one",
                   early is not None and early["t"] >= 0.5, early)

@@ -481,9 +481,11 @@ Window {
         level = 2
         optionIndex = where === "reset" ? options.length - 1 : firstSelectable(0, 1)
     }
-    // After the start-up, or at once: the resolution on trial asks first,
-    // then a session's result.
+    // After the start-up, or at once: the memory freed from now on goes back
+    // to the system (src/memory.h); the resolution on trial asks first, then
+    // a session's result.
     function afterStart() {
+        Memory.settle()
         if (ShellSettings.resolutionOnTrial)
             askKeepResolution()
         else

@@ -6,9 +6,10 @@ import MUN.Shell
 // plays), against the stand-ins for the card service and the launcher the
 // test runs. Every 100 ms it prints a BOOT line:
 // the start-up's clock (t), whether it plays, waits for the system (the
-// LED breathing), may be skipped and shows its hint, and whether Home is
-// powered. CONFIG's steps press a key at a time ({"at": ms, "key": "A"}:
-// the key goes through Main's own handling) or end the scene.
+// LED breathing), may be skipped and shows its hint (-1: the layer's drawing
+// is gone), and whether Home is powered. CONFIG's steps press a key at a
+// time ({"at": ms, "key": "A"}: the key goes through Main's own handling) or
+// end the scene.
 Item {
     id: scene
     readonly property var config: CONFIG
@@ -16,7 +17,6 @@ Item {
     property var main: null
     property var canvas: null
     property var boot: null
-    property var hint: null
     property int next: 0
 
     function now() { return Date.now() - started }
@@ -36,6 +36,8 @@ Item {
     }
 
     function state() {
+        // Looked up each time: the layer lets its drawing go once it has left.
+        const hint = find(boot, it => it.objectName === "skipHint")
         return { t: Math.round(boot.t * 100) / 100, playing: boot.playing, waiting: boot.waiting, canSkip: boot.canSkip,
                  hint: hint ? Math.round(hint.opacity * 100) / 100 : -1, shown: boot.shown,
                  ready: boot.ready, powered: main.powered }
@@ -84,7 +86,6 @@ Item {
         main = component.createObject(null)
         canvas = find(main.contentItem, it => it.width === Theme.canvasWidth && it.height === Theme.canvasHeight && it.focus === true)
         boot = find(canvas, it => it.canSkip !== undefined && it.waiting !== undefined)
-        hint = find(boot, it => it.objectName === "skipHint")
         report()
         run()
     }

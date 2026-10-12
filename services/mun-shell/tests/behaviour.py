@@ -1387,6 +1387,9 @@ def boot_cases(shell: Shell, checks: Checks):
                   home is not None and 3000 <= home["at"] < 3700 and not home["playing"] and not home["shown"], home)
     played = [s["t"] for s in states if s["at"] < 3000 and s["playing"]]
     checks.expect("boot-ready", "its clock ran before the skip", played and max(played) > 1.0, played[-3:])
+    gone = [s for s in states if home and s["at"] >= home["at"] + 1000]
+    checks.expect("boot-ready", "once it has faded out, its drawing is let go",
+                  gone and all(s["hint"] == -1 for s in gone), gone[:2])
     early = next((s for s in states if s["at"] >= 1500), None)
     checks.expect("boot-ready", "without a sound device the picture does not wait for one",
                   early is not None and early["t"] >= 0.5, early)
@@ -1410,7 +1413,7 @@ def boot_cases(shell: Shell, checks: Checks):
     # Neither answers: Home after the start-up's 20 s, whatever they do.
     states, _ = run("boot-never", steps=[], end=23000)
     home = first(states, powered=True)
-    checks.expect("boot-never", "no Skip ever shows", all(not s["canSkip"] and s["hint"] == 0 for s in states), "")
+    checks.expect("boot-never", "no Skip ever shows", all(not s["canSkip"] and s["hint"] <= 0 for s in states), "")
     checks.expect("boot-never", "Home after 20 s without the system", home is not None and 20000 <= home["at"] < 21500, home)
 
     # The interface sounds off: the picture's clock runs from the start.

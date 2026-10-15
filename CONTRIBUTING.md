@@ -77,7 +77,8 @@ how it may name itself).
 
 ## Set up and checks
 
-The requirements to play and to build are in
+[Where to change what](docs/contributor-map.md) maps each part of MUN OS to
+its files and its checks. The requirements to play and to build are in
 [compatibility](docs/compatibility.md). Host checks need only Python 3.9 or
 later and Make; a C compiler adds the example game's save tests.
 

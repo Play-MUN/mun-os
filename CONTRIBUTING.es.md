@@ -81,8 +81,10 @@ en inglés, dice cómo puede llamarse).
 
 ## Preparación y comprobaciones
 
-Los requisitos para jugar y para construir están en
-[compatibilidad](docs/es/compatibility.md). Las comprobaciones del anfitrión
+[Qué cambiar y dónde](docs/es/contributor-map.md) relaciona cada parte de
+MUN OS con sus archivos y sus comprobaciones. Los requisitos para jugar y
+para construir están en [compatibilidad](docs/es/compatibility.md). Las
+comprobaciones del anfitrión
 solo necesitan Python 3.9 o posterior y Make; con un compilador de C se
 añaden las pruebas de partidas del juego de ejemplo.
 

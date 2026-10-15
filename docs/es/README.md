@@ -50,6 +50,8 @@ Las páginas que todavía no tienen traducción enlazan a su original, en inglé
   Game Cards, entrada, registros.
 - [Arquitectura](../architecture.md) (en inglés): componentes, fronteras, lo
   que será de la integración del hardware, lo que no está implementado.
+- [Qué cambiar y dónde](contributor-map.md): un mapa breve para un primer
+  cambio, y cómo comprobarlo.
 - [Lenguajes y fronteras nativas](../development/languages.md) (en inglés).
 - [Glosario](glossary.md).
 

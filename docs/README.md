@@ -42,6 +42,8 @@
   input, logs.
 - [Architecture](architecture.md): components, boundaries, what the hardware
   integration will own, what is not implemented.
+- [Where to change what](contributor-map.md): a short map for a first
+  change, and how to check it.
 - [Languages and native boundaries](development/languages.md).
 - [Glossary](glossary.md).
 

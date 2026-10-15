@@ -371,7 +371,8 @@ QtObject {
     function reset() {
         return {
             title: t("Reset settings?", "¿Restablecer los ajustes?"),
-            text: t("Your games and saves are untouched: they live on their Game Cards.", "Tus juegos y partidas no se tocan: viven en sus Game Cards.")
+            text: t("Every setting returns to its default, except the language. Your games and saves are untouched: they live on their Game Cards.",
+                    "Todos los ajustes vuelven a su valor inicial, salvo el idioma. Tus juegos y partidas no se tocan: viven en sus Game Cards.")
                   + (ShellSettings.activeResolution !== "auto"
                      ? t(" The screen goes dark for a moment while the resolution returns to automatic.",
                          " La pantalla se apaga un momento mientras la resolución vuelve a automática.") : ""),

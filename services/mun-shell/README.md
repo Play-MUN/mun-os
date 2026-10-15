@@ -434,10 +434,14 @@ it cannot do.
 | | Updates | Not available yet |
 | | Developer mode | Informs: set by the image (on for a development build) |
 | | Reset settings | Works: every setting back to its default but the language; a resolution other than Automatic restarts the shell |
+| | Reset console | Works: after two confirmations, the console restarts and starts as on its first day, in English: the settings, the system's history and the shell's caches go, nothing of a Game Card ([mun-reset](../mun-reset/README.md)). Refused while a card is in the slot or a game runs |
 
 The settings live in `/var/lib/mun-shell/settings.ini`
 (`StateDirectory=mun-shell`). The file is read as untrusted input: a value
-outside the allowed set reads as its default. Nothing else is stored in the
+outside the allowed set reads as its default, and a damaged file reads as
+the defaults until the next choice writes a valid one. Every change replaces
+the file whole (QSettings writes a new file and renames it over the old
+one), so a write cut short leaves the previous file as it was. Nothing else is stored in the
 console: games and saves live on their Game Cards.
 
 ## Sounds

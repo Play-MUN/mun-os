@@ -54,6 +54,11 @@ come from CardClient. The cases:
   arrives late, Eject safely, a changed choice and another card, frame by
   frame (a dressed entry whole on every frame); an arrival after Settings
   or a dialog only once Home is wholly on screen.
+- settings: the player's settings file (settings.qml): a damaged file reads
+  as the defaults and the next choice writes a valid one; a value outside
+  the allowed set reads as its default; a change replaces the file whole (a
+  new file renamed over the old one) and a temporary file left by an
+  interrupted write is ignored; Reset settings keeps the language alone.
 
 Linux, with the shell's run-time libraries (the image's). The image build
 runs this after compiling the shell (os/mkosi/mkosi.build.chroot); exit
@@ -187,7 +192,11 @@ class Shell:
         runtime.mkdir(mode=0o700, parents=True, exist_ok=True)
         state = case / "state"
         state.mkdir(parents=True, exist_ok=True)
-        (state / "settings.ini").write_text(settings, encoding="utf-8")
+        # None: the caller wrote the file itself.
+        if isinstance(settings, bytes):
+            (state / "settings.ini").write_bytes(settings)
+        elif settings is not None:
+            (state / "settings.ini").write_text(settings, encoding="utf-8")
         env = dict(os.environ, QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software", QT_SCALE_FACTOR=repr(scale),
                    QT_FORCE_STDERR_LOGGING="1", LANG="C.UTF-8", HOME=str(case / "home"),
                    XDG_CONFIG_HOME=str(case / "config"), XDG_RUNTIME_DIR=str(runtime),
@@ -1429,11 +1438,91 @@ def boot_cases(shell: Shell, checks: Checks):
                   early is not None and early["t"] >= 0.8, early)
 
 
+def settings_cases(shell: Shell, checks: Checks):
+    """The player's settings file (settings.qml)."""
+    defaults = {"language": "en", "clockFormat": "24h", "safeArea": 100, "systemSounds": True, "gameSounds": True,
+                "shapeMode": "full", "reduceMotion": False, "autoPowerOffHours": 1}
+
+    def run(name, settings, steps, before=None):
+        state = shell.work / name / "state"
+        state.mkdir(parents=True, exist_ok=True)
+        if before:
+            before(state)
+        output = shell.run(name, "settings.qml", {"steps": steps}, settings=settings)
+        return {r["label"]: r for r in lines(output, "SETTINGS")}, state / "settings.ini"
+
+    def values(state):
+        return {k: state[k] for k in defaults} if state else None
+
+    def ini(path):
+        import configparser
+        parser = configparser.ConfigParser(interpolation=None)
+        try:
+            parser.read_string(path.read_text(encoding="utf-8"))
+        except (UnicodeDecodeError, configparser.Error):
+            return None
+        return {f"{section}/{key}": value for section in parser.sections() for key, value in parser[section].items()}
+
+    # A damaged file: the defaults, an error said once, and the next choice
+    # writes a valid file with it.
+    damaged = b"\x00\xff\xfe[display\nsafe-area=\x01\x02\n\xc3\x28=\n[interface\nlanguage"
+    states, path = run("settings-damaged", damaged, [{"set": {"language": "es"}}, {"report": "chosen"}])
+    start = states.get("start")
+    checks.expect("settings-damaged", "a damaged file reads as the defaults", values(start) == defaults, start)
+    written = ini(path)
+    checks.expect("settings-damaged", "the next choice writes a valid file that holds it",
+                  written is not None and written.get("interface/language") == "es"
+                  and states.get("chosen", {}).get("lastError") == "", (written, states.get("chosen")))
+
+    # Values outside the allowed set read as their defaults.
+    states, _ = run("settings-out-of-range", "[display]\nsafe-area=55\nreduce-motion=maybe\n"
+                    "[interface]\nlanguage=fr\nclock=13h\n[power]\nauto-off-hours=2\n[shape]\nmode=loud\n", [])
+    checks.expect("settings-out-of-range", "a value outside the allowed set reads as its default",
+                  values(states.get("start")) == defaults, states.get("start"))
+
+    # A change replaces the file whole: a new file renamed over the old one
+    # (another inode), so a write cut short leaves the old file as it was. A
+    # temporary file such a write left behind is not read.
+    opened = {}
+    def prepare(state):
+        (state / "settings.ini").write_text("[interface]\nclock=12h\n", encoding="utf-8")
+        (state / "settings.ini.Xq3Lp9").write_text("[interface]\nlanguage=es\n", encoding="utf-8")
+        opened["inode"] = (state / "settings.ini").stat().st_ino
+    states, path = run("settings-atomic", None, [{"report": "read"}, {"set": {"safeArea": 94}}, {"report": "chosen"}],
+                       before=prepare)
+    read = states.get("read", {})
+    checks.expect("settings-atomic", "a temporary file left by an interrupted write is ignored",
+                  read.get("language") == "en" and read.get("clockFormat") == "12h", read)
+    written = ini(path)
+    checks.expect("settings-atomic", "a change keeps the rest of the file and adds itself",
+                  written == {"interface/clock": "12h", "display/safe-area": "94"}, written)
+    checks.expect("settings-atomic", "the change is a new file renamed over the old one, never written in place",
+                  path.exists() and path.stat().st_ino != opened.get("inode"), opened)
+
+    # Reset settings: every choice back to its default but the language;
+    # the resolution's key goes too (Automatic).
+    chosen = ("[interface]\nlanguage=es\nclock=12h\n[display]\nsafe-area=91\nreduce-motion=on\n"
+              "resolution=1920x1080\n[audio]\nsystem-sounds=off\ngame-sounds=off\n[power]\nauto-off-hours=6\n"
+              "[shape]\nmode=off\n")
+    states, path = run("settings-reset", chosen, [{"report": "before"}, {"call": "resetKeepingLanguage"},
+                                                  {"report": "after"}])
+    before = states.get("before")
+    checks.expect("settings-reset", "the choices are read before the reset",
+                  before is not None and before["language"] == "es" and before["safeArea"] == 91
+                  and before["shapeMode"] == "off" and not before["systemSounds"], before)
+    after = values(states.get("after"))
+    checks.expect("settings-reset", "Reset settings keeps the language and returns everything else to its default",
+                  after == dict(defaults, language="es"), after)
+    checks.expect("settings-reset", "the file keeps the language alone", ini(path) == {"interface/language": "es"},
+                  ini(path))
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("binary", type=Path)
     parser.add_argument("--work", type=Path, help="keep the scenes, logs, grabs and report here")
-    parser.add_argument("--only", choices=("card", "cue", "surfaces", "presence", "world", "memory", "boot", "home"), action="append")
+    parser.add_argument("--only", choices=("card", "cue", "surfaces", "presence", "world", "memory", "boot", "home", "settings"),
+                        action="append")
     args = parser.parse_args(argv)
     binary = args.binary.resolve()
     if not os.access(binary, os.X_OK):
@@ -1448,7 +1537,7 @@ def main(argv=None) -> int:
     exports.mkdir()
     packages.mkdir()
     shell, checks, report = Shell(binary, work), Checks(), {}
-    only = set(args.only or ("card", "cue", "surfaces", "presence", "world", "memory", "boot", "home"))
+    only = set(args.only or ("card", "cue", "surfaces", "presence", "world", "memory", "boot", "home", "settings"))
     try:
         if "card" in only:
             print("MUN Shell behaviour: the card object")
@@ -1474,6 +1563,9 @@ def main(argv=None) -> int:
         if "home" in only:
             print("MUN Shell behaviour: Home, as a player meets it")
             home_cases(shell, checks, exports, packages, report)
+        if "settings" in only:
+            print("MUN Shell behaviour: the player's settings file")
+            settings_cases(shell, checks)
         (work / "report.json").write_text(json.dumps(report, indent=1, sort_keys=True) + "\n", encoding="utf-8")
         for folder in checks.failing:
             log = work / folder / "output.log"

@@ -190,7 +190,7 @@ class ShellTests(unittest.TestCase):
             tag, channels, rate = int.from_bytes(fmt[0:2], "little"), int.from_bytes(fmt[2:4], "little"), int.from_bytes(fmt[4:8], "little")
             self.assertEqual((tag, channels, rate, int.from_bytes(fmt[14:16], "little")), (1, 2, 48000, 16), path.name)
             if path.stem == "startup":
-                self.assertLessEqual(len(samples) / (48000 * 4), 12.0, "the start-up lasts as long as the console takes")
+                self.assertLessEqual(len(samples) / (48000 * 4), 13.1, "the start-up lasts as long as its picture")
             else:
                 self.assertLessEqual(len(samples) / (48000 * 4), 1.0, f"{path.name}: a menu sound lasts under a second")
             self.assertIn(f"sounds/{path.name}", cmake, "compiled in")
@@ -318,7 +318,9 @@ class InputTests(unittest.TestCase):
         self.assertIn("NAME-AND-LOGO.txt", notice, "the notice points to the terms it does not cover")
         terms = (ROOT / "NAME-AND-LOGO.txt").read_text()
         self.assertIn("qml/Logo.js", terms)
-        self.assertIn("qml/PlayMun.js", terms, "both logos' drawings are outside the licence")
+        for drawing in ("src/bootintroshapes.h", "images/boot-silhouette.png", "images/boot-engraving.png"):
+            self.assertIn(drawing, terms, "the logo's drawings in the start-up are outside the licence too")
+            self.assertTrue((ROOT / "services" / "mun-shell" / drawing).is_file(), drawing)
         stage = (ROOT / "services" / "mun-shell" / "deploy" / "stage.sh").read_text()
         self.assertIn('fonts/*-OFL.txt', stage, "the typefaces compiled into the shell go with their licence")
         for font in (ROOT / "services" / "mun-shell" / "fonts").glob("*.ttf"):

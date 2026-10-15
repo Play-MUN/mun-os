@@ -542,6 +542,32 @@ Window {
         running: ShellSettings.autoPowerOffHours > 0 && window.powered && !window.starting
         onTriggered: window.powerOff()
     }
+    // A key pressed (`repeated`: held down), as the canvas receives it;
+    // false for a key the console does not use.
+    function key(code, repeated) {
+        FrameWatch.keyPressed()
+        wake()
+        // The start-up: A (or Enter, or Space) skips it once the system is
+        // ready and its hint shows; until then, and for any other key,
+        // nothing.
+        if (boot.playing) {
+            if (!repeated && boot.canSkip && [Qt.Key_A, Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space].indexOf(code) >= 0)
+                boot.skip()
+            return true
+        }
+        if (!interactive || starting)
+            return true
+        switch (code) {
+        case Qt.Key_Up: move(-1); break
+        case Qt.Key_Down: move(1); break
+        case Qt.Key_Left: side(-1); break
+        case Qt.Key_Right: side(1); break
+        case Qt.Key_Return: case Qt.Key_Enter: case Qt.Key_Space: case Qt.Key_A: enter(); break
+        case Qt.Key_Escape: case Qt.Key_Backspace: case Qt.Key_Back: case Qt.Key_B: back(); break
+        default: return false
+        }
+        return true
+    }
     function wake() {
         resting = false
         restTimer.restart()
@@ -588,29 +614,7 @@ Window {
             }
         }
 
-        Keys.onPressed: (event) => {
-            event.accepted = true
-            FrameWatch.keyPressed()
-            window.wake()
-            // Any key skips the start-up to the console's logo; Home follows
-            // once the services have answered.
-            if (boot.playing) {
-                if (!event.isAutoRepeat)
-                    boot.skip()
-                return
-            }
-            if (!window.interactive || window.starting)
-                return
-            switch (event.key) {
-            case Qt.Key_Up: window.move(-1); break
-            case Qt.Key_Down: window.move(1); break
-            case Qt.Key_Left: window.side(-1); break
-            case Qt.Key_Right: window.side(1); break
-            case Qt.Key_Return: case Qt.Key_Enter: case Qt.Key_Space: case Qt.Key_A: window.enter(); break
-            case Qt.Key_Escape: case Qt.Key_Backspace: case Qt.Key_Back: case Qt.Key_B: window.back(); break
-            default: event.accepted = false
-            }
-        }
+        Keys.onPressed: (event) => { event.accepted = window.key(event.key, event.isAutoRepeat) }
 
         Backdrop {
             id: backdrop

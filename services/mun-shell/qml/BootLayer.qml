@@ -257,7 +257,7 @@ Rectangle {
                     opacity: background.flash
                     visible: opacity > 0.002
                 }
-                // The tube's lines and vignette over everything.
+                // The tube's vignette over everything.
                 BootIntro {
                     part: BootIntro.Tube
                     x: area.x; y: area.y; width: area.width; height: area.height

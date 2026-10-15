@@ -158,7 +158,7 @@ QtObject {
                 ShellSettings.resolutions.length > 0
                     ? action(t("Resolution", "Resolución"), resolutionValue(), shell.askResolution,
                              t("If the picture does not come back, the console returns to the previous one on its own.",
-                               "Si la imagen no vuelve, la consola recupera la anterior sola."))
+                               "Si la imagen no vuelve, la consola vuelve sola a la anterior."))
                     : info(t("Resolution", "Resolución"), resolutionValue()),
                 choice(t("Safe area", "Zona segura"), areas.map(a => a + " %"), areas.indexOf(ShellSettings.safeArea),
                        i => ShellSettings.safeArea = areas[i],
@@ -185,7 +185,7 @@ QtObject {
                          "Los sonidos propios de una Game Card en los menús mientras está dentro.")),
                 // The start-up's sound plays with the system sounds.
                 info(t("Startup sound", "Sonido de arranque"), ShellSettings.systemSounds ? t("On", "Activado") : t("Off", "Desactivado"),
-                     t("Follows System sounds.", "Sigue a Sonidos del sistema.")),
+                     t("Follows System sounds.", "Depende de Sonidos del sistema.")),
                 unavailable(t("Output", "Salida")),
                 unavailable(t("Format", "Formato"))
             ]
@@ -409,7 +409,8 @@ QtObject {
     }
 
     // Why the console cannot reset now: what the shell sees itself
-    // ("card", "reader", "busy"), or mun-reset's refusal (its exit status).
+    // ("card", "reader", "busy", "unavailable"), or mun-reset's refusal
+    // (its exit status).
     function resetConsoleRefused(reason, detail) {
         const card = reason === "card" || reason === 65
         const busy = reason === "busy" || reason === 66

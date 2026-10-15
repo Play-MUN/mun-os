@@ -504,7 +504,9 @@ Window {
             openModal(panels.resetConsoleRefused("reader", ""))
         else if (cardMode !== "absent" || CardClient.waitingCount > 0)
             openModal(panels.resetConsoleRefused("card", ""))
-        else if (!LaunchClient.available || LaunchClient.state !== "idle")
+        else if (!LaunchClient.available)
+            openModal(panels.resetConsoleRefused("unavailable", ""))
+        else if (LaunchClient.state !== "idle")
             openModal(panels.resetConsoleRefused("busy", ""))
         else
             openModal(panels.resetConsole())

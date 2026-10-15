@@ -19,13 +19,13 @@
 // whose time leads the sound's by 0.35 s): QML sets t from the sound's
 // clock on every frame and each part paints what t shows. A part is painted
 // again only when what it shows has changed, and only over its own `area`;
-// the still layers (the screen's gradient, the silhouette, the tube's lines
-// and vignette, the finished logo) are painted once per display scale.
+// the still layers (the screen's gradient, the silhouette, the tube's
+// vignette, the finished logo) are painted once per display scale.
 //
 // The parts, in drawing order (QML stacks them): Screen, the background;
 // Silhouette, the lid's top in the light behind it; Engraving, the gleam on
-// the dome; Mark, the letters and the moon; Led; Tube, the screen's lines and
-// vignette over everything. Between Screen and Tube the parts shake together
+// the dome; Mark, the letters and the moon; Led; Tube, the screen's vignette
+// over everything. Between Screen and Tube the parts shake together
 // (`shake`), fade together at the end (`fade`), and a white flash covers
 // them (`flash`): QML applies those three, read from any part.
 //

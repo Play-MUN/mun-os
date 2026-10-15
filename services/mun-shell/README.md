@@ -85,8 +85,8 @@ the keys (A Select, B Back). The card's crescent on the Game Card object
 cold at night, pale at dawn, grey-white by day, copper at dusk.
 
 Motion: the start-up plays once per boot, over the start-up sound (13.05
-s): the console waking in the dark, under the lines and vignette of a
-tube, still from start to end: the console, its LED and the U of MUN on
+s): the console waking in the dark, under the vignette of a tube, still
+from start to end: the console, its LED and the U of MUN on
 the screen's centre line, the moon reaching out to the right, the finished
 logo with the LED under it centred. At 0.3 s a pim lights the amber LED, a point that breathes once and
 grows into the console's long oval, two sweeps of light running along it;

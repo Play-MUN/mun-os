@@ -674,8 +674,10 @@ void BootIntro::paintScreen(QPainter *painter, qreal scale)
 
 void BootIntro::paintTube(QPainter *painter, qreal scale)
 {
-    // The tube's lines, 1 px of black at 28 % every 3 px, over a vignette:
-    // radial-gradient(120% 100%, transparent 60%, rgba(0, 0, 0, .65)).
+    // The tube's vignette: radial-gradient(120% 100%, transparent 60%,
+    // rgba(0, 0, 0, .65)). The design's scan lines (1 px of black at 28 %
+    // every 3 px) are left out: over the picture and its text they read as
+    // stripes, uneven wherever the canvas is scaled.
     if (m_still.image.isNull() || m_still.scale != scale) {
         m_still.image = offscreen(scale);
         m_still.scale = scale;
@@ -687,9 +689,6 @@ void BootIntro::paintTube(QPainter *painter, qreal scale)
                 line[x] = qRgba(0, 0, 0, std::clamp(int(std::lround(alpha + (alpha > 0 ? dither(x, y) : 0))), 0, 255));
             }
         }
-        QPainter p(&m_still.image);
-        for (int y = 0; y < 1080; y += 3)
-            p.fillRect(QRectF(0, y, 1920, 1), QColor(0, 0, 0, int(0.28 * 255 + 0.5)));
     }
     painter->drawImage(QPointF(0, 0), m_still.image);
 }

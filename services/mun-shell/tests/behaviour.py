@@ -1437,13 +1437,20 @@ def boot_cases(shell: Shell, checks: Checks):
     checks.expect("boot-late", "once the picture has faded, the LED waits for the system",
                   waiting is not None and waiting["t"] >= 11.7 and waiting["playing"] and not waiting["powered"], waiting)
     home = first(states, powered=True)
+    checks.expect("boot-late", "the memory settles once Home comes, not while the LED waits",
+                  home is not None and not any(s["settled"] for s in states if s["at"] < home["at"])
+                  and all(s["settled"] for s in states if s["at"] >= home["at"]), home)
     checks.expect("boot-late", "Home follows the system's answer",
                   home is not None and 15000 <= home["at"] < 16500, home)
 
     # Neither answers: Home after the start-up's 20 s, whatever they do.
     states, _ = run("boot-never", steps=[], end=23000)
     home = first(states, powered=True)
-    checks.expect("boot-never", "no Skip ever shows", all(not s["canSkip"] and s["hint"] <= 0 for s in states), "")
+    checks.expect("boot-never", "no Skip ever shows: hidden while the start-up is on screen, gone after",
+                  all(not s["canSkip"] and (s["hint"] == 0 if s["shown"] else s["hint"] <= 0) for s in states), "")
+    checks.expect("boot-never", "the memory settles once Home comes, not before",
+                  home is not None and not any(s["settled"] for s in states if s["at"] < home["at"])
+                  and all(s["settled"] for s in states if s["at"] >= home["at"]), home)
     checks.expect("boot-never", "Home after 20 s without the system", home is not None and 20000 <= home["at"] < 21500, home)
 
     # The interface sounds off: the picture's clock runs from the start.

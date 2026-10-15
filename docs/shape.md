@@ -322,9 +322,10 @@ second without light textures, as the `paper` sample's, costs far less: at
 rest 8 % of a core at 1080p and 18 % at 1440p, about MUN's own, and
 navigation as without a card.
 
-Once the card is out, the world's memory goes back to the system: its frames
-are let go while no world shows, and once the start-up is over the shell
-has glibc return every large block it frees (`services/mun-shell/src/memory.h`).
+Once the card is out, most of the world's memory goes back to the system:
+its frames are let go while no world shows, and once the start-up is over
+the shell has glibc give large blocks a mapping of their own, returned when
+freed (`services/mun-shell/src/memory.h`).
 In the same virtual machine, five rounds of three cards in and out (`sea`,
 `paper` and one without Shape) left the shell 16 MiB over its own at 1080p
 and 15–20 MiB at 1440p, the same after the first round as after the fifth.

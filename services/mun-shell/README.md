@@ -27,7 +27,7 @@ display, and a game drawing on `/dev/fb0` has it (see *Display path*).
 | `src/shape.*`, `src/contrast.h`, `src/readpalette.*` | A Game Card's MUN Shape on the eligible surfaces: the export read and decoded off the GUI thread, its colours verified again with the contrast rule, the palette read from a cover, the phases of its coming in and leaving (*A Game Card's identity*) |
 | `src/shapeworld.*`, `src/shapefront.h` | The package's world, prepared and painted on its own thread, and the fronts of its transitions |
 | `src/framewatch.*` | The interface's frame and key timings while a world is drawn; the step down when navigation suffers |
-| `src/memory.*` | Once the start-up is over, the memory the shell frees goes back to the system (glibc's thresholds fixed, then a trim) |
+| `src/memory.*` | Once the start-up is over, most of the memory the shell frees goes back to the system (glibc's thresholds fixed, then a trim) |
 | `src/launchclient.*` | Client of `mun-launchd`: `launch(slot, serial, version)`, `release(serial)`, `acknowledge()`, launcher state and the last session result (read from `/run/mun/launch/last-result.json` at start, then over the socket) |
 | `src/backdrop.*`, `src/heroicon.*` | Home's painted layers: the network of light behind everything, and the large object of the entry in focus |
 | `src/cssbox.*`, `src/blur.*` | Surfaces with CSS semantics (radii, gradients at any angle, outer and inset box shadows) and the blur they and the glows use |

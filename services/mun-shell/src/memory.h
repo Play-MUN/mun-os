@@ -10,17 +10,20 @@
 // MiB in that thread's arena once the card was out, and the start-up's
 // picture left its own in the heap once QML had let it go.
 //
-// settle() fixes both thresholds at 128 KiB (glibc's starting values): every
-// image from then on is returned when freed, and the heap is trimmed above
-// 128 KiB free. kTrimDelay later it also gives back what is free by then
-// (malloc_trim), the start-up's picture included. It is called once the
+// settle() fixes both thresholds at 128 KiB (glibc's starting values): from
+// then on a large block that free memory already held cannot serve gets a
+// mapping of its own, returned when it is freed, and the heap is trimmed
+// above 128 KiB free; freed space glibc still holds is used again first, so
+// not every block is returned. kTrimDelay later it also gives back what is
+// free by then (malloc_trim), the start-up's picture included. It is called once the
 // start-up is over, or at once when it does not play: the start-up makes
 // and frees large images on every frame, which the raised threshold keeps
 // cheap; with the thresholds fixed, every one of them would be mapped and
 // its pages faulted in anew.
 //
 // GUI thread only. Another thread may free a large block at the same moment
-// and raise the thresholds again; the cost is memory kept, never an error.
+// and raise the thresholds again; the cost is memory kept, never an error,
+// and the trim sets them once more before it runs.
 #pragma once
 
 #include <QObject>

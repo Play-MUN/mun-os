@@ -304,7 +304,7 @@ figures within 8 points), navigated with one key every 300 ms for 30 s; at
 | The interface's frames while navigating, 95th percentile | 14 ms | 13 ms | 17 ms | 20 ms |
 | The world's frames per second (rate 20) / paint time, median | – | 18.5–19.5 / 9–13 ms | – | 18.5–19.6 / 15–18 ms |
 | A transition's frames, 95th percentile | – | 19–24 ms | – | 18–52 ms |
-| Memory the world adds, peak (the shell's, over its own without a card) | – | 73 MB | – | 111 MB (154–163 MB after a second card, whose predecessor's freed memory the process keeps) |
+| Memory the world adds, peak (the shell's, over its own without a card) | – | 73 MB | – | 111 MB |
 
 At 1080p the full level of detail holds: navigation stays within 10 ms of
 the console without a card, and memory within the budget. At 1440p the
@@ -321,6 +321,18 @@ worlds that keep every limit but scale large. A world at 10 frames per
 second without light textures, as the `paper` sample's, costs far less: at
 rest 8 % of a core at 1080p and 18 % at 1440p, about MUN's own, and
 navigation as without a card.
+
+Once the card is out, most of the world's memory goes back to the system:
+its frames are let go while no world shows, and once the start-up is over
+the shell has glibc give large blocks a mapping of their own, returned when
+freed (`services/mun-shell/src/memory.h`).
+In the same virtual machine, five rounds of three cards in and out (`sea`,
+`paper` and one without Shape) left the shell 16 MiB over its own at 1080p
+and 15–20 MiB at 1440p, the same after the first round as after the fifth.
+A card already in the slot when the console starts has its world prepared
+while the start-up plays, before the shell settles its memory; once that
+card is out, more of its world's memory stays: 13–15 MiB over the shell's
+own at 1080p, and 31–36 MiB at 1440p.
 
 ## When something is wrong
 

@@ -23,6 +23,11 @@ import MUN.Shell
 // sound rings on; if it is not, the LED stays, breathing, until it is, or
 // kReady after the start whatever it does. powerOff() brings the black back
 // while the system shuts down.
+//
+// Everything drawn (the parts, the waiting LED, the flash, the tube, the
+// hint) exists only while the layer is visible: once it has faded out, the
+// loader below lets it all go, images and textures with it, and powerOff()
+// brings it back for the black.
 Rectangle {
     id: root
     // Shown: the layer covers the screen.
@@ -111,13 +116,13 @@ Rectangle {
         } else {
             t = ownFrom + (now - ownStart) / 1000
         }
-        if (t >= background.faded && running && !waiting && !leaving) {
+        if (t >= times.faded && running && !waiting && !leaving) {
             if (ready || late)
                 leave()
             else
                 waiting = true
         }
-        if (waiting && t >= background.end + 1)
+        if (waiting && t >= times.end + 1)
             running = false   // the sound is over: only the LED's breath moves
     }
     function skip() {
@@ -189,98 +194,109 @@ Rectangle {
     visible: opacity > 0
     Behavior on opacity { NumberAnimation { duration: 500; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.ease } }
 
-    // The screen: its gradient and the picture on it shake together on the
-    // hit; the picture fades at the end. Parts paint over their own areas,
-    // in canvas coordinates.
-    Item {
-        id: screen
-        width: Theme.canvasWidth
-        height: Theme.canvasHeight
-        transform: Translate { x: background.shake.x; y: background.shake.y }
+    // The start-up's times, from a part that never paints.
+    BootIntro { id: times; visible: false }
 
-        BootIntro {
-            id: background
-            part: BootIntro.Screen
-            t: root.t
-            reduceMotion: ShellSettings.reduceMotion
-            x: area.x; y: area.y; width: area.width; height: area.height
-        }
-        Item {
-            anchors.fill: parent
-            opacity: background.fade
-            visible: opacity > 0 && root.t >= 0
-            Repeater {
-                model: [BootIntro.Silhouette, BootIntro.Engraving, BootIntro.Mark, BootIntro.Led]
+    Loader {
+        anchors.fill: parent
+        active: root.visible
+        sourceComponent: Component {
+            Item {
+                // The screen: its gradient and the picture on it shake
+                // together on the hit; the picture fades at the end. Parts
+                // paint over their own areas, in canvas coordinates.
+                Item {
+                    id: screen
+                    width: Theme.canvasWidth
+                    height: Theme.canvasHeight
+                    transform: Translate { x: background.shake.x; y: background.shake.y }
+
+                    BootIntro {
+                        id: background
+                        part: BootIntro.Screen
+                        t: root.t
+                        reduceMotion: ShellSettings.reduceMotion
+                        x: area.x; y: area.y; width: area.width; height: area.height
+                    }
+                    Item {
+                        anchors.fill: parent
+                        opacity: background.fade
+                        visible: opacity > 0 && root.t >= 0
+                        Repeater {
+                            model: [BootIntro.Silhouette, BootIntro.Engraving, BootIntro.Mark, BootIntro.Led]
+                            BootIntro {
+                                required property int modelData
+                                part: modelData
+                                t: root.t
+                                reduceMotion: ShellSettings.reduceMotion
+                                x: area.x; y: area.y; width: area.width; height: area.height
+                            }
+                        }
+                    }
+                    // The LED waiting for the system, breathing.
+                    BootIntro {
+                        id: waitingLed
+                        part: BootIntro.Led
+                        opacity: root.waiting ? 1 : 0
+                        visible: opacity > 0
+                        Behavior on opacity { NumberAnimation { duration: 600 } }
+                        breath: -1
+                        x: area.x; y: area.y; width: area.width; height: area.height
+                        SequentialAnimation on breath {
+                            running: root.waiting
+                            loops: Animation.Infinite
+                            NumberAnimation { from: 0; to: 1; duration: 1200; easing.type: Easing.InOutSine }
+                            NumberAnimation { from: 1; to: 0; duration: 1200; easing.type: Easing.InOutSine }
+                        }
+                    }
+                }
+                // The flash of the two hits.
+                Rectangle {
+                    anchors.fill: screen
+                    color: "#FFFFFF"
+                    opacity: background.flash
+                    visible: opacity > 0.002
+                }
+                // The tube's vignette over everything.
                 BootIntro {
-                    required property int modelData
-                    part: modelData
-                    t: root.t
-                    reduceMotion: ShellSettings.reduceMotion
+                    part: BootIntro.Tube
                     x: area.x; y: area.y; width: area.width; height: area.height
                 }
-            }
-        }
-        // The LED waiting for the system, breathing.
-        BootIntro {
-            id: waitingLed
-            part: BootIntro.Led
-            opacity: root.waiting ? 1 : 0
-            visible: opacity > 0
-            Behavior on opacity { NumberAnimation { duration: 600 } }
-            breath: -1
-            x: area.x; y: area.y; width: area.width; height: area.height
-            SequentialAnimation on breath {
-                running: root.waiting
-                loops: Animation.Infinite
-                NumberAnimation { from: 0; to: 1; duration: 1200; easing.type: Easing.InOutSine }
-                NumberAnimation { from: 1; to: 0; duration: 1200; easing.type: Easing.InOutSine }
-            }
-        }
-    }
-    // The flash of the two hits.
-    Rectangle {
-        anchors.fill: screen
-        color: "#FFFFFF"
-        opacity: background.flash
-        visible: opacity > 0.002
-    }
-    // The tube's vignette over everything.
-    BootIntro {
-        part: BootIntro.Tube
-        x: area.x; y: area.y; width: area.width; height: area.height
-    }
 
-    // A Skip, once the system is ready: as Home's key hints are.
-    Row {
-        objectName: "skipHint"
-        anchors.right: screen.right
-        anchors.rightMargin: Theme.gutter
-        anchors.bottom: screen.bottom
-        anchors.bottomMargin: 60
-        spacing: 12
-        opacity: root.canSkip ? 1 : 0
-        visible: opacity > 0
-        Behavior on opacity { NumberAnimation { duration: 400; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.ease } }
-        Rectangle {
-            width: 36
-            height: 36
-            radius: 18
-            color: "transparent"
-            border.width: 2
-            border.color: Theme.ash
-            UiText {
-                anchors.centerIn: parent
-                text: "A"
-                size: 17
-                weight: 700
-                color: Theme.moon
+                // A Skip, once the system is ready: as Home's key hints are.
+                Row {
+                    objectName: "skipHint"
+                    anchors.right: screen.right
+                    anchors.rightMargin: Theme.gutter
+                    anchors.bottom: screen.bottom
+                    anchors.bottomMargin: 60
+                    spacing: 12
+                    opacity: root.canSkip ? 1 : 0
+                    visible: opacity > 0
+                    Behavior on opacity { NumberAnimation { duration: 400; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.ease } }
+                    Rectangle {
+                        width: 36
+                        height: 36
+                        radius: 18
+                        color: "transparent"
+                        border.width: 2
+                        border.color: Theme.ash
+                        UiText {
+                            anchors.centerIn: parent
+                            text: "A"
+                            size: 17
+                            weight: 700
+                            color: Theme.moon
+                        }
+                    }
+                    UiText {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: I18n.t("Skip", "Saltar")
+                        size: 23
+                        color: Theme.ash
+                    }
+                }
             }
-        }
-        UiText {
-            anchors.verticalCenter: parent.verticalCenter
-            text: I18n.t("Skip", "Saltar")
-            size: 23
-            color: Theme.ash
         }
     }
 }

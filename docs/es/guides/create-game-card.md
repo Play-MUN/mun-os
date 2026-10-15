@@ -24,7 +24,7 @@ en [partidas](../../saves.md), en inglés.
   ([compatibilidad](../compatibility.md#hacer-game-cards)).
 
 Esta guía cita los menús de la consola en español; arranca en inglés y se
-cambia en *Settings* › *Account and language* › *Language*
+cambia en *Settings* › *Language and time* › *Language*
 ([glosario](../glossary.md#las-palabras-de-la-consola)).
 
 ## 1. El juego: un programa Linux para ARM64

@@ -42,6 +42,8 @@
   input, logs.
 - [Architecture](architecture.md): components, boundaries, what the hardware
   integration will own, what is not implemented.
+- [Where to change what](contributor-map.md): a short map for a first
+  change, and how to check it.
 - [Languages and native boundaries](development/languages.md).
 - [Glossary](glossary.md).
 
@@ -56,5 +58,6 @@ Components document their own protocols, units and privileges:
 [MUN Shell](../services/mun-shell/README.md),
 [card service](../services/mun-cardd/README.md),
 [launcher](../services/mun-launchd/README.md),
+[console reset](../services/mun-reset/README.md),
 [`mun-card`](../tools/mun-card/README.md),
 [examples](../examples/README.md) and [tests](../tests/README.md).

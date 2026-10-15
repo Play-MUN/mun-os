@@ -28,8 +28,10 @@ QtObject {
         case "games": return games()
         case "settings": return settings()
         case "power": return power()
-        case "personal": return personal()
-        case "av": return pictureAndSound()
+        case "display": return display()
+        case "sound": return sound()
+        case "appearance": return appearance()
+        case "language": return languageAndTime()
         case "network": return network()
         case "system": return system()
         }
@@ -123,7 +125,8 @@ QtObject {
         return {
             kicker: t("SETTINGS", "CONFIGURACIÓN"),
             title: t("Settings", "Configuración"),
-            text: t("Account and language, picture and sound, network and system.", "Cuenta e idioma, imagen y sonido, red y sistema."),
+            text: t("Display, sound, appearance, language and time, network and system.",
+                    "Pantalla, sonido, apariencia, idioma y hora, red y sistema."),
             options: []
         }
     }
@@ -138,56 +141,92 @@ QtObject {
         }
     }
 
-    function personal() {
+    // The six sections. Each option says what it is today: one that works
+    // changes the console at once (the resolution through its dialog); one
+    // that only informs shows the value as the system has it; one the console
+    // does not have yet says "Not available yet". Nothing here needs an
+    // account.
+    function display() {
+        const areas = [100, 97, 94, 91]
         return {
-            kicker: t("ACCOUNT AND LANGUAGE", "CUENTA E IDIOMA"),
-            title: t("Account and language", "Cuenta e idioma"),
-            text: t("The account is optional: MUN works fully without one.", "La cuenta es opcional: MUN funciona completa sin ella."),
+            kicker: t("DISPLAY", "PANTALLA"),
+            title: t("Display", "Pantalla"),
+            text: t("What reaches your TV.", "Lo que llega a tu televisor."),
             options: [
-                head(t("ACCOUNT", "CUENTA")),
-                info(t("Status", "Estado"), t("No account", "Sin cuenta")),
-                unavailable(t("Create or link account", "Crear o vincular cuenta")),
-                head(t("LANGUAGE", "IDIOMA")),
-                choice(t("Language", "Idioma"), ["English", "Español"], I18n.spanish ? 1 : 0,
-                       i => ShellSettings.language = i === 1 ? "es" : "en")
+                // Chosen in a dialog, since a change restarts the shell; only
+                // shown where the display offers no choice.
+                ShellSettings.resolutions.length > 0
+                    ? action(t("Resolution", "Resolución"), resolutionValue(), shell.askResolution,
+                             t("If the picture does not come back, the console returns to the previous one on its own.",
+                               "Si la imagen no vuelve, la consola vuelve sola a la anterior."))
+                    : info(t("Resolution", "Resolución"), resolutionValue()),
+                choice(t("Safe area", "Zona segura"), areas.map(a => a + " %"), areas.indexOf(ShellSettings.safeArea),
+                       i => ShellSettings.safeArea = areas[i],
+                       t("Brings the interface in from the edges of a TV that crops them.",
+                         "Aleja la interfaz de los bordes en un televisor que los recorta.")),
+                unavailable("HDR"),
+                unavailable(t("Refresh rate", "Frecuencia"))
             ]
         }
     }
 
-    function pictureAndSound() {
-        const areas = [100, 97, 94, 91]
+    function sound() {
         return {
-            kicker: t("PICTURE AND SOUND", "IMAGEN Y SONIDO"),
-            title: t("Picture and sound", "Imagen y sonido"),
-            text: t("What reaches your TV and your ears.", "Lo que llega a tu televisor y a tus oídos."),
+            kicker: t("SOUND", "SONIDO"),
+            title: t("Sound", "Sonido"),
+            text: t("What reaches your ears.", "Lo que llega a tus oídos."),
             options: [
-                head(t("DISPLAY", "PANTALLA")),
-                // Chosen in a dialog, since a change restarts the shell; only
-                // shown where the display offers no choice. (Tall panels reach
-                // the key hints, so their options carry no notes.)
-                ShellSettings.resolutions.length > 0
-                    ? action(t("Resolution", "Resolución"), resolutionValue(), shell.askResolution)
-                    : info(t("Resolution", "Resolución"), resolutionValue()),
-                choice(t("Safe area", "Zona segura"), areas.map(a => a + " %"), areas.indexOf(ShellSettings.safeArea),
-                       i => ShellSettings.safeArea = areas[i]),
-                // Home's world and objects hold still.
-                choice(t("Reduce motion", "Reducir movimiento"), [t("Off", "Desactivado"), t("On", "Activado")],
-                       ShellSettings.reduceMotion ? 1 : 0, i => ShellSettings.reduceMotion = i === 1),
-                unavailable("HDR"),
-                unavailable(t("Refresh rate", "Frecuencia")),
-                head("AUDIO"),
-                unavailable(t("Output", "Salida")),
-                unavailable(t("Format", "Formato")),
                 choice(t("System sounds", "Sonidos del sistema"), [t("On", "Activados"), t("Off", "Desactivados")],
-                       ShellSettings.systemSounds ? 0 : 1, i => ShellSettings.systemSounds = i === 0),
+                       ShellSettings.systemSounds ? 0 : 1, i => ShellSettings.systemSounds = i === 0,
+                       t("The menus' sounds and the start-up's.", "Los sonidos de los menús y el del arranque.")),
                 choice(t("Game sounds on the menus", "Sonidos del juego en los menús"), [t("On", "Activados"), t("Off", "Desactivados")],
-                       ShellSettings.gameSounds ? 0 : 1, i => ShellSettings.gameSounds = i === 0),
-                unavailable(t("Startup sound", "Sonido de arranque")),
+                       ShellSettings.gameSounds ? 0 : 1, i => ShellSettings.gameSounds = i === 0,
+                       t("A Game Card's own sounds for the menus while it is in.",
+                         "Los sonidos propios de una Game Card en los menús mientras está dentro.")),
+                // The start-up's sound plays with the system sounds.
+                info(t("Startup sound", "Sonido de arranque"), ShellSettings.systemSounds ? t("On", "Activado") : t("Off", "Desactivado"),
+                     t("Follows System sounds.", "Depende de Sonidos del sistema.")),
+                unavailable(t("Output", "Salida")),
+                unavailable(t("Format", "Formato"))
+            ]
+        }
+    }
+
+    function appearance() {
+        return {
+            kicker: t("APPEARANCE AND ACCESSIBILITY", "APARIENCIA Y ACCESIBILIDAD"),
+            title: t("Appearance and accessibility", "Apariencia y accesibilidad"),
+            text: t("How the console looks and moves.", "Cómo se ve y se mueve la consola."),
+            options: [
                 // How a Game Card dresses the console (docs/shape.md).
-                head("MUN SHAPE"),
                 choice("MUN Shape", [t("Full", "Completo"), t("Colours only", "Solo colores"), t("Off", "Desactivado")],
                        ["full", "colours", "off"].indexOf(ShellSettings.shapeMode),
-                       i => ShellSettings.shapeMode = ["full", "colours", "off"][i])
+                       i => ShellSettings.shapeMode = ["full", "colours", "off"][i],
+                       t("How a Game Card dresses the console while it is in.",
+                         "Cómo viste una Game Card la consola mientras está dentro.")),
+                // Home's world and objects hold still; the start-up keeps its
+                // times without its shake, tremor and flicker.
+                choice(t("Reduce motion", "Reducir movimiento"), [t("Off", "Desactivado"), t("On", "Activado")],
+                       ShellSettings.reduceMotion ? 1 : 0, i => ShellSettings.reduceMotion = i === 1,
+                       t("Home and its worlds hold still; the start-up loses its shake and flicker.",
+                         "Home y sus mundos se quedan quietos; el arranque pierde su temblor y sus destellos.")),
+                unavailable(t("Status light", "Luz de estado"))
+            ]
+        }
+    }
+
+    function languageAndTime() {
+        return {
+            kicker: t("LANGUAGE AND TIME", "IDIOMA Y HORA"),
+            title: t("Language and time", "Idioma y hora"),
+            text: t("The console's language and its clock.", "El idioma de la consola y su reloj."),
+            options: [
+                choice(t("Language", "Idioma"), ["English", "Español"], I18n.spanish ? 1 : 0,
+                       i => ShellSettings.language = i === 1 ? "es" : "en"),
+                choice(t("Time format", "Formato de hora"), [t("24-hour", "24 horas"), t("12-hour", "12 horas")],
+                       ShellSettings.clockFormat === "12h" ? 1 : 0, i => ShellSettings.clockFormat = i === 1 ? "12h" : "24h"),
+                info(t("Time zone", "Zona horaria"), SystemInfo.timeZone),
+                unavailable(t("Set time", "Ajuste de hora"))
             ]
         }
     }
@@ -232,25 +271,20 @@ QtObject {
         return {
             kicker: t("SYSTEM", "SISTEMA"),
             title: t("System", "Sistema"),
-            text: t("Time, power and the console software.", "Hora, energía y software de la consola."),
+            text: t("Power and the console's software.", "Energía y software de la consola."),
             options: [
-                head(t("DATE AND TIME", "FECHA Y HORA")),
-                unavailable(t("Set time", "Ajuste")),
-                choice(t("Format", "Formato"), [t("24-hour", "24 horas"), t("12-hour", "12 horas")], ShellSettings.clockFormat === "12h" ? 1 : 0,
-                       i => ShellSettings.clockFormat = i === 1 ? "12h" : "24h"),
-                info(t("Time zone", "Zona horaria"), SystemInfo.timeZone),
                 head(t("POWER", "ENERGÍA")),
                 choice(t("Auto power off", "Apagado automático"),
                        [t("Never", "Nunca"), t("After 1 hour", "Tras 1 hora"), t("After 3 hours", "Tras 3 horas"), t("After 6 hours", "Tras 6 horas")],
                        hours.indexOf(ShellSettings.autoPowerOffHours), i => ShellSettings.autoPowerOffHours = hours[i]),
-                unavailable(t("Status light", "Luz de estado")),
                 action(t("Turn off console", "Apagar consola"), "", shell.askPowerOff),
                 head("SOFTWARE"),
                 unavailable(t("Updates", "Actualizaciones")),
                 // Set by the image: on for a development build.
                 info(t("Developer mode", "Modo desarrollador"), SystemInfo.release ? t("Off", "Desactivado") : t("On", "Activado")),
                 action(t("About", "Información"), "", shell.showAbout),
-                action(t("Reset settings", "Restablecer ajustes"), "", shell.askReset)
+                action(t("Reset settings", "Restablecer ajustes"), "", shell.askReset),
+                action(t("Reset console", "Restablecer la consola"), "", shell.askResetConsole)
             ]
         }
     }
@@ -338,7 +372,8 @@ QtObject {
     function reset() {
         return {
             title: t("Reset settings?", "¿Restablecer los ajustes?"),
-            text: t("Your games and saves are untouched: they live on their Game Cards.", "Tus juegos y partidas no se tocan: viven en sus Game Cards.")
+            text: t("Every setting returns to its default, except the language. Your games and saves are untouched: they live on their Game Cards.",
+                    "Todos los ajustes vuelven a su valor inicial, salvo el idioma. Tus juegos y partidas no se tocan: viven en sus Game Cards.")
                   + (ShellSettings.activeResolution !== "auto"
                      ? t(" The screen goes dark for a moment while the resolution returns to automatic.",
                          " La pantalla se apaga un momento mientras la resolución vuelve a automática.") : ""),
@@ -346,6 +381,50 @@ QtObject {
                 { label: t("Reset", "Restablecer"), run: () => { ShellSettings.resetKeepingLanguage(); shell.closeModal() } },
                 { label: t("Cancel", "Cancelar"), run: shell.closeModal }
             ]
+        }
+    }
+
+    // Reset console (services/mun-reset): two confirmations, then the
+    // console restarts and resets as it boots.
+    function resetConsole() {
+        return {
+            title: t("Reset the console?", "¿Restablecer la consola?"),
+            text: t("It returns to how it was the first time it started: the settings, the language included, and the system's history go. Your Game Cards, games and saves are not touched.",
+                    "Vuelve a como estaba la primera vez que arrancó: se borran los ajustes, también el idioma, y el historial del sistema. Tus Game Cards, juegos y partidas no se tocan."),
+            actions: [{ label: t("Continue", "Continuar"), run: shell.confirmResetConsole },
+                      { label: t("Cancel", "Cancelar"), run: shell.closeModal }],
+            initial: 1
+        }
+    }
+
+    function resetConsoleConfirm() {
+        return {
+            title: t("This cannot be undone", "No se puede deshacer"),
+            text: t("The console restarts now and starts as on its first day, in English.",
+                    "La consola se reinicia ahora y arranca como el primer día, en inglés."),
+            actions: [{ label: t("Reset the console", "Restablecer la consola"), run: shell.resetConsole },
+                      { label: t("Cancel", "Cancelar"), run: shell.closeModal }],
+            initial: 1
+        }
+    }
+
+    // Why the console cannot reset now: what the shell sees itself
+    // ("card", "reader", "busy", "unavailable"), or mun-reset's refusal
+    // (its exit status).
+    function resetConsoleRefused(reason, detail) {
+        const card = reason === "card" || reason === 65
+        const busy = reason === "busy" || reason === 66
+        return {
+            title: card ? t("Remove the Game Card first", "Retira primero la Game Card")
+                   : busy ? t("A game is in progress", "Hay un juego en marcha")
+                   : t("The console cannot reset now", "La consola no puede restablecerse ahora"),
+            text: card ? t("The console resets only with the slot empty, so nothing on a card is ever touched. Eject it safely, take it out and try again.",
+                           "La consola solo se restablece con la ranura vacía, para no tocar nunca nada de una tarjeta. Retírala con seguridad, sácala y vuelve a intentarlo.")
+                  : busy ? t("Try again once it has ended.", "Vuelve a intentarlo cuando termine.")
+                  : t("It is still on and nothing was deleted. Try again in a moment.",
+                      "Sigue encendida y no se ha borrado nada. Vuelve a intentarlo en un momento."),
+            facts: detail ? [detail] : [],
+            actions: [{ label: t("Close", "Cerrar"), run: shell.closeModal }]
         }
     }
 

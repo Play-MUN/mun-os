@@ -108,8 +108,12 @@ Home has four entries, each with its panel on the right:
 - **Game Card**: the slot. It is empty for now: "Slot empty".
 - **My games**: "There are no games on the console. Your games live on their
   Game Cards."
-- **Settings**: the language (English or Spanish), the resolution (the
-  window follows it), the menus' sounds, MUN Shape and more.
+- **Settings**: six sections. *Display* (the resolution, which the window
+  follows), *Sound* (the menus' sounds), *Appearance and accessibility*
+  (MUN Shape, Reduce motion), *Language and time* (English or Spanish),
+  *Network* and *System*. *System* › *Reset settings* keeps the language;
+  *Reset console* returns the console to its first day, with the slot
+  empty: nothing on a Game Card is touched.
 - **Turn off**: shuts the console down cleanly and closes the window; closing
   the window yourself is pulling the plug.
 
@@ -171,8 +175,8 @@ dressed in the `sea` sample, put in once Home is up so you see it arrive.
 Play it, come back, eject it; *Turn off* ends the preview. Your own cards
 are only read. The other sample is `examples/shape/paper`.
 
-*Settings* › *Picture and sound* › *MUN Shape* (Full, Colours only, Off)
-and *Reduce motion* change how much of it you see.
+*Settings* › *Appearance and accessibility* › *MUN Shape* (Full, Colours
+only, Off) and *Reduce motion* change how much of it you see.
 [See MUN Shape in action](guides/see-shape-in-action.md) shows how such a
 card is made and what to look at; [dress the console in your
 game](guides/shape-your-game.md) makes one of your own.

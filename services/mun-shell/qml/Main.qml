@@ -219,8 +219,10 @@ Window {
         { key: "power", label: I18n.t("Turn off", "Apagar") }
     ]
     readonly property var settingsEntries: [
-        { key: "personal", label: I18n.t("Account and language", "Cuenta e idioma") },
-        { key: "av", label: I18n.t("Picture and sound", "Imagen y sonido") },
+        { key: "display", label: I18n.t("Display", "Pantalla") },
+        { key: "sound", label: I18n.t("Sound", "Sonido") },
+        { key: "appearance", label: I18n.t("Appearance and accessibility", "Apariencia y accesibilidad") },
+        { key: "language", label: I18n.t("Language and time", "Idioma y hora") },
         { key: "network", label: I18n.t("Network", "Red") },
         { key: "system", label: I18n.t("System", "Sistema") }
     ]
@@ -473,7 +475,7 @@ Window {
     // The way a player gets there, one level at a time, so each panel is
     // built for its entry before its options take the focus.
     function resumeSettings(where) {
-        const key = where === "reset" ? "system" : "av"
+        const key = where === "reset" ? "system" : "display"
         mainIndex = 2
         settingsIndex = Math.max(0, settingsEntries.findIndex(e => e.key === key))
         level = 1
@@ -481,9 +483,11 @@ Window {
         level = 2
         optionIndex = where === "reset" ? options.length - 1 : firstSelectable(0, 1)
     }
-    // After the start-up, or at once: the resolution on trial asks first,
-    // then a session's result.
+    // After the start-up, or at once: the memory freed from now on goes back
+    // to the system (src/memory.h); the resolution on trial asks first, then
+    // a session's result.
     function afterStart() {
+        Memory.settle()
         if (ShellSettings.resolutionOnTrial)
             askKeepResolution()
         else
@@ -493,6 +497,27 @@ Window {
     function showCardError() { openModal(panels.cardError()) }
     function showAbout() { openModal(panels.about()) }
     function askReset() { openModal(panels.reset()) }
+    // Reset console: only with the slot empty and no game; mun-reset checks
+    // again for itself.
+    function askResetConsole() {
+        if (cardMode === "offline")
+            openModal(panels.resetConsoleRefused("reader", ""))
+        else if (cardMode !== "absent" || CardClient.waitingCount > 0)
+            openModal(panels.resetConsoleRefused("card", ""))
+        else if (!LaunchClient.available)
+            openModal(panels.resetConsoleRefused("unavailable", ""))
+        else if (LaunchClient.state !== "idle")
+            openModal(panels.resetConsoleRefused("busy", ""))
+        else
+            openModal(panels.resetConsole())
+    }
+    function confirmResetConsole() { openModal(panels.resetConsoleConfirm()) }
+    function resetConsole() {
+        modal = null
+        powered = false
+        boot.powerOff()
+        PowerControl.resetConsole()
+    }
     function askPowerOff() { openModal(panels.powerOff()) }
     function powerOff() {
         modal = null
@@ -515,7 +540,9 @@ Window {
                 return
             boot.shown = false
             window.powered = true
-            window.openModal(panels.powerOffFailed(PowerControl.lastError))
+            window.openModal(PowerControl.lastAction === "reset"
+                             ? panels.resetConsoleRefused(PowerControl.lastStatus, PowerControl.lastError)
+                             : panels.powerOffFailed(PowerControl.lastError))
         }
     }
     Connections {

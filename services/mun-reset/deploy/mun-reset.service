@@ -1,0 +1,25 @@
+# The console reset, when one was asked for (mun-reset request, from
+# Settings › System › Reset console): at boot, before the system journal
+# moves to the disk (systemd-journal-flush), before the boot is recorded
+# (systemd-update-utmp) and before the console's services start, mun-reset
+# apply deletes what its plan lists and then the mark. A boot cut short leaves
+# the mark, and the next boot finishes the reset. Without the mark, nothing
+# runs.
+[Unit]
+Description=MUN OS console reset
+Documentation=file:///opt/mun/reset/README.md
+DefaultDependencies=no
+ConditionPathExists=/var/lib/mun-reset/pending
+After=systemd-remount-fs.service
+Before=systemd-journal-flush.service systemd-update-utmp.service systemd-tmpfiles-setup.service
+Before=mun-cardd.service mun-launchd.service mun-shell.service
+Before=sysinit.target shutdown.target
+Conflicts=shutdown.target
+RequiresMountsFor=/var/lib/mun-reset /var/lib/mun-shell /var/cache/mun-shell /var/log/journal
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/mun-reset apply
+
+[Install]
+WantedBy=sysinit.target

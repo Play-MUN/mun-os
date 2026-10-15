@@ -1,4 +1,6 @@
-# MUN Shell may request exactly these power actions and nothing else.
+# MUN Shell may request exactly these power actions and a console reset
+# (services/mun-reset: the request, which refuses with a card in the slot or a
+# game running; never the reset itself), and nothing else.
 # Installed as /etc/sudoers.d/mun-shell (mode 0440) by deploy/stage.sh.
 Defaults:mun-shell !requiretty
-mun-shell ALL=(root) NOPASSWD: /usr/local/libexec/mun-power poweroff, /usr/local/libexec/mun-power reboot
+mun-shell ALL=(root) NOPASSWD: /usr/local/libexec/mun-power poweroff, /usr/local/libexec/mun-power reboot, /usr/local/libexec/mun-reset request

@@ -17,7 +17,7 @@ consola, haz la tarjeta, insértala, juega, vuelve, retírala. Las reglas, con
 todas sus cifras, son el contrato: [MUN Shape](../../shape.md), en inglés.
 
 Esta guía cita los menús de la consola en español; arranca en inglés y se
-cambia en *Settings* › *Account and language* › *Language*
+cambia en *Settings* › *Language and time* › *Language*
 ([glosario](../glossary.md#las-palabras-de-la-consola)).
 
 ## Antes de empezar
@@ -275,9 +275,9 @@ escribe un paquete defectuoso pequeño por caso, para verlos en la consola.
   colores no aguantan en todas las superficies, se usa el juego de colores de
   MUN en todas. `check --report` muestra las relaciones y las placas antes de
   que hagas una tarjeta.
-- **Reducir movimiento** (*Configuración* › *Imagen y sonido*): todas las
-  transiciones son fundidos y tu mundo se queda quieto. Diséñalo para que se
-  lea bien quieto.
+- **Reducir movimiento** (*Configuración* › *Apariencia y accesibilidad*):
+  todas las transiciones son fundidos y tu mundo se queda quieto. Diséñalo
+  para que se lea bien quieto.
 - **MUN Shape: Completo, Solo colores, Desactivado.** Solo colores mantiene
   tu paleta y tus placas, sin mundo, imágenes ni sonidos; Desactivado es MUN
   solo.

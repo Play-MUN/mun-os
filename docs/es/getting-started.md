@@ -111,8 +111,8 @@ La ventana tiene el teclado mientras está delante:
 | Izquierda, Derecha | Cambiar un ajuste |
 
 La consola arranca en inglés. Para verla en español, elige *Español* en
-*Settings* › *Account and language* › *Language*; desde entonces los menús
-dicen *Configuración* › *Cuenta e idioma* › *Idioma*, y esta guía usa esas
+*Settings* › *Language and time* › *Language*; desde entonces los menús
+dicen *Configuración* › *Idioma y hora* › *Idioma*, y esta guía usa esas
 etiquetas ([glosario](glossary.md#las-palabras-de-la-consola)).
 
 La pantalla principal tiene cuatro entradas, cada una con su panel a la
@@ -121,8 +121,12 @@ derecha:
 - **Game Card**: la ranura. Por ahora está vacía: «Ranura vacía».
 - **Mis juegos**: «No hay ningún juego en la consola. Tus juegos viven en
   sus Game Cards.»
-- **Configuración**: el idioma (inglés o español), la resolución (la ventana
-  la sigue), los sonidos de los menús, MUN Shape y más.
+- **Configuración**: seis secciones. *Pantalla* (la resolución, que la
+  ventana sigue), *Sonido* (los sonidos de los menús), *Apariencia y
+  accesibilidad* (MUN Shape, Reducir movimiento), *Idioma y hora* (inglés o
+  español), *Red* y *Sistema*. *Sistema* › *Restablecer ajustes* conserva el
+  idioma; *Restablecer la consola* la devuelve a su primer día, con la ranura
+  vacía: nada de una Game Card se toca.
 - **Apagar**: apaga la consola limpiamente y cierra la ventana; cerrar tú la
   ventana es como desenchufarla.
 
@@ -187,8 +191,9 @@ pantalla principal para que veas cómo llega. Juégala, vuelve, retírala;
 *Apagar* termina la vista previa. Tus propias tarjetas solo se leen. El otro
 ejemplo es `examples/shape/paper`.
 
-*Configuración* › *Imagen y sonido* › *MUN Shape* (Completo, Solo colores,
-Desactivado) y *Reducir movimiento* cambian cuánto de ella ves.
+*Configuración* › *Apariencia y accesibilidad* › *MUN Shape* (Completo,
+Solo colores, Desactivado) y *Reducir movimiento* cambian cuánto de ella
+ves.
 [Ver MUN Shape en acción](guides/see-shape-in-action.md) enseña cómo se hace
 una tarjeta así y qué mirar;
 [vestir la consola con tu juego](guides/shape-your-game.md) hace una tuya.

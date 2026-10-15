@@ -322,6 +322,12 @@ class RefusalTest(unittest.TestCase):
             self.assertEqual(reset.commit(Path(directory)), 1)
             self.assertFalse(os.path.lexists(Path(directory) / reset.MARK))
 
+    def test_a_restart_that_raises_takes_the_mark_back_too(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(reset.subprocess, "run", side_effect=OSError(12, "Cannot allocate memory")):
+            self.assertEqual(reset.commit(Path(directory)), 1)
+            self.assertFalse(os.path.lexists(Path(directory) / reset.MARK))
+
     def test_a_failure_is_one_line_never_a_traceback(self):
         with mock.patch.object(reset.os, "geteuid", return_value=0), \
                 mock.patch.object(reset, "commit", side_effect=OSError(30, "Read-only file system")), \

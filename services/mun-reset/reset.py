@@ -178,15 +178,20 @@ def request() -> int:
 
 def commit(root: Path = Path("/")) -> int:
     mark = write_mark(root)
-    rebooting = subprocess.run(["systemctl", "reboot"], capture_output=True, text=True)
-    if rebooting.returncode != 0:
-        # No restart, no reset: a mark left here would reset the console at
-        # some later boot the player did not ask for.
+    # No restart, no reset: a mark left after any failure here would reset
+    # the console at some later boot the player did not ask for.
+    try:
+        rebooting = subprocess.run(["systemctl", "reboot"], capture_output=True, text=True)
+        failure = None if rebooting.returncode == 0 else rebooting.stderr.strip()
+    except Exception as exc:   # noqa: BLE001 (whatever it was, the mark goes back)
+        failure = str(exc)
+    if failure is None:
+        return 0
+    if os.path.lexists(mark):
         os.unlink(mark)
-        fsync_directory(mark.parent)
-        print(f"mun-reset: the console could not restart: {rebooting.stderr.strip()}", file=sys.stderr)
-        return 1
-    return 0
+    fsync_directory(mark.parent)
+    print(f"mun-reset: the console could not restart: {failure}", file=sys.stderr)
+    return 1
 
 
 # ------------------------------------------------------------------- apply

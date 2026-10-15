@@ -111,7 +111,9 @@ Home has four entries, each with its panel on the right:
 - **Settings**: six sections. *Display* (the resolution, which the window
   follows), *Sound* (the menus' sounds), *Appearance and accessibility*
   (MUN Shape, Reduce motion), *Language and time* (English or Spanish),
-  *Network* and *System*.
+  *Network* and *System*. *System* › *Reset settings* keeps the language;
+  *Reset console* returns the console to its first day, with the slot
+  empty: nothing on a Game Card is touched.
 - **Turn off**: shuts the console down cleanly and closes the window; closing
   the window yourself is pulling the plug.
 

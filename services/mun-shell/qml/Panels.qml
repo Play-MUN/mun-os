@@ -283,7 +283,8 @@ QtObject {
                 // Set by the image: on for a development build.
                 info(t("Developer mode", "Modo desarrollador"), SystemInfo.release ? t("Off", "Desactivado") : t("On", "Activado")),
                 action(t("About", "Información"), "", shell.showAbout),
-                action(t("Reset settings", "Restablecer ajustes"), "", shell.askReset)
+                action(t("Reset settings", "Restablecer ajustes"), "", shell.askReset),
+                action(t("Reset console", "Restablecer la consola"), "", shell.askResetConsole)
             ]
         }
     }
@@ -380,6 +381,49 @@ QtObject {
                 { label: t("Reset", "Restablecer"), run: () => { ShellSettings.resetKeepingLanguage(); shell.closeModal() } },
                 { label: t("Cancel", "Cancelar"), run: shell.closeModal }
             ]
+        }
+    }
+
+    // Reset console (services/mun-reset): two confirmations, then the
+    // console restarts and resets as it boots.
+    function resetConsole() {
+        return {
+            title: t("Reset the console?", "¿Restablecer la consola?"),
+            text: t("It returns to how it was the first time it started: the settings, the language included, and the system's history go. Your Game Cards, games and saves are not touched.",
+                    "Vuelve a como estaba la primera vez que arrancó: se borran los ajustes, también el idioma, y el historial del sistema. Tus Game Cards, juegos y partidas no se tocan."),
+            actions: [{ label: t("Continue", "Continuar"), run: shell.confirmResetConsole },
+                      { label: t("Cancel", "Cancelar"), run: shell.closeModal }],
+            initial: 1
+        }
+    }
+
+    function resetConsoleConfirm() {
+        return {
+            title: t("This cannot be undone", "No se puede deshacer"),
+            text: t("The console restarts now and starts as on its first day, in English.",
+                    "La consola se reinicia ahora y arranca como el primer día, en inglés."),
+            actions: [{ label: t("Reset the console", "Restablecer la consola"), run: shell.resetConsole },
+                      { label: t("Cancel", "Cancelar"), run: shell.closeModal }],
+            initial: 1
+        }
+    }
+
+    // Why the console cannot reset now: what the shell sees itself
+    // ("card", "reader", "busy"), or mun-reset's refusal (its exit status).
+    function resetConsoleRefused(reason, detail) {
+        const card = reason === "card" || reason === 65
+        const busy = reason === "busy" || reason === 66
+        return {
+            title: card ? t("Remove the Game Card first", "Retira primero la Game Card")
+                   : busy ? t("A game is in progress", "Hay un juego en marcha")
+                   : t("The console cannot reset now", "La consola no puede restablecerse ahora"),
+            text: card ? t("The console resets only with the slot empty, so nothing on a card is ever touched. Eject it safely, take it out and try again.",
+                           "La consola solo se restablece con la ranura vacía, para no tocar nunca nada de una tarjeta. Retírala con seguridad, sácala y vuelve a intentarlo.")
+                  : busy ? t("Try again once it has ended.", "Vuelve a intentarlo cuando termine.")
+                  : t("It is still on and nothing was deleted. Try again in a moment.",
+                      "Sigue encendida y no se ha borrado nada. Vuelve a intentarlo en un momento."),
+            facts: detail ? [detail] : [],
+            actions: [{ label: t("Close", "Cerrar"), run: shell.closeModal }]
         }
     }
 

@@ -54,6 +54,22 @@ class StagingTests(unittest.TestCase):
                 records.append((Path(tmp) / "opt/mun/launchd/BUILD-INFO").read_text())
         self.assertEqual(records[0], records[1])
 
+    def test_reset_files_land_under_destdir_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp)
+            src = ROOT / "services" / "mun-reset"
+            self.stage(src / "deploy" / "stage.sh", src, dest)
+            helper = dest / "usr/local/libexec/mun-reset"
+            self.assertTrue(os.access(helper, os.X_OK))
+            self.assertEqual(helper.read_bytes(), (src / "reset.py").read_bytes())
+            self.assertTrue(helper.read_text().startswith("#!/usr/bin/python3\n"))
+            self.assertTrue((dest / "etc/systemd/system/mun-reset.service").is_file())
+            self.assertTrue((dest / "opt/mun/reset/README.md").is_file())
+            self.assertIn("component=mun-reset", (dest / "opt/mun/reset/BUILD-INFO").read_text())
+            self.assertEqual(sorted(str(p.relative_to(dest)) for p in dest.rglob("*") if p.is_file()),
+                             ["etc/systemd/system/mun-reset.service", "opt/mun/reset/BUILD-INFO",
+                              "opt/mun/reset/README.md", "usr/local/libexec/mun-reset"])
+
     def test_shell_staging_needs_a_build_first(self):
         with tempfile.TemporaryDirectory() as tmp:
             src = ROOT / "services" / "mun-shell"

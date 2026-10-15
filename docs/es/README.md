@@ -65,6 +65,7 @@ Los componentes documentan sus propios protocolos, unidades y privilegios:
 [MUN Shell](../../services/mun-shell/README.md),
 [servicio de tarjetas](../../services/mun-cardd/README.md),
 [lanzador](../../services/mun-launchd/README.md),
+[restablecimiento de la consola](../../services/mun-reset/README.md),
 [`mun-card`](../../tools/mun-card/README.md) y
 [pruebas](../../tests/README.md), en inglés, y [ejemplos](../../examples/README.es.md).
 

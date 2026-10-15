@@ -497,6 +497,25 @@ Window {
     function showCardError() { openModal(panels.cardError()) }
     function showAbout() { openModal(panels.about()) }
     function askReset() { openModal(panels.reset()) }
+    // Reset console: only with the slot empty and no game; mun-reset checks
+    // again for itself.
+    function askResetConsole() {
+        if (cardMode === "offline")
+            openModal(panels.resetConsoleRefused("reader", ""))
+        else if (cardMode !== "absent" || CardClient.waitingCount > 0)
+            openModal(panels.resetConsoleRefused("card", ""))
+        else if (!LaunchClient.available || LaunchClient.state !== "idle")
+            openModal(panels.resetConsoleRefused("busy", ""))
+        else
+            openModal(panels.resetConsole())
+    }
+    function confirmResetConsole() { openModal(panels.resetConsoleConfirm()) }
+    function resetConsole() {
+        modal = null
+        powered = false
+        boot.powerOff()
+        PowerControl.resetConsole()
+    }
     function askPowerOff() { openModal(panels.powerOff()) }
     function powerOff() {
         modal = null
@@ -519,7 +538,9 @@ Window {
                 return
             boot.shown = false
             window.powered = true
-            window.openModal(panels.powerOffFailed(PowerControl.lastError))
+            window.openModal(PowerControl.lastAction === "reset"
+                             ? panels.resetConsoleRefused(PowerControl.lastStatus, PowerControl.lastError)
+                             : panels.powerOffFailed(PowerControl.lastError))
         }
     }
     Connections {

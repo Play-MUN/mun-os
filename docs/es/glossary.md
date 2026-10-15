@@ -61,6 +61,7 @@ español usa las de la columna derecha.
 | Auto power off | Apagado automático |
 | Network / System | Red / Sistema |
 | Reset settings | Restablecer ajustes |
+| Reset console | Restablecer la consola |
 
 ## Lo que no se traduce
 

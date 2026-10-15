@@ -124,7 +124,9 @@ derecha:
 - **Configuración**: seis secciones. *Pantalla* (la resolución, que la
   ventana sigue), *Sonido* (los sonidos de los menús), *Apariencia y
   accesibilidad* (MUN Shape, Reducir movimiento), *Idioma y hora* (inglés o
-  español), *Red* y *Sistema*.
+  español), *Red* y *Sistema*. *Sistema* › *Restablecer ajustes* conserva el
+  idioma; *Restablecer la consola* la devuelve a su primer día, con la ranura
+  vacía: nada de una Game Card se toca.
 - **Apagar**: apaga la consola limpiamente y cierra la ventana; cerrar tú la
   ventana es como desenchufarla.
 

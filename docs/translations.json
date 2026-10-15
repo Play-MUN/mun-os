@@ -27,8 +27,8 @@
       "translation": "docs/es/README.md",
       "source": "docs/README.md",
       "language": "es",
-      "reviewed": "2026-10-05",
-      "source_sha256": "2689d61f646452586593720c067d6294718b88acdffaee085e1cb0a5ee68594a"
+      "reviewed": "2026-10-15",
+      "source_sha256": "4001588ada30dab2ac020cab8c487794310cb08a97d695dd297ddb90320d67f5"
     },
     {
       "translation": "docs/es/compatibility.md",
@@ -42,7 +42,7 @@
       "source": "docs/getting-started.md",
       "language": "es",
       "reviewed": "2026-10-15",
-      "source_sha256": "78ca367db7d9708f0fc9faad5ca327c977262de957eaf4f71011d00f55d83a15"
+      "source_sha256": "55a25f886f503ca95702283f8d2eccd067fecd0c04bb324ab6b7ca80d1bebecd"
     },
     {
       "translation": "docs/es/glossary.md",

@@ -112,7 +112,7 @@ class CompositionTests(unittest.TestCase):
     def test_the_console_services_are_enabled_and_tty1_left_to_the_shell(self):
         preset = (MKOSI / "mkosi.extra" / "usr" / "lib" / "systemd" / "system-preset" / "10-mun.preset").read_text()
         for unit in ("run-mun-launch.mount", "mun-cardd.service", "mun-launchd.service",
-                     "mun-shell.service"):
+                     "mun-shell.service", "mun-reset.service"):
             self.assertIn(f"enable {unit}", preset)
         self.assertIn("disable getty@.service", preset)
 

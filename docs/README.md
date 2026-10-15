@@ -56,5 +56,6 @@ Components document their own protocols, units and privileges:
 [MUN Shell](../services/mun-shell/README.md),
 [card service](../services/mun-cardd/README.md),
 [launcher](../services/mun-launchd/README.md),
+[console reset](../services/mun-reset/README.md),
 [`mun-card`](../tools/mun-card/README.md),
 [examples](../examples/README.md) and [tests](../tests/README.md).

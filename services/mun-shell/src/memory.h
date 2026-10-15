@@ -19,7 +19,9 @@
 // start-up is over, or at once when it does not play: the start-up makes
 // and frees large images on every frame, which the raised threshold keeps
 // cheap; with the thresholds fixed, every one of them would be mapped and
-// its pages faulted in anew.
+// its pages faulted in anew. What another thread allocates before settle()
+// (a Game Card's world prepared while the start-up plays, the card already
+// in the slot) is not covered: part of it stays once it is freed.
 //
 // GUI thread only. Another thread may free a large block at the same moment
 // and raise the thresholds again; the cost is memory kept, never an error,

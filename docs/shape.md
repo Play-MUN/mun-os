@@ -329,6 +329,10 @@ freed (`services/mun-shell/src/memory.h`).
 In the same virtual machine, five rounds of three cards in and out (`sea`,
 `paper` and one without Shape) left the shell 16 MiB over its own at 1080p
 and 15–20 MiB at 1440p, the same after the first round as after the fifth.
+A card already in the slot when the console starts has its world prepared
+while the start-up plays, before the shell settles its memory; once that
+card is out, more of its world's memory stays: 13–15 MiB over the shell's
+own at 1080p, and 31–36 MiB at 1440p.
 
 ## When something is wrong
 

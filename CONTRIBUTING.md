@@ -50,7 +50,7 @@ against `dev`, as the rest of this page describes:
   report what you saw at each step.
 - Run `./mun play` on a Linux ARM64 computer with KVM: the tools support it,
   and nobody has tried it yet.
-- In Spanish at 1080p, *Configuración* › *Imagen y sonido* cuts the row
+- In Spanish at 1080p, *Configuración* › *Sonido* cuts the row
   *Sonidos del juego en los menús* short; make the row show it whole without
   changing the label.
 - Read a guide as a newcomer and turn every step you had to guess into a

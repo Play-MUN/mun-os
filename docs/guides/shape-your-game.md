@@ -259,8 +259,9 @@ one small defective package per case, to see them in the console.
   becomes as opaque as your colours need. If your colours cannot hold on
   every surface, MUN's set is used on all of them. `check --report` shows the
   ratios and plates before you make a card.
-- **Reduce motion** (Settings › Picture and sound): every transition is a
-  fade and your world holds still. Design it to read well still.
+- **Reduce motion** (Settings › Appearance and accessibility): every
+  transition is a fade and your world holds still. Design it to read well
+  still.
 - **MUN Shape: Full, Colours only, Off.** Colours only keeps your palette
   and plates, without world, images or sounds; Off is MUN alone.
 - **Sounds.** *System sounds* off silences all of them, yours included;

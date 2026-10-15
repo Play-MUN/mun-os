@@ -319,7 +319,7 @@ code (`src/shape.*`, `src/shapeworld.*`, `src/shapefront.h`):
   insertion's identity, so a decoder that crashes cannot do it in a loop.
   Sounds are read in the mixer's format and within the contract's
   durations, the set whole or not at all.
-- **Settings** (Picture and sound): *MUN Shape* Full (default), Colours only
+- **Settings** (Appearance and accessibility; Sound): *MUN Shape* Full (default), Colours only
   (colours and plates; no world, images or sounds, MUN's object, the
   palette's light as the ambient) or Off (MUN alone); *Game sounds on the
   menus*; *Reduce motion*, which makes every transition a fade and holds the
@@ -373,7 +373,7 @@ pixels, and scaled to the display mode: 2/3 at 1280×720, 1 at 1920×1080,
 picture of the same layout, and in the laboratory a larger window. Other
 aspect ratios centre the canvas; adaptive layout is a later concern.
 
-Settings › Picture and sound › Resolution offers *Automatic*, the
+Settings › Display › Resolution offers *Automatic*, the
 display's own mode (the default; the laboratory's is 1920×1080), and 720p,
 1080p and 1440p where the display takes them: listed by the connector (from the
 display's EDID on real hardware, and in the laboratory from the EDID the
@@ -385,7 +385,7 @@ display once, so the mode is chosen before `QGuiApplication` exists
 (`src/displaymode.cpp`): the shell writes Qt's KMS configuration for it to
 `/run/mun-shell/kms.json` and points `QT_QPA_KMS_CONFIG` there. A change
 restarts the shell: it exits with status 75, which the unit restarts at once
-(`RestartForceExitStatus=75`), and returns to Picture and sound.
+(`RestartForceExitStatus=75`), and returns to Display.
 
 A new mode is on trial. It is stored under a one-shot key that the next
 start removes before opening the display, and the shell asks whether to
@@ -407,21 +407,33 @@ displays that crop their edges.
 
 ## Settings
 
-| Setting | State |
-| --- | --- |
-| Language | English (default) or Español; kept |
-| Clock format | 24-hour (default) or 12-hour; kept |
-| Resolution | Automatic (default), or 720p, 1080p or 1440p where the display takes them; kept once confirmed (*Resolution*) |
-| Safe area | 100 (default), 97, 94 or 91 %; kept |
-| System sounds | On (default) or Off: the menus' sounds and the start-up's (*Sounds*); kept |
-| Game sounds on the menus | On (default) or Off: a Game Card's own menu sounds and cue (*A Game Card's identity*); kept |
-| MUN Shape | Full (default), Colours only or Off (*A Game Card's identity*); kept |
-| Reduce motion | Off (default) or On: Home's world and objects hold still; kept |
-| Auto power off | Never, or after 1 (default), 3 or 6 hours without input on the menus; kept. A game in progress does not count: the shell is stopped while it runs |
-| Turn off console, About, Reset settings | Work; reset keeps the language |
-| Time zone, developer mode | Shown as they are (the system's zone, set by the image); changing them is not available yet |
-| Ethernet, Wi-Fi | Shown as the kernel sees them (not detected, not connected, connected; no adapter); joining networks is not available yet |
-| Account, HDR, refresh rate, audio output and format, status light, setting the time, updates | Not available yet |
+Six sections, none of which needs an account. An option either works (it
+changes the console at once and is kept), informs (it shows the value as the
+system has it), or says *Not available yet*: the console never offers what
+it cannot do.
+
+| Section | Setting | State |
+| --- | --- | --- |
+| Display | Resolution | Works: Automatic (default), or 720p, 1080p or 1440p where the display takes them; kept once confirmed, back to the previous one on its own otherwise (*Resolution*) |
+| | Safe area | Works: 100 (default), 97, 94 or 91 %; kept |
+| | HDR, refresh rate | Not available yet |
+| Sound | System sounds | Works: On (default) or Off, the menus' sounds and the start-up's (*Sounds*); kept |
+| | Game sounds on the menus | Works: On (default) or Off, a Game Card's own menu sounds and cue (*A Game Card's identity*); kept |
+| | Startup sound | Informs: on or off with System sounds |
+| | Output, format | Not available yet |
+| Appearance and accessibility | MUN Shape | Works: Full (default), Colours only or Off (*A Game Card's identity*); kept |
+| | Reduce motion | Works: Off (default) or On; Home's world and objects hold still, every transition is a fade, the start-up loses its shake, tremor and flicker; kept |
+| | Status light | Not available yet |
+| Language and time | Language | Works: English (default) or Español; kept |
+| | Time format | Works: 24-hour (default) or 12-hour; kept |
+| | Time zone | Informs: the system's zone, set by the image |
+| | Set time | Not available yet |
+| Network | Ethernet, Wi-Fi | Inform: as the kernel sees them (not detected, not connected, connected; no adapter); joining networks is not available yet |
+| System | Auto power off | Works: Never, or after 1 (default), 3 or 6 hours without input on the menus; kept. A game in progress does not count: the shell is stopped while it runs |
+| | Turn off console, About | Work |
+| | Updates | Not available yet |
+| | Developer mode | Informs: set by the image (on for a development build) |
+| | Reset settings | Works: every setting back to its default but the language; a resolution other than Automatic restarts the shell |
 
 The settings live in `/var/lib/mun-shell/settings.ini`
 (`StateDirectory=mun-shell`). The file is read as untrusted input: a value
@@ -459,8 +471,8 @@ I/O error), and let go after three seconds of silence; the shell holds none
 of it while a game runs (the launcher stops the shell first). A device that
 fails is opened afresh at once; no device, or one that fails again, means
 silence and one line in the journal, and the next sound tries again after
-five seconds. Settings › Picture and sound
-› System sounds turns them off. In the laboratory the guest's sound device
+five seconds. Settings › Sound › System
+sounds turns them off. In the laboratory the guest's sound device
 is silent unless it plays to the Mac (`--window`, or `--audio coreaudio`)
 or records to `audio.wav` (`--audio wav`).
 

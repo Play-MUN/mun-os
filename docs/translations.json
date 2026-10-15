@@ -6,8 +6,8 @@
       "translation": "CONTRIBUTING.es.md",
       "source": "CONTRIBUTING.md",
       "language": "es",
-      "reviewed": "2026-10-07",
-      "source_sha256": "36c6eced8104a47687b54b3e89a4b9e6196ba71ee075e50810555b4c1c5f89d4"
+      "reviewed": "2026-10-15",
+      "source_sha256": "8fcf359c4174f4f19a437294754f25f7d94ef3c07c563234e899e2c9fdf32259"
     },
     {
       "translation": "README.es.md",
@@ -41,8 +41,8 @@
       "translation": "docs/es/getting-started.md",
       "source": "docs/getting-started.md",
       "language": "es",
-      "reviewed": "2026-10-07",
-      "source_sha256": "8fbff8e18efb60b4065f2836a860b0ab461e12cf10461f1ffb896262ab8e702a"
+      "reviewed": "2026-10-15",
+      "source_sha256": "78ca367db7d9708f0fc9faad5ca327c977262de957eaf4f71011d00f55d83a15"
     },
     {
       "translation": "docs/es/glossary.md",
@@ -69,15 +69,15 @@
       "translation": "docs/es/guides/see-shape-in-action.md",
       "source": "docs/guides/see-shape-in-action.md",
       "language": "es",
-      "reviewed": "2026-10-06",
-      "source_sha256": "81093fe71350558db042356f62fa12af57455b504ff098be52a7a5f37736c9f6"
+      "reviewed": "2026-10-15",
+      "source_sha256": "6bc825a1576ba2698d2da2dbdb8e31fcfebd9fdd88f261d397358971cece9755"
     },
     {
       "translation": "docs/es/guides/shape-your-game.md",
       "source": "docs/guides/shape-your-game.md",
       "language": "es",
-      "reviewed": "2026-10-06",
-      "source_sha256": "6d2d448fb90bc0c3c1814ee1c888163036cf2893d016136a5d87b986c6cbd9db"
+      "reviewed": "2026-10-15",
+      "source_sha256": "a6798a6a295c337537e67503ee692dcbb07fc8f36db6d7b53d809c20fc8c373c"
     },
     {
       "translation": "examples/README.es.md",

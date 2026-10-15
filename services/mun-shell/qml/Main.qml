@@ -219,8 +219,10 @@ Window {
         { key: "power", label: I18n.t("Turn off", "Apagar") }
     ]
     readonly property var settingsEntries: [
-        { key: "personal", label: I18n.t("Account and language", "Cuenta e idioma") },
-        { key: "av", label: I18n.t("Picture and sound", "Imagen y sonido") },
+        { key: "display", label: I18n.t("Display", "Pantalla") },
+        { key: "sound", label: I18n.t("Sound", "Sonido") },
+        { key: "appearance", label: I18n.t("Appearance and accessibility", "Apariencia y accesibilidad") },
+        { key: "language", label: I18n.t("Language and time", "Idioma y hora") },
         { key: "network", label: I18n.t("Network", "Red") },
         { key: "system", label: I18n.t("System", "Sistema") }
     ]
@@ -473,7 +475,7 @@ Window {
     // The way a player gets there, one level at a time, so each panel is
     // built for its entry before its options take the focus.
     function resumeSettings(where) {
-        const key = where === "reset" ? "system" : "av"
+        const key = where === "reset" ? "system" : "display"
         mainIndex = 2
         settingsIndex = Math.max(0, settingsEntries.findIndex(e => e.key === key))
         level = 1

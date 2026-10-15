@@ -1242,6 +1242,9 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
     settings = first(phases, label="settings")
     checks.expect("home-settings", "in Settings the world is under MUN's scrim",
                   settings is not None and settings["level"] == 1 and settings["dim"] > 0.7, settings)
+    checks.expect("home-settings", "Settings has its six sections, in order, and no account",
+                  settings is not None and settings["sections"] == ["display", "sound", "appearance", "language",
+                                                                    "network", "system"], settings)
 
     # The options focused when the identity comes, goes or changes: a dressed
     # entry whole from its first frame (never easing out of MUN's fade),

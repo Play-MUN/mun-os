@@ -3,7 +3,7 @@
 // change of resolution restarts the shell (systemd starts it again when it
 // exits with kRestartStatus; see deploy/mun-shell.service).
 //
-// The choice is the player's (Settings › Picture and sound › Resolution),
+// The choice is the player's (Settings › Display › Resolution),
 // kept by ShellSettings: "auto", the display's own preferred mode, or one of
 // kModes. A mode is offered only when the display takes it: listed by the
 // connector (its EDID on real hardware), or on a virtual connector, which

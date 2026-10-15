@@ -31,9 +31,14 @@
 // on the GUI thread; a sound already queued or playing holds its samples
 // (shared) until it ends.
 //
-// Thread contract: play(), stop(), useGameSounds() and playGame() on the GUI
-// thread, started() delivered on it; the worker owns the ALSA handle and is
-// joined by the destructor, before any member it reads is destroyed.
+// A sound the worker has to drop (no device, or one that stopped and failed
+// again) is over: heard() says NaN for it from then on, and dropped() says
+// so, as it does for a sound asked for while the device is being retried.
+//
+// Thread contract: play(), stop(), useGameSounds(), playGame() and heard() on
+// the GUI thread (heard() reads what the worker wrote under a lock), started()
+// and dropped() delivered on it; the worker owns the ALSA handle and is joined
+// by the destructor, before any member it reads is destroyed.
 #pragma once
 
 #include <QByteArray>
@@ -83,8 +88,8 @@ public:
     // what the device still holds (snd_pcm_delay), as of the last write and
     // carried on by the clock since, never past what was written. Below zero
     // while its first samples wait in the device; NaN when it is not
-    // playing (not yet started, or played out). A device that stops leaves it
-    // where it was.
+    // playing (not yet started, played out, or dropped). A device that stalls
+    // leaves it where it was until it plays again or the sound is dropped.
     Q_INVOKABLE double heard(const QString &name) const;
     int latency() const { return int(kLatencyMicroseconds / 1000); }
     bool gameSounds() const { return m_gameSounds; }
@@ -94,6 +99,8 @@ public:
 signals:
     // The first samples of a sound that play() asked for went to the device.
     void started(const QString &name);
+    // A sound that play() asked for will not be heard (any more): no device.
+    void dropped(const QString &name);
     void gameSoundsChanged();
     void gameSetChanged();
     // One of the game's sounds was queued by playGame().

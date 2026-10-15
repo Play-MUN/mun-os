@@ -242,12 +242,33 @@ void SystemSounds::run()
             pcm = nullptr;
         }
     };
+    // Sounds that will not be heard: over for heard() (NaN once what was
+    // heard has passed) and said to the GUI thread.
+    const auto drop = [&] {
+        if (voices.empty())
+            return;
+        {
+            std::lock_guard lock(m_progressMutex);
+            const auto now = std::chrono::steady_clock::now();
+            for (const Voice &voice : voices) {
+                Progress &progress = m_progress[voice.sound->name];
+                const double since = std::chrono::duration<double>(now - progress.at).count();
+                const qint64 heard = std::min(progress.written, progress.heard + qint64(since * kRate));
+                progress = {heard, heard, now, true};
+            }
+        }
+        for (const Voice &voice : voices) {
+            const QString name = voice.sound->name;
+            QMetaObject::invokeMethod(this, [this, name] { emit dropped(name); }, Qt::QueuedConnection);
+        }
+        voices.clear();
+    };
     const auto giveUp = [&](const char *what, int error) {
         if (!reported)
             qWarning("mun-shell: interface sounds off: %s: %s", what, snd_strerror(error));
         reported = true;
         closeDevice();
-        voices.clear();
+        drop();
         failures = 0;
         retryAt = std::chrono::steady_clock::now() + kRetry;
     };
@@ -286,7 +307,7 @@ void SystemSounds::run()
 
         if (!pcm) {
             if (now < retryAt) {
-                voices.clear();
+                drop();
                 continue;
             }
             int error = snd_pcm_open(&pcm, "default", SND_PCM_STREAM_PLAYBACK, 0);

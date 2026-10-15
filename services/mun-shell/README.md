@@ -98,14 +98,17 @@ from 7.85 s the moon comes out of an eclipse, copper, then silver as the
 shadow withdraws; from 10.05 s the LED melts away in silence and the logo
 fades while the sound rings on. The system loads meanwhile: once the card
 service and the launcher have answered, "A Skip" shows at the bottom right
-and A (or Enter) ends the start-up; until then no key does anything. When
-the picture has faded (11.75 s), Home comes in if they have answered, while
-the sound rings on; if not, the LED waits, breathing, until they do, or 20
-s after the start whatever they do. The picture keeps time with the sound:
-on every frame its clock is what has been heard of it, the samples written
-to the device less what the device still holds; with System sounds off, or
-no device, it plays silent on its own clock. *Reduce motion* takes out the
-shake, the tremor and the flicker; every time stays. Moving to another entry: the chosen bar
+and A (or Enter, or Space) ends the start-up; until then no key does
+anything. When the picture has faded (11.75 s), Home comes in if they have
+answered, while the sound rings on; if not, the LED waits, breathing, until
+they do, or 20 s after the start whatever they do. The picture keeps time
+with the sound: on every frame its clock is what has been heard of it, the
+samples written to the device less what the device still holds. The black
+screen waits up to 3 s for the sound's first samples, and the picture holds
+while the sound stalls, up to 2 s, then follows it again; with System sounds
+off, no device, or a longer wait, it plays on its own clock from where it
+was. The journal says each time the picture changes clock. *Reduce motion*
+takes out the shake, the tremor and the flicker; every time stays. Moving to another entry: the chosen bar
 turns light at once while its copper edge, glow and text colour settle in
 0.3 s and it slides 4 px out; the new object loads in 0.9 s, a radar-like
 sweep drawing its glowing wireframe with a copper line and its face

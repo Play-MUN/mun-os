@@ -1367,10 +1367,13 @@ def boot_cases(shell: Shell, checks: Checks):
             for service in (cardd, launchd):
                 if service:
                     service.close()
+        clocks[name] = re.findall(r"mun-shell: start-up: the picture (follows the sound|runs on its own[^\n]*)", output)
         return lines(output, "BOOT"), lines(output, "KEY")
 
     def first(states, **match):
         return next((s for s in states if all(s[k] == v for k, v in match.items())), None)
+
+    clocks = {}   # what each run's start-up said about its clock
 
     # Both services answer at once: the hint shows; Down does nothing, A ends it.
     states, keys = run("boot-ready", ready_at=0, steps=[{"at": 2000, "key": "Down"}, {"at": 3000, "key": "A"}], end=5000)
@@ -1384,6 +1387,12 @@ def boot_cases(shell: Shell, checks: Checks):
                   home is not None and 3000 <= home["at"] < 3700 and not home["playing"] and not home["shown"], home)
     played = [s["t"] for s in states if s["at"] < 3000 and s["playing"]]
     checks.expect("boot-ready", "its clock ran before the skip", played and max(played) > 1.0, played[-3:])
+    early = next((s for s in states if s["at"] >= 1500), None)
+    checks.expect("boot-ready", "without a sound device the picture does not wait for one",
+                  early is not None and early["t"] >= 0.5, early)
+
+    checks.expect("boot-ready", "the journal says which clock the picture follows", bool(clocks.get("boot-ready")),
+                  clocks.get("boot-ready"))
 
     # The services answer at 15 s: nothing skips it before; the picture
     # fades (11.75 s of the sound) and the LED waits for them; Home follows.

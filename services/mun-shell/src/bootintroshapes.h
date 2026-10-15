@@ -1,5 +1,5 @@
 // The start-up's shapes, in the units of its design (an SVG view
-// "176 -22 1414 900", 1180 px wide at the centre of the 1920 x 1080 canvas):
+// "176 -22 1414 900", drawn 1180 px wide on the 1920 x 1080 canvas):
 // the MUN letters (even-odd) and the moon's arc, absolute M, L, C and Z only,
 // and the LED's outline around its centre, from (-115.50, 0) along its
 // upper edge and back along the lower one. Used by bootintro.cpp only.

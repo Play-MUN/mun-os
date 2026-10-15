@@ -26,8 +26,8 @@ using namespace bootshapes;
 
 // The design's frame time leads the sound's by this much.
 constexpr qreal kLead = 0.35;
-// The design's view, 1414 x 900 units from (176, -22), is 1180 px wide at
-// the canvas's centre.
+// The design's view, 1414 x 900 units from (176, -22), is 1180 px wide on
+// the canvas, placed as viewTransform() says.
 constexpr qreal kView = 1180.0 / 1414.0;
 
 qreal cl(qreal v) { return std::clamp<qreal>(v, 0, 1); }
@@ -541,6 +541,10 @@ QPointF BootIntro::shake() const
     if (m_reduceMotion || s < 3.8)
         return QPointF();
     const qreal shake = 9 * std::exp(-(s - 3.8) * 9);
+    // Exactly still once it cannot be seen: an offset that keeps changing,
+    // however small, has the whole screen composed again on every frame.
+    if (shake < 0.01)
+        return QPointF();
     return QPointF(std::sin(s * 90) * shake, std::cos(s * 77) * shake);
 }
 

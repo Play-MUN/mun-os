@@ -116,6 +116,24 @@ class CompositionTests(unittest.TestCase):
             self.assertIn(f"enable {unit}", preset)
         self.assertIn("disable getty@.service", preset)
 
+    def test_the_journal_is_bounded_and_forwards_nowhere(self):
+        extra = MKOSI / "mkosi.extra"
+        bound = (extra / "usr" / "lib" / "systemd" / "journald.conf.d" / "60-mun.conf").read_text()
+        self.assertRegex(bound, r"(?m)^\[Journal\]$")
+        self.assertRegex(bound, r"(?m)^SystemMaxUse=32M$")
+        # Debian's systemd ships journald.conf.d/syslog.conf with forwarding
+        # on; a file of the same name in /etc replaces it.
+        syslog = (extra / "etc" / "systemd" / "journald.conf.d" / "syslog.conf").read_text()
+        self.assertRegex(syslog, r"(?m)^ForwardToSyslog=no$")
+        self.assertNotIn("rsyslog", mkosi_list(MKOSI / "mkosi.conf", "Packages"))
+
+    def test_package_translations_go_only_with_the_c_locale(self):
+        # Removing them is safe only while no other locale is generated.
+        text = (MKOSI / "mkosi.conf").read_text()
+        self.assertRegex(text, r"(?m)^Locale=C\.UTF-8$")
+        self.assertRegex(text, r"(?m)^RemoveFiles=/usr/share/locale/\*$")
+        self.assertNotIn("locales", mkosi_list(MKOSI / "mkosi.conf", "Packages"))
+
     def test_build_scripts_never_have_network(self):
         text = (MKOSI / "mkosi.conf").read_text()
         self.assertRegex(text, r"(?m)^WithNetwork=no$")

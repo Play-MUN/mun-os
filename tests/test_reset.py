@@ -198,6 +198,14 @@ class ApplyTest(unittest.TestCase):
         self.assertEqual((Path(outside.name) / "keep").read_text(), "keep")
 
 
+class LogTest(unittest.TestCase):
+    def test_each_line_is_written_as_it_happens(self):
+        self.assertIs(reset.apply.__defaults__[1], reset.say)
+        with mock.patch("builtins.print") as printed:
+            reset.say("mun-reset: deleted /var/log/wtmp")
+        printed.assert_called_once_with("mun-reset: deleted /var/log/wtmp", flush=True)
+
+
 class MarkTest(unittest.TestCase):
     def test_the_mark_is_written_whole(self):
         with tempfile.TemporaryDirectory() as directory:

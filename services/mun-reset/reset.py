@@ -246,7 +246,14 @@ def targets(root: Path) -> List[Tuple[Path, str]]:
     return [(path, how) for path, how in found if inside(root, path)]
 
 
-def apply(root: Path = Path("/"), log=print) -> bool:
+def say(line: str) -> None:
+    # Each line as it happens: under systemd stdout is a pipe, which Python
+    # would otherwise buffer to the end, and the journal's times (and what a
+    # reset cut short had done) would be lost.
+    print(line, flush=True)
+
+
+def apply(root: Path = Path("/"), log=say) -> bool:
     """Carries out a pending reset; False when none was asked for."""
     mark = root / MARK
     if not os.path.lexists(mark):

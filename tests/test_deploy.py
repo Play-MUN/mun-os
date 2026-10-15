@@ -67,8 +67,8 @@ class StagingTests(unittest.TestCase):
             self.assertTrue((dest / "opt/mun/reset/README.md").is_file())
             self.assertIn("component=mun-reset", (dest / "opt/mun/reset/BUILD-INFO").read_text())
             self.assertEqual(sorted(str(p.relative_to(dest)) for p in dest.rglob("*") if p.is_file()),
-                             ["etc/systemd/system/mun-reset.service", "opt/mun/reset/BUILD-INFO",
-                              "opt/mun/reset/README.md", "usr/local/libexec/mun-reset"])
+                             ["etc/systemd/system/mun-reset-commit.service", "etc/systemd/system/mun-reset.service",
+                              "opt/mun/reset/BUILD-INFO", "opt/mun/reset/README.md", "usr/local/libexec/mun-reset"])
 
     def test_shell_staging_needs_a_build_first(self):
         with tempfile.TemporaryDirectory() as tmp:

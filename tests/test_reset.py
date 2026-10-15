@@ -283,18 +283,45 @@ class RefusalTest(unittest.TestCase):
             reset.refusal(missing, missing, system_state="running")
         self.assertEqual(caught.exception.status, reset.EXIT_NO_ANSWER)
 
-    def test_a_refused_request_writes_no_mark(self):
+    def test_a_refused_request_starts_nothing(self):
+        with mock.patch.object(reset, "refusal", side_effect=reset.Refused(reset.EXIT_CARD, "a card")), \
+                mock.patch.object(reset.subprocess, "run") as run:
+            self.assertEqual(reset.request(), reset.EXIT_CARD)
+            run.assert_not_called()
+
+    def test_an_accepted_request_starts_the_commit_unit_and_waits(self):
+        done = mock.Mock(returncode=0, stderr="")
+        with mock.patch.object(reset, "refusal"), mock.patch.object(reset.subprocess, "run", return_value=done) as run:
+            self.assertEqual(reset.request(), 0)
+            run.assert_called_once()
+            self.assertEqual(run.call_args[0][0], ["systemctl", "start", "mun-reset-commit.service"])
+        failed = mock.Mock(returncode=1, stderr="Job failed")
+        with mock.patch.object(reset, "refusal"), mock.patch.object(reset.subprocess, "run", return_value=failed):
+            self.assertEqual(reset.request(), 1)
+
+    def test_commit_marks_and_restarts(self):
+        done = mock.Mock(returncode=0, stderr="")
         with tempfile.TemporaryDirectory() as directory, \
-                mock.patch.object(reset, "refusal", side_effect=reset.Refused(reset.EXIT_CARD, "a card")):
-            self.assertEqual(reset.request(Path(directory)), reset.EXIT_CARD)
-            self.assertFalse(os.path.lexists(Path(directory) / reset.MARK))
+                mock.patch.object(reset.subprocess, "run", return_value=done) as run:
+            self.assertEqual(reset.commit(Path(directory)), 0)
+            self.assertTrue((Path(directory) / reset.MARK).is_file())
+            self.assertEqual(run.call_args[0][0], ["systemctl", "reboot"])
 
     def test_a_restart_that_cannot_be_asked_for_takes_the_mark_back(self):
         failed = mock.Mock(returncode=1, stderr="no systemd")
-        with tempfile.TemporaryDirectory() as directory, mock.patch.object(reset, "refusal"), \
+        with tempfile.TemporaryDirectory() as directory, \
                 mock.patch.object(reset.subprocess, "run", return_value=failed):
-            self.assertEqual(reset.request(Path(directory)), 1)
+            self.assertEqual(reset.commit(Path(directory)), 1)
             self.assertFalse(os.path.lexists(Path(directory) / reset.MARK))
+
+    def test_a_failure_is_one_line_never_a_traceback(self):
+        with mock.patch.object(reset.os, "geteuid", return_value=0), \
+                mock.patch.object(reset, "commit", side_effect=OSError(30, "Read-only file system")), \
+                mock.patch("sys.stderr") as stderr:
+            self.assertEqual(reset.main(["commit"]), 1)
+        written = "".join(call.args[0] for call in stderr.write.call_args_list)
+        self.assertEqual(written.count("\n"), 1)
+        self.assertIn("mun-reset: commit failed:", written)
 
 
 class DeployTest(unittest.TestCase):
@@ -307,12 +334,20 @@ class DeployTest(unittest.TestCase):
             self.assertRegex(unit, rf"(?m)^Before=.*\b{re.escape(before)}\b")
         self.assertIn("ExecStart=/usr/local/libexec/mun-reset apply", unit)
 
+    def test_the_commit_unit_runs_outside_the_shell_and_survives_its_restart(self):
+        unit = (SERVICE / "deploy" / "mun-reset-commit.service").read_text()
+        self.assertIn("ExecStart=/usr/local/libexec/mun-reset commit", unit)
+        self.assertRegex(unit, r"(?m)^DefaultDependencies=no$")
+        self.assertNotRegex(unit, r"(?m)^\[Install\]", "nothing starts it but a request")
+        self.assertEqual(reset.COMMIT_UNIT, "mun-reset-commit.service")
+
     def test_the_shell_may_ask_for_a_request_and_nothing_else(self):
         rule = (ROOT / "services" / "mun-shell" / "deploy" / "mun-shell.sudoers").read_text()
         commands = [line for line in rule.splitlines() if "mun-reset" in line]
         self.assertTrue(commands)
         self.assertIn("/usr/local/libexec/mun-reset request", rule)
         self.assertNotIn("mun-reset apply", rule)
+        self.assertNotIn("mun-reset commit", rule)
         self.assertNotRegex(rule, r"mun-reset\s*(,|$)", "the rule names the request, not the helper alone")
 
 

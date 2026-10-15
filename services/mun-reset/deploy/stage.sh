@@ -1,8 +1,8 @@
 #!/bin/sh
 # Install mun-reset's files under DESTDIR, the image root in an image build
 # (os/mkosi): the helper, which the shell's sudoers rule names
-# (services/mun-shell/deploy/mun-shell.sudoers), and the unit that carries
-# out a reset at boot. Enabled by the image's preset; no packages here.
+# (services/mun-shell/deploy/mun-shell.sudoers), the unit that marks a reset
+# and restarts, and the unit that carries it out at boot. Enabled by the image's preset; no packages here.
 #
 #   deploy/stage.sh SRC_DIR DESTDIR
 set -eu
@@ -14,7 +14,9 @@ PREFIX=/opt/mun/reset
 install -d "$DESTDIR$PREFIX" "$DESTDIR/usr/local/libexec" "$DESTDIR/etc/systemd/system"
 install -m 0755 "$SRC/reset.py" "$DESTDIR/usr/local/libexec/mun-reset"
 install -m 0644 "$SRC/README.md" "$DESTDIR$PREFIX/README.md"
-install -m 0644 "$SRC/deploy/mun-reset.service" "$DESTDIR/etc/systemd/system/mun-reset.service"
+for unit in mun-reset.service mun-reset-commit.service; do
+    install -m 0644 "$SRC/deploy/$unit" "$DESTDIR/etc/systemd/system/$unit"
+done
 {
     echo "component=mun-reset"
     echo "source_sha256=$(cd "$SRC" && cat reset.py deploy/* | sha256sum | cut -d' ' -f1)"

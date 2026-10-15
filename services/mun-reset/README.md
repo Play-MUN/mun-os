@@ -45,18 +45,26 @@ nothing else; `tests/test_reset.py` checks that the two agree.
    | 67 | the console is shutting down |
    | 68 | the card service or the launcher did not answer |
 
-   Otherwise it writes the mark, `/var/lib/mun-reset/pending`, whole or not
-   at all (a temporary file, synced, renamed, its directory synced), and
-   restarts the console. If the restart cannot be asked for, it removes the
-   mark again: no reset happens at a later boot nobody asked for.
-2. **`mun-reset apply`**, at the next boot (`deploy/mun-reset.service`,
+   Otherwise it starts `mun-reset-commit.service` and waits for it.
+2. **`mun-reset commit`**, in that unit (`deploy/mun-reset-commit.service`,
+   which nothing else starts). It runs as a unit of its own because the
+   shell's sandbox (`ProtectSystem=strict`) keeps the file system read-only
+   for the shell and for whatever it runs, sudo included. It writes the
+   mark, `/var/lib/mun-reset/pending`, whole or not at all (a temporary
+   file, synced, renamed, its directory synced), and restarts the console.
+   If the restart cannot be asked for, it removes the mark again: no reset
+   happens at a later boot nobody asked for.
+3. **`mun-reset apply`**, at the next boot (`deploy/mun-reset.service`,
    only when the mark exists). It runs before the system journal moves to
    the disk, before the boot is recorded and before the console's services
    start, deletes what the plan lists, syncs, and removes the mark last.
    Every step can run again, so a boot cut short (power lost, a crash)
    leaves the mark and the next boot finishes the reset. A path in the plan
    that is a symbolic link is removed as a link, never followed.
-3. The console starts as on its first day, start-up included.
+4. The console starts as on its first day, start-up included.
+
+Any failure is one line on the standard error, for the shell to show; never
+a traceback.
 
 ## Tests
 

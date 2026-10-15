@@ -12,7 +12,13 @@ not overwritten. Two steps, both as root:
                       while a Game Card is in the slot, while a game runs or
                       starts, while the console is shutting down, or when the
                       card service or the launcher does not answer; otherwise
-                      writes the mark (MARK) and restarts the console.
+                      starts COMMIT_UNIT and waits for it.
+  mun-reset commit    run by COMMIT_UNIT (deploy/mun-reset-commit.service),
+                      outside the shell's sandbox: the shell's unit keeps the
+                      file system read-only for it and for whatever it runs,
+                      sudo included. Writes the mark (MARK) and restarts the
+                      console; if the restart cannot be asked for, takes the
+                      mark back.
   mun-reset apply     at the next boot (deploy/mun-reset.service), before the
                       system journal moves to the disk and before the
                       console's services start: deletes what PLAN lists, and
@@ -59,6 +65,7 @@ PLAN: Tuple[Tuple[str, str], ...] = (
 )
 MARK = "var/lib/mun-reset/pending"
 FORMAT = "mun-reset/1"
+COMMIT_UNIT = "mun-reset-commit.service"
 
 CARDD_SOCKET = "/run/mun/cardd.sock"
 LAUNCHD_SOCKET = "/run/mun/launchd.sock"
@@ -155,12 +162,21 @@ def write_mark(root: Path, now: Optional[float] = None) -> Path:
     return mark
 
 
-def request(root: Path = Path("/")) -> int:
+def request() -> int:
     try:
         refusal()
     except Refused as refused:
         print(f"mun-reset: refused: {refused.reason}", file=sys.stderr)
         return refused.status
+    committed = subprocess.run(["systemctl", "start", COMMIT_UNIT], capture_output=True, text=True)
+    if committed.returncode != 0:
+        print(f"mun-reset: the reset could not be marked: {committed.stderr.strip()}", file=sys.stderr)
+        return 1
+    print("mun-reset: the console resets as it restarts")
+    return 0
+
+
+def commit(root: Path = Path("/")) -> int:
     mark = write_mark(root)
     rebooting = subprocess.run(["systemctl", "reboot"], capture_output=True, text=True)
     if rebooting.returncode != 0:
@@ -170,7 +186,6 @@ def request(root: Path = Path("/")) -> int:
         fsync_directory(mark.parent)
         print(f"mun-reset: the console could not restart: {rebooting.stderr.strip()}", file=sys.stderr)
         return 1
-    print("mun-reset: the console resets as it restarts")
     return 0
 
 
@@ -254,15 +269,22 @@ def apply(root: Path = Path("/"), log=print) -> bool:
 
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(prog="mun-reset", description=__doc__.splitlines()[0])
-    parser.add_argument("step", choices=("request", "apply"))
+    parser.add_argument("step", choices=("request", "commit", "apply"))
     args = parser.parse_args(argv)
     if os.geteuid() != 0:
         print("mun-reset: must run as root", file=sys.stderr)
         return EXIT_USAGE
-    if args.step == "request":
-        return request()
-    apply()
-    return 0
+    # One line for the shell to show, never a traceback.
+    try:
+        if args.step == "request":
+            return request()
+        if args.step == "commit":
+            return commit()
+        apply()
+        return 0
+    except Exception as exc:   # noqa: BLE001 (any failure is reported, nothing half done is hidden)
+        print(f"mun-reset: {args.step} failed: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

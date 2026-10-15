@@ -1,0 +1,6 @@
+# The development image's own name (Hostname= in this profile's mkosi.conf)
+# resolves locally: without it, sudo warns "unable to resolve host" on every
+# call, and the warning reaches what the shell shows when a helper fails.
+127.0.0.1	localhost
+127.0.1.1	mun-qemu
+::1	localhost ip6-localhost ip6-loopback

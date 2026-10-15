@@ -116,6 +116,12 @@ class CompositionTests(unittest.TestCase):
             self.assertIn(f"enable {unit}", preset)
         self.assertIn("disable getty@.service", preset)
 
+    def test_the_lab_image_resolves_its_own_name(self):
+        hostname = re.search(r"(?m)^Hostname=(\S+)$", PROFILE.read_text()).group(1)
+        hosts = (PROFILE.parent / "extra" / "etc" / "hosts").read_text()
+        self.assertRegex(hosts, rf"(?m)^127\.0\.1\.1\s+{re.escape(hostname)}$")
+        self.assertRegex(hosts, r"(?m)^127\.0\.0\.1\s+localhost$")
+
     def test_the_journal_is_bounded_and_forwards_nowhere(self):
         extra = MKOSI / "mkosi.extra"
         bound = (extra / "usr" / "lib" / "systemd" / "journald.conf.d" / "60-mun.conf").read_text()

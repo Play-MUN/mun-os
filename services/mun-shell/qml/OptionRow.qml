@@ -3,6 +3,8 @@ import MUN.Shell
 
 // A row of options: a label and, on the right, its value. A choice shows
 // arrows around the value while it has the focus (Left and Right change it).
+// A label too long for the room its value leaves goes on to a second line,
+// whole (the row grows); only beyond two lines is it cut short.
 // `large` is a dialog's button size. In the game's dressed panel (`shaped`)
 // the row draws no fill of its own over the game's plate, only its frame in
 // the focus colour, and its text in the plate's text colour (`textColour`);
@@ -36,6 +38,8 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
         text: root.label
         size: root.large ? 26 : 24
+        wrapMode: Text.WordWrap
+        maximumLineCount: 2
         elide: Text.ElideRight
         color: root.shaped ? root.textColour : Theme.moon
     }

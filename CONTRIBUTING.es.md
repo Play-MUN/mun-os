@@ -53,9 +53,6 @@ o una pull request contra `dev`, como explica el resto de esta página:
   cuenta lo que viste en cada paso.
 - Ejecuta `./mun play` en un ordenador ARM64 con Linux y KVM: las
   herramientas lo admiten y nadie lo ha probado todavía.
-- En español y a 1080p, *Configuración* › *Sonido* corta la fila
-  *Sonidos del juego en los menús*; haz que se vea entera sin cambiar la
-  etiqueta.
 - Lee una guía como alguien que llega de nuevas y convierte en una
   corrección cada paso que tuviste que adivinar.
 - Una más grande: un tercer ejemplo de MUN Shape, con el arte y los sonidos

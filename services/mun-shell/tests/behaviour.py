@@ -1255,6 +1255,21 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
                   settings is not None and settings["sections"] == ["display", "sound", "appearance", "language",
                                                                     "network", "system"], settings)
 
+    # In Spanish, the longer language: every section with its options
+    # focused, no text on screen cut short.
+    steps = [{"at": 2500, "set": {"mainIndex": 2}}, {"at": 2700, "call": "enter"}]
+    for i in range(6):
+        at = 3500 + i * 1600
+        steps += [{"at": at, "set": {"settingsIndex": i}}, {"at": at + 100, "call": "enter"},
+                  {"at": at + 1200, "probe": f"section-{i}"}, {"at": at + 1300, "call": "back"}]
+    cardd, launchd = serve("home-settings-es", [[(0, snapshot())]])
+    out, phases, _ = run("home-settings-es", cardd, launchd, steps, settings="[interface]\nlanguage=es\n",
+                         end=3500 + 6 * 1600 + 400)
+    sections = [p for p in phases if p["label"].startswith("section-")]
+    checks.expect("home-settings-es", "in Spanish, every section's options show whole, nothing cut short",
+                  len(sections) == 6 and all(p["level"] == 2 and not p["cut"] for p in sections),
+                  [(p["label"], p["level"], p["cut"]) for p in sections])
+
     # The options focused when the identity comes, goes or changes: a dressed
     # entry whole from its first frame (never easing out of MUN's fade),
     # measured frame by frame and on grabs from the first dressed frame on.

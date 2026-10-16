@@ -22,7 +22,7 @@ cambia en *Settings* › *Language and time* › *Language*
 
 ## Antes de empezar
 
-- Las herramientas y una imagen que muestre MUN Shape: la v0.1.0-dev.3, como
+- Las herramientas y una imagen que muestre MUN Shape: la v0.1.0-dev.4, como
   en [primeros pasos](../getting-started.md) (secciones 1 a 3), o una
   construida desde tu copia del repositorio como en
   [construir la imagen tú mismo](../getting-started.md#construir-la-imagen-tú-mismo)

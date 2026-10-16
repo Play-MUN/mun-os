@@ -55,10 +55,11 @@ imagen.
 
 ## 3. La imagen
 
-Una versión preliminar trae la imagen, su registro (`BUILD-INFO.json`), dos
-Game Cards (MUN Collect y la MUN Test Card), los textos de las licencias y
-`release.json`, que lista cada archivo con su tamaño y su SHA-256. Estas
-páginas son de la v0.1.0-dev.3; si todavía no está en la
+Una versión preliminar trae la imagen, su registro (`BUILD-INFO.json`), tres
+Game Cards (MUN Collect, MUN Collect vestido con el ejemplo `sea` de MUN
+Shape y la MUN Test Card), los textos de las licencias y `release.json`, que
+lista cada archivo con su tamaño y su SHA-256. Estas páginas son de la
+v0.1.0-dev.4; si todavía no está en la
 [página de versiones](https://github.com/Play-MUN/mun-os/releases), usa la
 última versión preliminar que haya allí, con las páginas de su propia
 etiqueta, o construye la imagen de esta rama
@@ -66,7 +67,7 @@ etiqueta, o construye la imagen de esta rama
 `./mun get` la dirección de su `release.json`:
 
 ```sh
-./mun get https://github.com/Play-MUN/mun-os/releases/download/v0.1.0-dev.3/release.json
+./mun get https://github.com/Play-MUN/mun-os/releases/download/v0.1.0-dev.4/release.json
 ```
 
 Descarga cada archivo, lo comprueba contra `release.json` e instala la imagen
@@ -190,6 +191,11 @@ MUN Collect vestido con el ejemplo `sea`, insertado cuando ya se ve la
 pantalla principal para que veas cómo llega. Juégala, vuelve, retírala;
 *Apagar* termina la vista previa. Tus propias tarjetas solo se leen. El otro
 ejemplo es `examples/shape/paper`.
+
+Sin e2fsprogs, la tarjeta vestida que trae la versión muestra lo mismo:
+`./mun play --card collect-sea` (se instala como
+`.local/gamecards/collect-sea.img` junto a MUN Collect, con sus propias
+partidas).
 
 *Configuración* › *Apariencia y accesibilidad* › *MUN Shape* (Completo,
 Solo colores, Desactivado) y *Reducir movimiento* cambian cuánto de ella

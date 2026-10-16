@@ -18,7 +18,7 @@ number, are the contract: [MUN Shape](../shape.md).
 
 ## Before you start
 
-- The tools and an image that shows MUN Shape: v0.1.0-dev.3, as in
+- The tools and an image that shows MUN Shape: v0.1.0-dev.4, as in
   [getting started](../getting-started.md) (sections 1 to 3), or one built
   from this checkout as in
   [build the image yourself](../getting-started.md#build-the-image-yourself)

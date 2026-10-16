@@ -70,8 +70,9 @@ válida.
 ## La consola tiene que mostrar MUN Shape
 
 Una imagen registra en su `BUILD-INFO.json` el MUN Shape que lee su consola
-(`"shape": {"format": "mun-shape/1"}`). La v0.1.0-dev.3 lo registra, igual
-que las imágenes construidas desde tu copia del repositorio;
+(`"shape": {"format": "mun-shape/1"}`). La v0.1.0-dev.3 y la v0.1.0-dev.4
+lo registran, igual que las imágenes construidas desde tu copia del
+repositorio;
 las versiones preliminares anteriores, la v0.1.0-dev.2 y las de antes, no
 muestran MUN Shape. Mira lo que tienes:
 
@@ -79,7 +80,7 @@ muestran MUN Shape. Mira lo que tienes:
 ./mun dev list        # cada build e invitado: "shape mun-shape/1" o "shape not recorded"
 ```
 
-Si ninguna lo registra, descarga la v0.1.0-dev.3
+Si ninguna lo registra, descarga la v0.1.0-dev.4
 ([primeros pasos](../getting-started.md#3-la-imagen)) o construye una con
 `./mun dev build`
 ([construir la imagen tú mismo](../getting-started.md#construir-la-imagen-tú-mismo)).

@@ -50,17 +50,18 @@ Use the tools of the same release as the image when you can.
 
 ## 3. The image
 
-A preview release carries the image, its record (`BUILD-INFO.json`), two
-Game Cards (MUN Collect and the MUN Test Card), the licence texts and
-`release.json`, which lists every file with its size and SHA-256. These
-pages are for v0.1.0-dev.3; if it is not on the
+A preview release carries the image, its record (`BUILD-INFO.json`), three
+Game Cards (MUN Collect, MUN Collect dressed in the `sea` MUN Shape sample,
+and the MUN Test Card), the licence texts and `release.json`, which lists
+every file with its size and SHA-256. These pages are for v0.1.0-dev.4; if
+it is not on the
 [releases page](https://github.com/Play-MUN/mun-os/releases) yet, use the
 latest preview there, with the pages of its own tag, or build this branch's
 image ([build the image yourself](#build-the-image-yourself)). Give
 `./mun get` the address of its `release.json`:
 
 ```sh
-./mun get https://github.com/Play-MUN/mun-os/releases/download/v0.1.0-dev.3/release.json
+./mun get https://github.com/Play-MUN/mun-os/releases/download/v0.1.0-dev.4/release.json
 ```
 
 It downloads every file, checks each one against `release.json`, installs
@@ -174,6 +175,10 @@ latest image) opens in a window with a disposable card: your MUN Collect
 dressed in the `sea` sample, put in once Home is up so you see it arrive.
 Play it, come back, eject it; *Turn off* ends the preview. Your own cards
 are only read. The other sample is `examples/shape/paper`.
+
+Without e2fsprogs, the release's own dressed card shows the same:
+`./mun play --card collect-sea` (it is installed as
+`.local/gamecards/collect-sea.img` beside MUN Collect, with saves of its own).
 
 *Settings* › *Appearance and accessibility* › *MUN Shape* (Full, Colours
 only, Off) and *Reduce motion* change how much of it you see.

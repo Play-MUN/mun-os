@@ -5,7 +5,7 @@
 | Component | Language | Baseline |
 | --- | --- | --- |
 | MUN Shell | C++20 with Qt 6 QML | Debian 13's Qt 6.8 and GCC 14, built with CMake and Ninja |
-| Card service, launcher, card tool, host tools | Python 3; the standard library only, except the card service's pyudev | 3.13 in the image; the shared `mun_card` package and the host tools also run on macOS's Python 3.9 |
+| Card service, launcher, console reset, card tool, host tools | Python 3; the standard library only, except the card service's pyudev | 3.13 in the image; the shared `mun_card` package and the host tools also run on macOS's Python 3.9 |
 | Example games | C11 | GCC 14 in the image build; `mun-gl-probe` against SDL2 and OpenAL Soft |
 | Image build and service staging | POSIX shell, mkosi | the pinned builder of `os/inputs.json` |
 

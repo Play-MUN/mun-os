@@ -624,10 +624,14 @@ def shape_of(build: Path) -> str:
 # third-party game (from a recipe, `--recipe`) is not bundled, whatever that
 # game's terms.
 OWN_GAMES = {"mun-collect", "mun-gl-probe"}
-# The cards a bundle carries, made from the build's own example game.
+# The cards a bundle carries, made from the build's own example game. The
+# third is MUN Collect dressed in the sea sample, under a name of its own, so
+# a player sees MUN Shape without the card tools (which need e2fsprogs).
 BUNDLED_CARDS = {
     "demo": ("MUN Test Card", []),
     "collect": ("MUN Collect", ["--variant", "game", "--game", "{games}/mun-collect/mun-collect"]),
+    "collect-sea": ("MUN Collect", ["--variant", "game", "--game", "{games}/mun-collect/mun-collect",
+                                    "--shape", "{repo}/examples/shape/sea"]),
 }
 
 
@@ -660,7 +664,7 @@ def cmd_bundle(args: argparse.Namespace) -> None:
         for name, (title, extra) in BUNDLED_CARDS.items():
             image = Path(tmp) / f"{name}.img"
             command = [sys.executable, str(CARD_TOOL), "create", str(image), "--title", title]
-            command += [part.format(games=build / "games") for part in extra]
+            command += [part.format(games=build / "games", repo=REPO_ROOT) for part in extra]
             result = subprocess.run(command, capture_output=True, text=True)
             if result.returncode:
                 raise vm.LabError(f"making the {name} card failed: {(result.stderr or result.stdout).strip()}")

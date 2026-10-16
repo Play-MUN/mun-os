@@ -13,7 +13,7 @@ QEMU 8.2 or later with its ARM64 UEFI firmware ([getting started](getting-starte
 
 | Computer | Console's processor | Headless (download, start, card, game, power-off) | Window, keyboard, sound |
 | --- | --- | --- | --- |
-| macOS 27, Apple Silicon | Virtualized (HVF) | Checked on a Mac (v0.1.0-dev.3) | Checked on a Mac (v0.1.0-dev.3; Cocoa, CoreAudio) |
+| macOS 27, Apple Silicon | Virtualized (HVF) | Checked on a Mac (v0.1.0-dev.4) | Checked on a Mac (v0.1.0-dev.4; Cocoa, CoreAudio) |
 | macOS 15, ARM64 (GitHub's virtual machine) | Emulated: no HVF inside a VM | Checked in CI (v0.1.0-dev.3) | Not tried |
 | Linux x86_64, Ubuntu 24.04 | Emulated | Checked in CI (v0.1.0-dev.3) and in a virtual machine (v0.1.0-dev.2) | Not tried (GTK or SDL) |
 | Linux ARM64, Ubuntu 24.04 | Emulated (no `/dev/kvm` in either) | Checked in CI (v0.1.0-dev.3) and in a virtual machine (v0.1.0-dev.2) | Not tried |
@@ -27,7 +27,9 @@ downloads a preview release as a player would, starts the console, inserts
 MUN Collect, plays and exits it, ejects the card and powers off. It runs on
 each preview once it is published, and that preview's release notes give
 the result: v0.1.0-dev.3 passed on all five
-([its run](https://github.com/Play-MUN/mun-os/actions/runs/37493429263)). It says the tools and the image work on that system; it
+([its run](https://github.com/Play-MUN/mun-os/actions/runs/37493429263)),
+and v0.1.0-dev.4 is pending there until its own run. It says the tools and
+the image work on that system; it
 does not measure speed, and no physical Linux or Windows computer has been
 tried. Emulated consoles are several times slower than
 virtualized ones.
@@ -58,7 +60,7 @@ VM from pinned inputs, and needs Git, Make, OpenSSH, QEMU, e2fsprogs, about
 
 | Computer | State |
 | --- | --- |
-| macOS, Apple Silicon (HVF, `hdiutil` for the builder's seed) | Checked: the v0.1.0-dev.3 build took about 9 minutes, its inputs already downloaded |
+| macOS, Apple Silicon (HVF, `hdiutil` for the builder's seed) | Checked: the v0.1.0-dev.4 build took about 10 minutes, its inputs already downloaded |
 | Linux ARM64 with KVM (`xorriso` for the seed) | Supported by the tools; not tried |
 | Linux x86_64, or ARM64 without KVM | The builder is emulated: hours; not tried |
 | Windows | Not supported; WSL 2 not tried |

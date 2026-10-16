@@ -18,7 +18,7 @@ number, are the contract: [MUN Shape](../shape.md).
 
 ## Before you start
 
-- The tools and an image that shows MUN Shape: v0.1.0-dev.3, as in
+- The tools and an image that shows MUN Shape: v0.1.0-dev.4, as in
   [getting started](../getting-started.md) (sections 1 to 3), or one built
   from this checkout as in
   [build the image yourself](../getting-started.md#build-the-image-yourself)
@@ -259,8 +259,9 @@ one small defective package per case, to see them in the console.
   becomes as opaque as your colours need. If your colours cannot hold on
   every surface, MUN's set is used on all of them. `check --report` shows the
   ratios and plates before you make a card.
-- **Reduce motion** (Settings › Picture and sound): every transition is a
-  fade and your world holds still. Design it to read well still.
+- **Reduce motion** (Settings › Appearance and accessibility): every
+  transition is a fade and your world holds still. Design it to read well
+  still.
 - **MUN Shape: Full, Colours only, Off.** Colours only keeps your palette
   and plates, without world, images or sounds; Off is MUN alone.
 - **Sounds.** *System sounds* off silences all of them, yours included;

@@ -52,10 +52,11 @@ virtual console, with disk images standing in for cards:
 
 ## What works today, and what does not yet
 
-MUN OS v0.1.0-dev.3 is a development preview. In the virtual console:
+MUN OS v0.1.0-dev.4 is a development preview. In the virtual console:
 
 - **MUN Shell**, the console's own interface, starts on its own: Home,
-  Settings (English or Spanish, 720p to 1440p, sounds), menus with sound.
+  Settings (English or Spanish, 720p to 1440p, sounds; resetting the
+  settings or the whole console), menus with sound.
 - **Game Cards** are validated before anything on them runs. A game starts
   sandboxed and hands the console back however it ends, its saves go to the
   card, and a card is ejected safely. Games built on SDL or OpenGL start in
@@ -106,7 +107,7 @@ the same console, slower.
 
 | Your computer | The console's processor | Checked |
 | --- | --- | --- |
-| macOS, Apple Silicon | Virtualized (HVF) | v0.1.0-dev.3 on a Mac (macOS 27), with window, keyboard and sound, and in CI on macOS 15, headless and emulated (no HVF in a VM) |
+| macOS, Apple Silicon | Virtualized (HVF) | v0.1.0-dev.4 on a Mac (macOS 27), with window, keyboard and sound; v0.1.0-dev.3 also in CI on macOS 15, headless and emulated (no HVF in a VM) |
 | Linux, x86_64 or ARM64 | Emulated; KVM on ARM64 not tried yet | v0.1.0-dev.3 in CI, headless; v0.1.0-dev.2 also in Ubuntu 24.04 virtual machines |
 | Windows, x86_64 or ARM64 | Emulated | v0.1.0-dev.3 in CI (Windows Server 2025; Windows 11 ARM64), headless |
 
@@ -114,8 +115,10 @@ the same console, slower.
 its card, power off, in GitHub's virtual machines, without a window. It
 checks each preview once it is published, and that preview's release notes
 give the result: v0.1.0-dev.3 passed on all five
-([its run](https://github.com/Play-MUN/mun-os/actions/runs/37493429263)). No Linux or Windows computer has been tried yet, and no
-window, keyboard or sound outside macOS.
+([its run](https://github.com/Play-MUN/mun-os/actions/runs/37493429263)),
+and v0.1.0-dev.4 is pending there until its own run. No Linux or Windows
+computer has been tried yet, and no window, keyboard or sound outside
+macOS.
 
 ## Principles
 

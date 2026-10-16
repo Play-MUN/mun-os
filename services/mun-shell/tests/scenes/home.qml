@@ -116,7 +116,11 @@ Item {
             world: Object.keys(Shape.world).length > 0,
             worldDrawn: world ? world.drawn : false, worldFailed: world ? world.failed : false,
             frames: world ? world.frames : 0, still: world ? world.still : false, dim: world ? world.dim : 0,
-            modal: main ? !!main.modal : false, level: main ? main.level : -1
+            modal: main ? !!main.modal : false, level: main ? main.level : -1,
+            sections: main ? main.settingsEntries.map(e => e.key) : [],
+            // Texts on screen cut short (an elided label).
+            cut: canvas ? findAll(canvas, it => it.truncated === true && it.visible && effective(it) > 0.5, [])
+                              .map(it => it.text) : []
         }))
     }
 

@@ -1,8 +1,9 @@
 // SystemSounds plays the interface's sounds: moving, entering and going back
 // on the menus (qml/Main.qml asks for them by name: "move", "enter", "back")
 // and the start-up ("startup", qml/BootLayer.qml, which draws in step with
-// it: started() says when its first samples went to the device, latency how
-// long the device holds them before they are heard). They are compiled in
+// it: started() says when its first samples went to the device, heard() how
+// much of it has been heard, the samples written less what the device still
+// holds). They are compiled in
 // (sounds/*.wav: PCM, 16-bit, 48 kHz, stereo), the menus' sounds mixed at
 // 3/4 of their level and the start-up at its own, and played through
 // ALSA's default device, the one the games use, which
@@ -30,9 +31,14 @@
 // on the GUI thread; a sound already queued or playing holds its samples
 // (shared) until it ends.
 //
-// Thread contract: play(), stop(), useGameSounds() and playGame() on the GUI
-// thread, started() delivered on it; the worker owns the ALSA handle and is
-// joined by the destructor, before any member it reads is destroyed.
+// A sound the worker has to drop (no device, or one that stopped and failed
+// again) is over: heard() says NaN for it from then on, and dropped() says
+// so, as it does for a sound asked for while the device is being retried.
+//
+// Thread contract: play(), stop(), useGameSounds(), playGame() and heard() on
+// the GUI thread (heard() reads what the worker wrote under a lock), started()
+// and dropped() delivered on it; the worker owns the ALSA handle and is joined
+// by the destructor, before any member it reads is destroyed.
 #pragma once
 
 #include <QByteArray>
@@ -78,6 +84,13 @@ public:
     // One of the game's sounds only ("insert"), whenever the caller asks
     // (the caller checks the player's choices); nothing if it has none.
     Q_INVOKABLE void playGame(const QString &name);
+    // Seconds of the named sound heard so far: what went to the device less
+    // what the device still holds (snd_pcm_delay), as of the last write and
+    // carried on by the clock since, never past what was written. Below zero
+    // while its first samples wait in the device; NaN when it is not
+    // playing (not yet started, played out, or dropped). A device that stalls
+    // leaves it where it was until it plays again or the sound is dropped.
+    Q_INVOKABLE double heard(const QString &name) const;
     int latency() const { return int(kLatencyMicroseconds / 1000); }
     bool gameSounds() const { return m_gameSounds; }
     void setGameSounds(bool on);
@@ -86,6 +99,8 @@ public:
 signals:
     // The first samples of a sound that play() asked for went to the device.
     void started(const QString &name);
+    // A sound that play() asked for will not be heard (any more): no device.
+    void dropped(const QString &name);
     void gameSoundsChanged();
     void gameSetChanged();
     // One of the game's sounds was queued by playGame().
@@ -119,6 +134,14 @@ private:
     void queue(const SoundPtr &sound);
     void run();
 
+    // How far a sound playing has gone, for heard().
+    struct Progress {
+        qint64 written = 0;   // frames gone to the device
+        qint64 heard = 0;     // frames heard, as of `at`
+        std::chrono::steady_clock::time_point at;
+        bool done = false;    // played out or faded: nothing more is written
+    };
+
     std::vector<SoundPtr> m_sounds;         // MUN's: filled before the worker starts, then read-only
     std::map<QString, SoundPtr> m_game;     // the game's: GUI thread only
     bool m_gameSounds = true;
@@ -127,5 +150,7 @@ private:
     std::deque<SoundPtr> m_requests;  // guarded by m_mutex
     std::deque<SoundPtr> m_stops;     // guarded by m_mutex
     bool m_stop = false;              // guarded by m_mutex
+    mutable std::mutex m_progressMutex;
+    std::map<QString, Progress> m_progress;  // guarded by m_progressMutex: the worker writes, heard() reads
     std::thread m_worker;
 };

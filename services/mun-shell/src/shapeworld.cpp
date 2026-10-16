@@ -804,6 +804,28 @@ void WorldPainter::tick()
     {
         QMutexLocker lock(&m_frames->mutex);
         p = m_frames->params;
+        if (p.progress <= 0) {
+            // MUN alone: nothing of the world shows. The frames the scene
+            // graph does not hold are let go here, the one on screen by the
+            // item with its node (updatePaintNode); the next transition
+            // makes them again.
+            const bool already = m_frames->blank;
+            for (int i = 0; i < 2; ++i) {
+                if (i != m_frames->shown)
+                    m_frames->images[i] = QImage();
+            }
+            m_frames->ready = -1;
+            m_frames->wanted = false;
+            m_frames->blank = true;
+            lock.unlock();
+            m_content = {};
+            m_contentTime = -1;
+            m_paintedVersion = ~0ULL;
+            if (!already)
+                emit frameReady();
+            schedule();
+            return;
+        }
         target = m_frames->shown == 0 ? 1 : 0;
         if (m_frames->ready == target) {
             // The last frame is not on screen yet: this one is skipped, never
@@ -859,6 +881,7 @@ void WorldPainter::tick()
     {
         QMutexLocker lock(&m_frames->mutex);
         m_frames->ready = target;
+        m_frames->blank = false;
     }
     emit frameReady();
     static const bool timing = qEnvironmentVariableIsSet("MUN_SHELL_TIMING");
@@ -1169,14 +1192,26 @@ QSGNode *ShapeWorld::updatePaintNode(QSGNode *old, UpdatePaintNodeData *)
     QImage image;
     int index = -1;
     bool wanted = false;
+    bool blank = false;
     {
         QMutexLocker lock(&m_frames->mutex);
-        if (m_frames->ready >= 0) {
+        if (m_frames->blank) {
+            // Nothing shows (WorldPainter::tick): the frame on screen goes
+            // with the node.
+            if (m_frames->shown >= 0)
+                m_frames->images[m_frames->shown] = QImage();
+            m_frames->shown = -1;
+            blank = true;
+        } else if (m_frames->ready >= 0) {
             index = m_frames->ready;
             image = m_frames->images[index];
             m_frames->ready = -1;
             wanted = std::exchange(m_frames->wanted, false);
         }
+    }
+    if (blank) {
+        delete node;
+        return nullptr;
     }
     if (wanted)
         emit wakeRequested();   // the tick that found this frame waiting

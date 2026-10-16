@@ -1,0 +1,17 @@
+# Marks a console reset and restarts the console (mun-reset commit). Started
+# only by `mun-reset request`, after its checks (no Game Card in the slot, no
+# game, the console not shutting down): it runs here, as a unit of its own,
+# because the shell's sandbox (ProtectSystem=strict) keeps the file system
+# read-only for the shell and for whatever it runs, sudo included. Static: no
+# [Install], nothing starts it at boot.
+[Unit]
+Description=MUN OS console reset: mark it and restart
+Documentation=file:///opt/mun/reset/README.md
+# Not stopped by the restart it asks for: with the default dependencies the
+# reboot would cancel this unit's own start, and `mun-reset request`, waiting
+# for it, would report a failure while the console restarts.
+DefaultDependencies=no
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/mun-reset commit

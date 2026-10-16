@@ -30,7 +30,7 @@ Términos que usan la documentación y el código de MUN™.
 ## Las palabras de la consola
 
 Esta sección solo está en la versión española. La consola arranca en inglés;
-en *Settings* › *Account and language* › *Language* se elige el español, y
+en *Settings* › *Language and time* › *Language* se elige el español, y
 desde entonces los menús muestran estas etiquetas. La documentación en
 español usa las de la columna derecha.
 
@@ -51,14 +51,17 @@ español usa las de la columna derecha.
 | OK | Aceptar |
 | Select / Back | Seleccionar / Atrás |
 | Offline | Sin conexión |
-| Account and language / Language | Cuenta e idioma / Idioma |
-| Picture and sound | Imagen y sonido |
+| Display / Sound | Pantalla / Sonido |
+| Appearance and accessibility | Apariencia y accesibilidad |
+| Language and time / Language | Idioma y hora / Idioma |
+| Time format / Set time | Formato de hora / Ajuste de hora |
 | Resolution | Resolución |
 | System sounds | Sonidos del sistema |
 | Startup sound | Sonido de arranque |
 | Auto power off | Apagado automático |
 | Network / System | Red / Sistema |
 | Reset settings | Restablecer ajustes |
+| Reset console | Restablecer la consola |
 
 ## Lo que no se traduce
 

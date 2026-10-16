@@ -56,12 +56,12 @@ virtual, con imágenes de disco en lugar de tarjetas:
 
 ## Lo que funciona hoy, y lo que todavía no
 
-MUN OS v0.1.0-dev.3 es una versión preliminar de desarrollo. En la consola
+MUN OS v0.1.0-dev.4 es una versión preliminar de desarrollo. En la consola
 virtual:
 
 - **MUN Shell**, la interfaz propia de la consola, arranca sola: la pantalla
-  principal, Configuración (inglés o español, de 720p a 1440p, sonidos),
-  menús con sonido.
+  principal, Configuración (inglés o español, de 720p a 1440p, sonidos;
+  restablecer los ajustes o toda la consola), menús con sonido.
 - **Las Game Cards** se validan antes de que se ejecute nada de ellas. Un
   juego arranca aislado y devuelve la consola acabe como acabe, sus partidas
   van a la tarjeta y una tarjeta se retira con seguridad. Los juegos hechos
@@ -115,7 +115,7 @@ lenta.
 
 | Tu ordenador | El procesador de la consola | Comprobado |
 | --- | --- | --- |
-| macOS, Apple Silicon | Virtualizado (HVF) | La v0.1.0-dev.3 en un Mac (macOS 27), con ventana, teclado y sonido, y en CI en macOS 15, sin pantalla y emulado (no hay HVF dentro de una VM) |
+| macOS, Apple Silicon | Virtualizado (HVF) | La v0.1.0-dev.4 en un Mac (macOS 27), con ventana, teclado y sonido; la v0.1.0-dev.3, además, en CI en macOS 15, sin pantalla y emulado (no hay HVF dentro de una VM) |
 | Linux, x86_64 o ARM64 | Emulado; KVM en ARM64 aún sin probar | La v0.1.0-dev.3 en CI, sin pantalla; la v0.1.0-dev.2, además, en máquinas virtuales Ubuntu 24.04 |
 | Windows, x86_64 o ARM64 | Emulado | La v0.1.0-dev.3 en CI (Windows Server 2025; Windows 11 ARM64), sin pantalla |
 
@@ -123,8 +123,10 @@ lenta.
 arrancar la consola, jugar su tarjeta y apagar, en las máquinas virtuales de
 GitHub, sin ventana. Comprueba cada versión preliminar cuando se publica, y
 las notas de esa versión dan el resultado: la v0.1.0-dev.3 pasó en los cinco
-([su ejecución](https://github.com/Play-MUN/mun-os/actions/runs/37493429263)). Todavía no se ha probado en ningún ordenador con
-Linux o Windows, ni con ventana, teclado y sonido fuera de macOS.
+([su ejecución](https://github.com/Play-MUN/mun-os/actions/runs/37493429263)),
+y la v0.1.0-dev.4 está pendiente allí hasta su propia ejecución. Todavía no
+se ha probado en ningún ordenador con Linux o Windows, ni con ventana,
+teclado y sonido fuera de macOS.
 
 ## Principios
 

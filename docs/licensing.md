@@ -62,8 +62,10 @@ guidance on distributing derived images:
 The Apache License grants no rights to the MUN and Play MUN names or to the
 MUN and Play MUN logos (section 6); they are Iván Moreno Mendoza's, and MUN™
 is his trademark. The logos' drawings, the paths in
-`services/mun-shell/qml/Logo.js` and `services/mun-shell/qml/PlayMun.js`,
-are not covered by the licence. Their terms are in [NAME-AND-LOGO.txt](../NAME-AND-LOGO.txt), which goes with
+`services/mun-shell/qml/Logo.js` and `services/mun-shell/src/bootintroshapes.h`
+and the start-up's images `services/mun-shell/images/boot-silhouette.png`
+and `boot-engraving.png` (the MUN logo engraved on the console), are not
+covered by the licence. Their terms are in [NAME-AND-LOGO.txt](../NAME-AND-LOGO.txt), which goes with
 every image and every download: official images may be redistributed
 unchanged, the logos go with MUN OS and its modified versions where their
 interface shows them, and a fork distributed to others takes its own name

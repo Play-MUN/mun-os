@@ -22,6 +22,7 @@ cp "$BUILDDIR/shell-behaviour/report.json" "$ART/shell-behaviour.json"
 sh "$MUN/services/mun-shell/deploy/stage.sh" "$MUN/services/mun-shell" "$BUILDDIR/mun-shell" "$DESTDIR"
 sh "$MUN/services/mun-cardd/deploy/stage.sh" "$MUN/services/mun-cardd" "$MUN/tools/mun-card/mun_card" "$DESTDIR"
 sh "$MUN/services/mun-launchd/deploy/stage.sh" "$MUN/services/mun-launchd" "$DESTDIR"
+sh "$MUN/services/mun-reset/deploy/stage.sh" "$MUN/services/mun-reset" "$DESTDIR"
 
 echo "== licences"
 # MUN OS's own licence, its notice and the terms of the MUN and Play MUN names

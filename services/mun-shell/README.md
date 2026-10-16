@@ -27,15 +27,17 @@ display, and a game drawing on `/dev/fb0` has it (see *Display path*).
 | `src/shape.*`, `src/contrast.h`, `src/readpalette.*` | A Game Card's MUN Shape on the eligible surfaces: the export read and decoded off the GUI thread, its colours verified again with the contrast rule, the palette read from a cover, the phases of its coming in and leaving (*A Game Card's identity*) |
 | `src/shapeworld.*`, `src/shapefront.h` | The package's world, prepared and painted on its own thread, and the fronts of its transitions |
 | `src/framewatch.*` | The interface's frame and key timings while a world is drawn; the step down when navigation suffers |
+| `src/memory.*` | Once the start-up is over, most of the memory the shell frees goes back to the system (glibc's thresholds fixed, then a trim) |
 | `src/launchclient.*` | Client of `mun-launchd`: `launch(slot, serial, version)`, `release(serial)`, `acknowledge()`, launcher state and the last session result (read from `/run/mun/launch/last-result.json` at start, then over the socket) |
 | `src/backdrop.*`, `src/heroicon.*` | Home's painted layers: the network of light behind everything, and the large object of the entry in focus |
 | `src/cssbox.*`, `src/blur.*` | Surfaces with CSS semantics (radii, gradients at any angle, outer and inset box shadows) and the blur they and the glows use |
 | `src/projectedview.*` | Shows an item through a perspective transform, projected once per change |
 | `src/sceneclock.*` | One frame clock for the painted layers |
+| `src/bootintro.*`, `src/bootintroshapes.h`, `images/boot-*.png` | The start-up's picture, part by part, as a function of the sound's time; its shapes (the MUN letters, the moon's arc, the LED) and its two images of the console's lid |
 | `qml/Main.qml` | The scene, the navigation, the actions and the key handling |
 | `qml/Panels.qml` | What each entry's panel and each dialog says, from the real state |
 | `qml/Theme.qml`, `qml/I18n.qml` | Design tokens and motion; the two languages |
-| `qml/ArcMenu.qml`, `ArcNode`, `DetailPanel`, `OptionRow`, `StatusBar`, `MoonPhase`, `ModalLayer`, `BootLayer`, `UiText`, `MarkText`, `Shadow`, `Material`, `Logo.js`, `PlayMun.js` | Components: the arcs and their entries, the panel and its options, the status line, dialogs, the start-up and power-off screen, text and shadows; the MUN and Play MUN logos |
+| `qml/ArcMenu.qml`, `ArcNode`, `DetailPanel`, `OptionRow`, `StatusBar`, `MoonPhase`, `ModalLayer`, `BootLayer`, `UiText`, `MarkText`, `Shadow`, `Material`, `Logo.js` | Components: the arcs and their entries, the panel and its options, the status line, dialogs, the start-up and power-off screen, text and shadows; the MUN logo |
 | `tests/behaviour.py`, `tests/scenes/` | Behaviour regressions run on the compiled binary, offscreen (*A Game Card's identity*) |
 | `fonts/` | Archivo and Michroma, compiled in, with their licences |
 | `sounds/` | The interface's sounds, compiled in: the menus' `move.wav`, `enter.wav`, `back.wav` and the start-up's `startup.wav` |
@@ -83,19 +85,31 @@ the keys (A Select, B Back). The card's crescent on the Game Card object
 (the logo's moon) fills while a card is in the slot. The ambient light at the orb follows the local hour:
 cold at night, pale at dawn, grey-white by day, copper at dusk.
 
-Motion: the start-up plays once per boot, over the start-up sound, in two
-acts. The house: an ivory dawn, and on it PLAY, then MUN, then the copper
-stroke under them, each with one of the sound's three notes (2.30, 3.24 and
-3.86 s into it), and a sheen across the letters. The console: the night,
-the MUN letters written and filled, the arc drawing itself from its tip and
-its light rising, each on one of the sound's later cues (6.15, 6.70 and
-7.25 s), moon dust rising. Each logo stays a while before the next. From
-10.3 s, once the
-card service and the launcher have answered (20 s after the start at the
-latest), the screen fades into Home; any key skips to the console's logo.
-The picture keeps time with the sound: its clock starts when the sound's
-first samples reach the device, less the 40 ms the device holds ahead; with
-System sounds off it plays silent. Moving to another entry: the chosen bar
+Motion: the start-up plays once per boot, over the start-up sound (13.05
+s): the console waking in the dark, under the vignette of a tube, still
+from start to end: the console, its LED and the U of MUN on
+the screen's centre line, the moon reaching out to the right, the finished
+logo with the LED under it centred. At 0.3 s a pim lights the amber LED, a point that breathes once and
+grows into the console's long oval, two sweeps of light running along it;
+at 3.45 s a hit shakes the screen and flashes, a faint light behind the
+console shows only the top of its lid, and a gleam runs along the MUN
+engraved on its dome; at 6.65 s MUN arrives higher up with a ding and a
+discharge from the LED that makes its strokes tremble, a warm glow rising;
+from 7.85 s the moon comes out of an eclipse, copper, then silver as the
+shadow withdraws; from 10.05 s the LED melts away in silence and the logo
+fades while the sound rings on. The system loads meanwhile: once the card
+service and the launcher have answered, "A Skip" shows at the bottom right
+and A (or Enter, or Space) ends the start-up; until then no key does
+anything. When the picture has faded (11.75 s), Home comes in if they have
+answered, while the sound rings on; if not, the LED waits, breathing, until
+they do, or 20 s after the start whatever they do. The picture keeps time
+with the sound: on every frame its clock is what has been heard of it, the
+samples written to the device less what the device still holds. The black
+screen waits up to 3 s for the sound's first samples, and the picture holds
+while the sound stalls, up to 2 s, then follows it again; with System sounds
+off, no device, or a longer wait, it plays on its own clock from where it
+was. The journal says each time the picture changes clock. *Reduce motion*
+takes out the shake, the tremor and the flicker; every time stays. Moving to another entry: the chosen bar
 turns light at once while its copper edge, glow and text colour settle in
 0.3 s and it slides 4 px out; the new object loads in 0.9 s, a radar-like
 sweep drawing its glowing wireframe with a copper line and its face
@@ -305,7 +319,7 @@ code (`src/shape.*`, `src/shapeworld.*`, `src/shapefront.h`):
   insertion's identity, so a decoder that crashes cannot do it in a loop.
   Sounds are read in the mixer's format and within the contract's
   durations, the set whole or not at all.
-- **Settings** (Picture and sound): *MUN Shape* Full (default), Colours only
+- **Settings** (Appearance and accessibility; Sound): *MUN Shape* Full (default), Colours only
   (colours and plates; no world, images or sounds, MUN's object, the
   palette's light as the ambient) or Off (MUN alone); *Game sounds on the
   menus*; *Reduce motion*, which makes every transition a fade and holds the
@@ -359,7 +373,7 @@ pixels, and scaled to the display mode: 2/3 at 1280×720, 1 at 1920×1080,
 picture of the same layout, and in the laboratory a larger window. Other
 aspect ratios centre the canvas; adaptive layout is a later concern.
 
-Settings › Picture and sound › Resolution offers *Automatic*, the
+Settings › Display › Resolution offers *Automatic*, the
 display's own mode (the default; the laboratory's is 1920×1080), and 720p,
 1080p and 1440p where the display takes them: listed by the connector (from the
 display's EDID on real hardware, and in the laboratory from the EDID the
@@ -371,7 +385,7 @@ display once, so the mode is chosen before `QGuiApplication` exists
 (`src/displaymode.cpp`): the shell writes Qt's KMS configuration for it to
 `/run/mun-shell/kms.json` and points `QT_QPA_KMS_CONFIG` there. A change
 restarts the shell: it exits with status 75, which the unit restarts at once
-(`RestartForceExitStatus=75`), and returns to Picture and sound.
+(`RestartForceExitStatus=75`), and returns to Display.
 
 A new mode is on trial. It is stored under a one-shot key that the next
 start removes before opening the display, and the shell asks whether to
@@ -393,25 +407,43 @@ displays that crop their edges.
 
 ## Settings
 
-| Setting | State |
-| --- | --- |
-| Language | English (default) or Español; kept |
-| Clock format | 24-hour (default) or 12-hour; kept |
-| Resolution | Automatic (default), or 720p, 1080p or 1440p where the display takes them; kept once confirmed (*Resolution*) |
-| Safe area | 100 (default), 97, 94 or 91 %; kept |
-| System sounds | On (default) or Off: the menus' sounds and the start-up's (*Sounds*); kept |
-| Game sounds on the menus | On (default) or Off: a Game Card's own menu sounds and cue (*A Game Card's identity*); kept |
-| MUN Shape | Full (default), Colours only or Off (*A Game Card's identity*); kept |
-| Reduce motion | Off (default) or On: Home's world and objects hold still; kept |
-| Auto power off | Never, or after 1 (default), 3 or 6 hours without input on the menus; kept. A game in progress does not count: the shell is stopped while it runs |
-| Turn off console, About, Reset settings | Work; reset keeps the language |
-| Time zone, developer mode | Shown as they are (the system's zone, set by the image); changing them is not available yet |
-| Ethernet, Wi-Fi | Shown as the kernel sees them (not detected, not connected, connected; no adapter); joining networks is not available yet |
-| Account, HDR, refresh rate, audio output and format, status light, setting the time, updates | Not available yet |
+Six sections, none of which needs an account. An option either works (it
+changes the console at once and is kept), informs (it shows the value as the
+system has it), or says *Not available yet*: the console never offers what
+it cannot do.
+
+| Section | Setting | State |
+| --- | --- | --- |
+| Display | Resolution | Works: Automatic (default), or 720p, 1080p or 1440p where the display takes them; kept once confirmed, back to the previous one on its own otherwise (*Resolution*) |
+| | Safe area | Works: 100 (default), 97, 94 or 91 %; kept |
+| | HDR, refresh rate | Not available yet |
+| Sound | System sounds | Works: On (default) or Off, the menus' sounds and the start-up's (*Sounds*); kept |
+| | Game sounds on the menus | Works: On (default) or Off, a Game Card's own menu sounds and cue (*A Game Card's identity*); kept |
+| | Startup sound | Informs: on or off with System sounds |
+| | Output, format | Not available yet |
+| Appearance and accessibility | MUN Shape | Works: Full (default), Colours only or Off (*A Game Card's identity*); kept |
+| | Reduce motion | Works: Off (default) or On; Home's world and objects hold still, every transition is a fade, the start-up loses its shake, tremor and flicker; kept |
+| | Status light | Not available yet |
+| Language and time | Language | Works: English (default) or Español; kept |
+| | Time format | Works: 24-hour (default) or 12-hour; kept |
+| | Time zone | Informs: the system's zone, set by the image |
+| | Set time | Not available yet |
+| Network | Ethernet, Wi-Fi | Inform: as the kernel sees them (not detected, not connected, connected; no adapter); joining networks is not available yet |
+| System | Auto power off | Works: Never, or after 1 (default), 3 or 6 hours without input on the menus; kept. A game in progress does not count: the shell is stopped while it runs |
+| | Turn off console, About | Work |
+| | Updates | Not available yet |
+| | Developer mode | Informs: set by the image (on for a development build) |
+| | Reset settings | Works: every setting back to its default but the language; a resolution other than Automatic restarts the shell |
+| | Reset console | Works: after two confirmations, the console restarts and starts as on its first day, in English: the settings, the system's history and the shell's caches go, nothing of a Game Card ([mun-reset](../mun-reset/README.md)). Refused while a card is in the slot or a game runs |
 
 The settings live in `/var/lib/mun-shell/settings.ini`
 (`StateDirectory=mun-shell`). The file is read as untrusted input: a value
-outside the allowed set reads as its default. Nothing else is stored in the
+outside the allowed set reads as its default, and a damaged file reads as
+the defaults until the next choice writes a valid one. Every change replaces
+the file whole (QSettings writes a new file and renames it over the old
+one), so a write cut short leaves the previous file as it was. The
+directory is not synced after the rename: power lost within seconds of a
+change may lose that change, never the file. Nothing else is stored in the
 console: games and saves live on their Game Cards.
 
 ## Sounds
@@ -419,14 +451,14 @@ console: games and saves live on their Game Cards.
 Moving the focus or changing a choice plays `move`, going in or running an
 action `enter`, going back or closing a dialog `back`: only when a key or
 the pointer changed something, never for the console's own changes (a card
-arriving, a result shown). The start-up sound, `startup` (10.1 s), plays
+arriving, a result shown). The start-up sound, `startup` (13.05 s), plays
 once per boot with the start-up (*Motion*), at the level it was mastered at
-rather than the menus' 3/4; a key that skips the start-up fades it out in
-0.1 s. They are MUN's own, compiled in from `sounds/`, all in one chosen
+rather than the menus' 3/4; skipping the start-up fades it out in 0.1 s. They are MUN's own, compiled in from `sounds/`, all in one chosen
 format: PCM, 16-bit, 48 kHz, stereo, only the format and the samples (no
 metadata chunks), the menus' under a second each and the start-up's under
-twelve (`tests/test_os.py` checks all of that); the start-up's was made
-from its 96 kHz, 24-bit master, resampled and dithered to 16 bits. The shell asks ALSA for that format and lets it convert
+13.1 (`tests/test_os.py` checks all of that); the start-up's was made from
+its 96 kHz, 24-bit master, resampled with a linear-phase filter (no sample
+moves in time) and dithered to 16 bits. The shell asks ALSA for that format and lets it convert
 when a device plays another; it has been heard only through the virtual
 console's sound device, and physical outputs are tested on the chosen board.
 
@@ -445,8 +477,8 @@ I/O error), and let go after three seconds of silence; the shell holds none
 of it while a game runs (the launcher stops the shell first). A device that
 fails is opened afresh at once; no device, or one that fails again, means
 silence and one line in the journal, and the next sound tries again after
-five seconds. Settings › Picture and sound
-› System sounds turns them off. In the laboratory the guest's sound device
+five seconds. Settings › Sound › System
+sounds turns them off. In the laboratory the guest's sound device
 is silent unless it plays to the Mac (`--window`, or `--audio coreaudio`)
 or records to `audio.wav` (`--audio wav`).
 

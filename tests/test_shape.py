@@ -1197,7 +1197,7 @@ class ShellBehaviourTests(unittest.TestCase):
         line = next(text for text in build.splitlines() if run in text)
         self.assertNotIn("||", line, "a failed expectation fails the build")
         self.assertTrue(build.startswith("#!/bin/sh") and "set -eu" in build)
-        for scene in ("controller.qml", "arrival.qml", "surfaces.qml", "world.qml", "home.qml"):
+        for scene in ("controller.qml", "arrival.qml", "surfaces.qml", "world.qml", "boot.qml", "home.qml"):
             self.assertIn(f'"{scene}"', (self.SHELL / "tests" / "behaviour.py").read_text(encoding="utf-8"))
             self.assertTrue((self.SHELL / "tests" / "scenes" / scene).is_file(), scene)
 

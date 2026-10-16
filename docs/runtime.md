@@ -99,8 +99,8 @@ which games on those cards were built against. A card with `mun.toml` gets
 
 ## Display
 
-The resolution the player chooses (Settings › Picture and sound ›
-Resolution) is the console's, not only the shell's: it applies at once, no
+The resolution the player chooses (Settings › Display › Resolution) is
+the console's, not only the shell's: it applies at once, no
 restart, and the display stays in it when a game starts.
 
 - **`linux-arm64-gl-v0`.** The game starts with the display already in the

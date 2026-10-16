@@ -49,10 +49,11 @@ uncommitted changes is for local tests only (`./mun dev bundle` warns).
 ```
 
 `.local/mun/bundles/dev2/` then holds the files a release carries: the
-image, `BUILD-INFO.json`, the two Game Cards (`card-collect.img.xz`,
-`card-demo.img.xz`), `LICENSE`, `NOTICE`, `NAME-AND-LOGO.txt`, the
-typefaces' licences and `release.json`, which lists all of them with their
-sizes and SHA-256.
+image, `BUILD-INFO.json`, the Game Cards (`card-collect.img.xz`,
+`card-collect-sea.img.xz`, MUN Collect dressed in the `sea` MUN Shape
+sample, and `card-demo.img.xz`), `LICENSE`, `NOTICE`, `NAME-AND-LOGO.txt`,
+the typefaces' licences and `release.json`, which lists all of them with
+their sizes and SHA-256.
 
 ## 4. The corresponding source
 

@@ -1,6 +1,7 @@
 // HeroIcon draws the large object at Home's orb for the entry in focus: the
-// Game Card, a fan of cards, a gear, the power sign, a person with a globe, a
-// screen with sound, the network's arcs, a chip. When the entry changes the
+// Game Card, a fan of cards, a gear, the power sign; and Settings' sections: a
+// screen, a speaker, the logo's moon in its eclipse, a globe with a clock, the
+// network's arcs, a chip. When the entry changes the
 // new object loads in 0.9 s: a radar-like sweep draws its glowing wireframe,
 // its face fills in over the second half and a copper line marks the sweep,
 // while the previous object fades out. The crescent on the card (the logo's
@@ -46,7 +47,8 @@
 class HeroIcon : public QQuickPaintedItem {
     Q_OBJECT
     QML_ELEMENT
-    // card | games | settings | personal | av | network | system; anything else draws nothing.
+    // card | games | settings | power | display | sound | appearance | language | network | system;
+    // anything else draws nothing.
     Q_PROPERTY(QString icon READ icon WRITE setIcon NOTIFY iconChanged)
     // How full the card's crescent should be, 0 to 1; it eases there.
     Q_PROPERTY(qreal lit READ lit WRITE setLit NOTIFY litChanged)

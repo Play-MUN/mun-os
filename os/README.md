@@ -23,7 +23,7 @@ it builds). A published preview comes with the source of its Debian packages
 | `mkosi/mkosi.images/initrd/` | The initrd: mkosi's own `mkosi-initrd` configuration, declared as a subimage so its packages are recorded too |
 | `mkosi/mkosi.build.chroot` | Compiles and stages the components into the image with their `services/*/deploy/build.sh` and `stage.sh`, and builds the example games against the image's libraries (beside the image, never in it) |
 | `mkosi/mkosi.postinst.chroot` | Writes `/usr/lib/mun/release` and checks that the staged components can run on the image's packages |
-| `mkosi/mkosi.extra/` | The systemd preset that enables the console services and leaves tty1 to the shell |
+| `mkosi/mkosi.extra/` | The systemd preset that enables the console services and leaves tty1 to the shell; the journal's bound (32 MiB) and no forwarding to a syslog the image does not have |
 | `mkosi/mkosi.repart/` | Partitions: a 512 MiB EFI system partition and a 6 GiB ext4 root |
 | `builder/provision.sh` | Prepares a fresh builder: APT pointed only at the snapshot, the builder brought to it, the image tools installed from it |
 | `builder/build.sh` | Fetches and verifies external sources, runs mkosi on a copy of `mkosi/`, converts the disk to qcow2 and writes `BUILD-INFO.json` and `SHA256SUMS` |

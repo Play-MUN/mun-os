@@ -37,6 +37,9 @@ qt_add_executable(mun-shell
     src/systemsounds.h
     src/blur.cpp
     src/blur.h
+    src/bootintro.cpp
+    src/bootintro.h
+    src/bootintroshapes.h
     src/hairline.cpp
     src/hairline.h
     src/cssbox.cpp
@@ -59,6 +62,8 @@ qt_add_executable(mun-shell
     src/shapeworld.h
     src/framewatch.cpp
     src/framewatch.h
+    src/memory.cpp
+    src/memory.h
 )
 
 # The generated QML type registration includes headers by basename.
@@ -76,7 +81,6 @@ set(MUN_QML_FILES
     qml/Theme.qml
     qml/I18n.qml
     qml/Logo.js
-    qml/PlayMun.js
     qml/Panels.qml
     qml/UiText.qml
     qml/MarkText.qml
@@ -111,6 +115,8 @@ qt_add_qml_module(mun-shell
         sounds/enter.wav
         sounds/back.wav
         sounds/startup.wav
+        images/boot-silhouette.png
+        images/boot-engraving.png
 )
 
 target_link_libraries(mun-shell PRIVATE Qt6::Core Qt6::Gui Qt6::Network Qt6::Qml Qt6::Quick PkgConfig::ALSA Threads::Threads)

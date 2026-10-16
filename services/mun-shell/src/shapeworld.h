@@ -12,7 +12,10 @@
 // GUI takes the frame, when no later tick is due). The world moves at the
 // package's rate (10 or 20 frames per second); its transitions at
 // kTransitionRate. A still world, or one at rest, is painted once and costs
-// nothing more.
+// nothing more. With MUN alone on screen (the front at 0: no world yet, or
+// one gone), nothing of the world shows and its frames are let go: the
+// painter frees those the scene graph does not hold and the item drops its
+// node, and with it the last one.
 //
 // Preparing: every image is decoded one at a time, its dimensions checked
 // from its header first and Qt's allocation limit in force, and scaled once
@@ -161,6 +164,7 @@ public:
         int shown = -1;   // held by the scene graph
         int ready = -1;   // painted, not taken yet
         bool wanted = false;   // a tick was skipped for want of a free frame
+        bool blank = false;   // nothing shows: the item drops its node and the frame on screen
         Params params;
     };
 

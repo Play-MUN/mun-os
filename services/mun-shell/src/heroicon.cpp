@@ -299,34 +299,66 @@ void drawSettings(Ink &ink)
     p->restore();
 }
 
-void drawPersonal(Ink &ink)
+void drawDisplay(Ink &ink)
 {
-    ink.fillOrStroke(ellipse(0, -44, 50, 50));
-    QPainterPath body;
-    body.moveTo(-100, 110);
-    body.cubicTo(-100, 20, 100, 20, 100, 110);
-    body.closeSubpath();
-    ink.fillOrStroke(body);
-    // A globe: the language's sign.
-    ink.stroke(ellipse(118, -80, 34, 34));
-    ink.stroke(ellipse(118, -80, 14, 34));
-    QPainterPath equator;
-    equator.moveTo(84, -80);
-    equator.lineTo(152, -80);
-    ink.stroke(equator);
+    ink.fillOrStroke(roundedRect(-150, -100, 300, 180, 12));
+    QPainterPath stand;
+    stand.moveTo(-50, 115);
+    stand.lineTo(50, 115);
+    stand.moveTo(0, 80);
+    stand.lineTo(0, 115);
+    ink.stroke(stand);
 }
 
-void drawPictureAndSound(Ink &ink)
+void drawSound(Ink &ink)
 {
-    ink.fillOrStroke(roundedRect(-150, -95, 220, 150, 12));
-    QPainterPath stand;
-    stand.moveTo(-60, 80);
-    stand.lineTo(-20, 80);
-    stand.moveTo(-40, 55);
-    stand.lineTo(-40, 80);
-    ink.stroke(stand);
+    // A speaker and its waves.
+    QPainterPath speaker;
+    speaker.moveTo(-106, -32);
+    speaker.lineTo(-66, -32);
+    speaker.lineTo(-16, -82);
+    speaker.lineTo(-16, 82);
+    speaker.lineTo(-66, 32);
+    speaker.lineTo(-106, 32);
+    speaker.closeSubpath();
+    ink.fillOrStroke(speaker);
     for (int i = 1; i <= 3; ++i)
-        ink.stroke(arc(90, -20, 22 * i, -0.8, 0.8));
+        ink.stroke(arc(4, 0, 34 * i, -0.8, 0.8));
+}
+
+void drawAppearance(Ink &ink)
+{
+    // The logo's moon in its eclipse: how the console looks.
+    const QPainterPath disc = ellipse(0, 0, 112, 112);
+    if (ink.face)
+        ink.fillWith(disc, rgba(12, 13, 16, 0.9));
+    ink.stroke(disc);
+    const QPainterPath moon = crescent(0, 0, 112, 0.32);
+    if (ink.face)
+        ink.glowFill(moon, rgba(236, 233, 227, 0.92), rgba(221, 233, 255, 0.6), 8);
+    else
+        ink.stroke(moon);
+}
+
+void drawLanguageAndTime(Ink &ink)
+{
+    // A globe, and a clock in front of it.
+    ink.fillOrStroke(ellipse(-46, -18, 92, 92));
+    ink.stroke(ellipse(-46, -18, 38, 92));
+    QPainterPath equator;
+    equator.moveTo(-138, -18);
+    equator.lineTo(46, -18);
+    ink.stroke(equator);
+    const QPainterPath dial = ellipse(78, 58, 54, 54);
+    if (ink.face)
+        ink.fillWith(dial, rgba(12, 13, 16, 0.92));
+    ink.stroke(dial);
+    QPainterPath hands;
+    hands.moveTo(78, 58);
+    hands.lineTo(78, 24);
+    hands.moveTo(78, 58);
+    hands.lineTo(102, 72);
+    ink.stroke(hands);
 }
 
 void drawNetwork(Ink &ink)
@@ -391,10 +423,14 @@ void drawShapes(const QString &key, Ink &ink)
         drawGames(ink);
     else if (key == QLatin1String("settings"))
         drawSettings(ink);
-    else if (key == QLatin1String("personal"))
-        drawPersonal(ink);
-    else if (key == QLatin1String("av"))
-        drawPictureAndSound(ink);
+    else if (key == QLatin1String("display"))
+        drawDisplay(ink);
+    else if (key == QLatin1String("sound"))
+        drawSound(ink);
+    else if (key == QLatin1String("appearance"))
+        drawAppearance(ink);
+    else if (key == QLatin1String("language"))
+        drawLanguageAndTime(ink);
     else if (key == QLatin1String("network"))
         drawNetwork(ink);
     else if (key == QLatin1String("system"))

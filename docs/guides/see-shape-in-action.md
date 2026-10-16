@@ -63,15 +63,15 @@ cannot use is dropped block by block, and the card stays valid.
 ## The console must show MUN Shape
 
 An image records the MUN Shape its console reads in its `BUILD-INFO.json`
-(`"shape": {"format": "mun-shape/1"}`). v0.1.0-dev.3 records it, as do
-images built from this checkout; earlier previews, v0.1.0-dev.2 and before,
+(`"shape": {"format": "mun-shape/1"}`). v0.1.0-dev.3 and v0.1.0-dev.4
+record it, as do images built from this checkout; earlier previews, v0.1.0-dev.2 and before,
 do not show MUN Shape. List what you have:
 
 ```sh
 ./mun dev list        # each build and guest: "shape mun-shape/1" or "shape not recorded"
 ```
 
-If none records it, get v0.1.0-dev.3
+If none records it, get v0.1.0-dev.4
 ([getting started](../getting-started.md#3-the-image)) or build one with
 `./mun dev build`
 ([build the image yourself](../getting-started.md#build-the-image-yourself)).
@@ -115,9 +115,10 @@ If none records it, get v0.1.0-dev.3
 
 6. **Turn off** (*Turn off* › *Turn off*).
 
-On the way, try *Settings › Picture and sound*: *MUN Shape* (Full, Colours
-only, Off), *Reduce motion* (every transition a fade, the world still) and
-the sounds (*System sounds*, *Game sounds on the menus*). Settings and
+On the way, try *Settings › Appearance and accessibility*: *MUN Shape*
+(Full, Colours only, Off) and *Reduce motion* (every transition a fade, the
+world still); and *Settings › Sound*: *System sounds*, *Game sounds on the
+menus*. Settings and
 dialogs stay MUN's over any world.
 
 ## What to look at

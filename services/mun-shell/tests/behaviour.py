@@ -40,6 +40,13 @@ come from CardClient. The cases:
   measured (wait4) against the engine's estimate at 1080p and 1440p, for
   worlds that keep every limit but scale large or decode larger, and a
   sample stepped down to still; how the extreme ones look.
+- boot: the start-up as the first start of a boot plays it (boot.qml), the
+  shell's own Main.qml against stand-ins for the card service and the
+  launcher: with both answering at once, "A Skip" shows and A ends it while
+  another key does nothing; with them answering late, nothing skips it, the
+  LED waits for them once the picture has faded and Home follows them; with
+  neither, Home comes after its 20 s; with the interface sounds off its
+  clock runs from the start.
 - home: the shell's own Main.qml (home.qml) against stand-ins for the card
   service and the launcher: an arrival, dialogs, a return, removal, Eject
   safely confirmed and refused, another card, the player's choices, a
@@ -47,6 +54,11 @@ come from CardClient. The cases:
   arrives late, Eject safely, a changed choice and another card, frame by
   frame (a dressed entry whole on every frame); an arrival after Settings
   or a dialog only once Home is wholly on screen.
+- settings: the player's settings file (settings.qml): a damaged file reads
+  as the defaults and the next choice writes a valid one; a value outside
+  the allowed set reads as its default; a change replaces the file whole (a
+  new file renamed over the old one) and a temporary file left by an
+  interrupted write is ignored; Reset settings keeps the language alone.
 
 Linux, with the shell's run-time libraries (the image's). The image build
 runs this after compiling the shell (os/mkosi/mkosi.build.chroot); exit
@@ -180,7 +192,11 @@ class Shell:
         runtime.mkdir(mode=0o700, parents=True, exist_ok=True)
         state = case / "state"
         state.mkdir(parents=True, exist_ok=True)
-        (state / "settings.ini").write_text(settings, encoding="utf-8")
+        # None: the caller wrote the file itself.
+        if isinstance(settings, bytes):
+            (state / "settings.ini").write_bytes(settings)
+        elif settings is not None:
+            (state / "settings.ini").write_text(settings, encoding="utf-8")
         env = dict(os.environ, QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software", QT_SCALE_FACTOR=repr(scale),
                    QT_FORCE_STDERR_LOGGING="1", LANG="C.UTF-8", HOME=str(case / "home"),
                    XDG_CONFIG_HOME=str(case / "config"), XDG_RUNTIME_DIR=str(runtime),
@@ -1235,6 +1251,24 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
     settings = first(phases, label="settings")
     checks.expect("home-settings", "in Settings the world is under MUN's scrim",
                   settings is not None and settings["level"] == 1 and settings["dim"] > 0.7, settings)
+    checks.expect("home-settings", "Settings has its six sections, in order, and no account",
+                  settings is not None and settings["sections"] == ["display", "sound", "appearance", "language",
+                                                                    "network", "system"], settings)
+
+    # In Spanish, the longer language: every section with its options
+    # focused, no text on screen cut short.
+    steps = [{"at": 2500, "set": {"mainIndex": 2}}, {"at": 2700, "call": "enter"}]
+    for i in range(6):
+        at = 3500 + i * 1600
+        steps += [{"at": at, "set": {"settingsIndex": i}}, {"at": at + 100, "call": "enter"},
+                  {"at": at + 1200, "probe": f"section-{i}"}, {"at": at + 1300, "call": "back"}]
+    cardd, launchd = serve("home-settings-es", [[(0, snapshot())]])
+    out, phases, _ = run("home-settings-es", cardd, launchd, steps, settings="[interface]\nlanguage=es\n",
+                         end=3500 + 6 * 1600 + 400)
+    sections = [p for p in phases if p["label"].startswith("section-")]
+    checks.expect("home-settings-es", "in Spanish, every section's options show whole, nothing cut short",
+                  len(sections) == 6 and all(p["level"] == 2 and not p["cut"] for p in sections),
+                  [(p["label"], p["level"], p["cut"]) for p in sections])
 
     # The options focused when the identity comes, goes or changes: a dressed
     # entry whole from its first frame (never easing out of MUN's fade),
@@ -1345,11 +1379,172 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
     whole_when_dressed("home-dialog-closed", out)
 
 
+def boot_cases(shell: Shell, checks: Checks):
+    """The start-up as the first start of a boot plays it (boot.qml)."""
+    def run(name, ready_at=None, steps=(), end=16000, settings=""):
+        cardd = launchd = None
+        if ready_at is not None:
+            cardd = Service(shell.work / f"{name}.sock", [[(ready_at, snapshot())]])
+            launchd = Service(shell.work / f"{name}-launch.sock", [[(ready_at, {"type": "snapshot", "state": "idle"})]])
+        try:
+            output = shell.run(name, "boot.qml", {"steps": list(steps) + [{"at": end, "quit": True}]},
+                               socket_path=cardd.path if cardd else None, launcher=launchd.path if launchd else None,
+                               settings=settings, timeout=end / 1000 + 60)
+        finally:
+            for service in (cardd, launchd):
+                if service:
+                    service.close()
+        clocks[name] = re.findall(r"mun-shell: start-up: the picture (follows the sound|runs on its own[^\n]*)", output)
+        return lines(output, "BOOT"), lines(output, "KEY")
+
+    def first(states, **match):
+        return next((s for s in states if all(s[k] == v for k, v in match.items())), None)
+
+    clocks = {}   # what each run's start-up said about its clock
+
+    # Both services answer at once: the hint shows; Down does nothing, A ends it.
+    states, keys = run("boot-ready", ready_at=0, steps=[{"at": 2000, "key": "Down"}, {"at": 3000, "key": "A"}], end=5000)
+    hinted = first(states, hint=1)
+    checks.expect("boot-ready", "the system ready, the Skip hint shows before any key",
+                  hinted is not None and hinted["at"] < 2000 and hinted["canSkip"], hinted)
+    checks.expect("boot-ready", "another key (Down) does nothing: the start-up plays on",
+                  all(s["playing"] and not s["powered"] for s in states if 2000 <= s["at"] < 3000), keys)
+    home = first(states, powered=True)
+    checks.expect("boot-ready", "A skips it: Home within 0.7 s, the layer leaving",
+                  home is not None and 3000 <= home["at"] < 3700 and not home["playing"] and not home["shown"], home)
+    played = [s["t"] for s in states if s["at"] < 3000 and s["playing"]]
+    checks.expect("boot-ready", "its clock ran before the skip", played and max(played) > 1.0, played[-3:])
+    gone = [s for s in states if home and s["at"] >= home["at"] + 1000]
+    checks.expect("boot-ready", "once it has faded out, its drawing is let go",
+                  gone and all(s["hint"] == -1 for s in gone), gone[:2])
+    checks.expect("boot-ready", "the memory settles once it is over, not while it plays",
+                  home is not None and not any(s["settled"] for s in states if s["at"] < home["at"] and s["playing"])
+                  and all(s["settled"] for s in states if s["at"] >= home["at"]), home)
+    early = next((s for s in states if s["at"] >= 1500), None)
+    checks.expect("boot-ready", "without a sound device the picture does not wait for one",
+                  early is not None and early["t"] >= 0.5, early)
+
+    checks.expect("boot-ready", "the journal says which clock the picture follows", bool(clocks.get("boot-ready")),
+                  clocks.get("boot-ready"))
+
+    # The services answer at 15 s: nothing skips it before; the picture
+    # fades (11.75 s of the sound) and the LED waits for them; Home follows.
+    states, keys = run("boot-late", ready_at=15.0, steps=[{"at": 5000, "key": "A"}, {"at": 14000, "key": "A"}], end=17000)
+    checks.expect("boot-late", "before the system is ready no Skip shows and A does nothing",
+                  all(not s["canSkip"] and s["hint"] == 0 for s in states if s["at"] < 15000)
+                  and all(s["playing"] for s in states if 5000 <= s["at"] < 14900), keys)
+    waiting = first(states, waiting=True)
+    checks.expect("boot-late", "once the picture has faded, the LED waits for the system",
+                  waiting is not None and waiting["t"] >= 11.7 and waiting["playing"] and not waiting["powered"], waiting)
+    home = first(states, powered=True)
+    checks.expect("boot-late", "the memory settles once Home comes, not while the LED waits",
+                  home is not None and not any(s["settled"] for s in states if s["at"] < home["at"])
+                  and all(s["settled"] for s in states if s["at"] >= home["at"]), home)
+    checks.expect("boot-late", "Home follows the system's answer",
+                  home is not None and 15000 <= home["at"] < 16500, home)
+
+    # Neither answers: Home after the start-up's 20 s, whatever they do.
+    states, _ = run("boot-never", steps=[], end=23000)
+    home = first(states, powered=True)
+    checks.expect("boot-never", "no Skip ever shows: hidden while the start-up is on screen, gone after",
+                  all(not s["canSkip"] and (s["hint"] == 0 if s["shown"] else s["hint"] <= 0) for s in states), "")
+    checks.expect("boot-never", "the memory settles once Home comes, not before",
+                  home is not None and not any(s["settled"] for s in states if s["at"] < home["at"])
+                  and all(s["settled"] for s in states if s["at"] >= home["at"]), home)
+    checks.expect("boot-never", "Home after 20 s without the system", home is not None and 20000 <= home["at"] < 21500, home)
+
+    # The interface sounds off: the picture's clock runs from the start.
+    states, _ = run("boot-silent", ready_at=0, steps=[], end=3000, settings="[audio]\nsystem-sounds=off\n")
+    early = next((s for s in states if s["at"] >= 1300), None)
+    checks.expect("boot-silent", "without the sound, its clock runs from the start (no wait for a device)",
+                  early is not None and early["t"] >= 0.8, early)
+
+
+def settings_cases(shell: Shell, checks: Checks):
+    """The player's settings file (settings.qml)."""
+    defaults = {"language": "en", "clockFormat": "24h", "safeArea": 100, "systemSounds": True, "gameSounds": True,
+                "shapeMode": "full", "reduceMotion": False, "autoPowerOffHours": 1}
+
+    def run(name, settings, steps, before=None):
+        state = shell.work / name / "state"
+        state.mkdir(parents=True, exist_ok=True)
+        if before:
+            before(state)
+        output = shell.run(name, "settings.qml", {"steps": steps}, settings=settings)
+        return {r["label"]: r for r in lines(output, "SETTINGS")}, state / "settings.ini"
+
+    def values(state):
+        return {k: state[k] for k in defaults} if state else None
+
+    def ini(path):
+        import configparser
+        parser = configparser.ConfigParser(interpolation=None)
+        try:
+            parser.read_string(path.read_text(encoding="utf-8"))
+        except (UnicodeDecodeError, configparser.Error):
+            return None
+        return {f"{section}/{key}": value for section in parser.sections() for key, value in parser[section].items()}
+
+    # A damaged file: the defaults, an error said once, and the next choice
+    # writes a valid file with it.
+    damaged = b"\x00\xff\xfe[display\nsafe-area=\x01\x02\n\xc3\x28=\n[interface\nlanguage"
+    states, path = run("settings-damaged", damaged, [{"set": {"language": "es"}}, {"report": "chosen"}])
+    start = states.get("start")
+    checks.expect("settings-damaged", "a damaged file reads as the defaults", values(start) == defaults, start)
+    written = ini(path)
+    checks.expect("settings-damaged", "the next choice writes a valid file that holds it",
+                  written is not None and written.get("interface/language") == "es"
+                  and states.get("chosen", {}).get("lastError") == "", (written, states.get("chosen")))
+
+    # Values outside the allowed set read as their defaults.
+    states, _ = run("settings-out-of-range", "[display]\nsafe-area=55\nreduce-motion=maybe\n"
+                    "[interface]\nlanguage=fr\nclock=13h\n[power]\nauto-off-hours=2\n[shape]\nmode=loud\n", [])
+    checks.expect("settings-out-of-range", "a value outside the allowed set reads as its default",
+                  values(states.get("start")) == defaults, states.get("start"))
+
+    # A change replaces the file whole: a new file renamed over the old one
+    # (another inode), so a write cut short leaves the old file as it was. A
+    # temporary file such a write left behind is not read.
+    opened = {}
+    def prepare(state):
+        (state / "settings.ini").write_text("[interface]\nclock=12h\n", encoding="utf-8")
+        (state / "settings.ini.Xq3Lp9").write_text("[interface]\nlanguage=es\n", encoding="utf-8")
+        opened["inode"] = (state / "settings.ini").stat().st_ino
+    states, path = run("settings-atomic", None, [{"report": "read"}, {"set": {"safeArea": 94}}, {"report": "chosen"}],
+                       before=prepare)
+    read = states.get("read", {})
+    checks.expect("settings-atomic", "a temporary file left by an interrupted write is ignored",
+                  read.get("language") == "en" and read.get("clockFormat") == "12h", read)
+    written = ini(path)
+    checks.expect("settings-atomic", "a change keeps the rest of the file and adds itself",
+                  written == {"interface/clock": "12h", "display/safe-area": "94"}, written)
+    checks.expect("settings-atomic", "the change is a new file renamed over the old one, never written in place",
+                  path.exists() and path.stat().st_ino != opened.get("inode"), opened)
+
+    # Reset settings: every choice back to its default but the language;
+    # the resolution's key goes too (Automatic).
+    chosen = ("[interface]\nlanguage=es\nclock=12h\n[display]\nsafe-area=91\nreduce-motion=on\n"
+              "resolution=1920x1080\n[audio]\nsystem-sounds=off\ngame-sounds=off\n[power]\nauto-off-hours=6\n"
+              "[shape]\nmode=off\n")
+    states, path = run("settings-reset", chosen, [{"report": "before"}, {"call": "resetKeepingLanguage"},
+                                                  {"report": "after"}])
+    before = states.get("before")
+    checks.expect("settings-reset", "the choices are read before the reset",
+                  before is not None and before["language"] == "es" and before["safeArea"] == 91
+                  and before["shapeMode"] == "off" and not before["systemSounds"], before)
+    after = values(states.get("after"))
+    checks.expect("settings-reset", "Reset settings keeps the language and returns everything else to its default",
+                  after == dict(defaults, language="es"), after)
+    checks.expect("settings-reset", "the file keeps the language alone", ini(path) == {"interface/language": "es"},
+                  ini(path))
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("binary", type=Path)
     parser.add_argument("--work", type=Path, help="keep the scenes, logs, grabs and report here")
-    parser.add_argument("--only", choices=("card", "cue", "surfaces", "presence", "world", "memory", "home"), action="append")
+    parser.add_argument("--only", choices=("card", "cue", "surfaces", "presence", "world", "memory", "boot", "home", "settings"),
+                        action="append")
     args = parser.parse_args(argv)
     binary = args.binary.resolve()
     if not os.access(binary, os.X_OK):
@@ -1364,7 +1559,7 @@ def main(argv=None) -> int:
     exports.mkdir()
     packages.mkdir()
     shell, checks, report = Shell(binary, work), Checks(), {}
-    only = set(args.only or ("card", "cue", "surfaces", "presence", "world", "memory", "home"))
+    only = set(args.only or ("card", "cue", "surfaces", "presence", "world", "memory", "boot", "home", "settings"))
     try:
         if "card" in only:
             print("MUN Shell behaviour: the card object")
@@ -1384,9 +1579,15 @@ def main(argv=None) -> int:
         if "memory" in only:
             print("MUN Shell behaviour: the world's memory at 1080p and 1440p")
             memory_cases(shell, checks, exports, packages, report)
+        if "boot" in only:
+            print("MUN Shell behaviour: the start-up, as a boot plays it")
+            boot_cases(shell, checks)
         if "home" in only:
             print("MUN Shell behaviour: Home, as a player meets it")
             home_cases(shell, checks, exports, packages, report)
+        if "settings" in only:
+            print("MUN Shell behaviour: the player's settings file")
+            settings_cases(shell, checks)
         (work / "report.json").write_text(json.dumps(report, indent=1, sort_keys=True) + "\n", encoding="utf-8")
         for folder in checks.failing:
             log = work / folder / "output.log"

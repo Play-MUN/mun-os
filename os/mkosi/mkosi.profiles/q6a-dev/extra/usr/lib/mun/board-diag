@@ -18,7 +18,8 @@
 # STATUS.txt has a line per file: ok, empty, truncated (cut at its limit, by
 # design for the journal), absent (a source that may not exist yet), or
 # failed, which says whether the source could not be read or the file could
-# not be written. Its last line, "run", is complete only when nothing failed
+# not be written; a read that failed stays failed when its output was also
+# cut. Its last line, "run", is complete only when nothing failed
 # or was skipped, and names what was cut; the journal gets the same line.
 # The boot is never failed by this script.
 #
@@ -30,6 +31,9 @@ case "$mode" in boot|shutdown) ;; *) echo "usage: board-diag boot|shutdown" >&2;
 
 MIB=1048576
 RUN_BUDGET=$((2 * MIB))
+# What a shell reports for a command killed by SIGPIPE (128 + 13), in dash
+# and bash alike.
+SIGPIPE_STATUS=141
 KEEP_FREE=$((64 * MIB))
 KEEP_BOOTS=5
 
@@ -109,15 +113,21 @@ put() {
     produced=$(cat "$tmp/.producer" 2>/dev/null)
     written=$(cat "$tmp/.writer" 2>/dev/null)
     error=$(head -n 1 "$tmp/.stderr" 2>/dev/null | cut -c1-200)
+    cut=
+    if [ "${size:-0}" -gt "$limit" ]; then
+        cut="output went past $limit bytes; $size kept"
+        truncations="$truncations $name"
+    fi
     if [ "$written" != 0 ]; then
         failed "$name" "not written in full (writer exit ${written:-unknown})"
-    elif [ "${size:-0}" -gt "$limit" ]; then
-        # The writer stopped reading at the limit; the command then ends on
-        # SIGPIPE, which is no failure of its own.
-        status "$name" truncated "output went past $limit bytes; $size kept"
-        truncations="$truncations $name"
+    elif [ -n "$cut" ] && { [ "$produced" = 0 ] || [ "$produced" = "$SIGPIPE_STATUS" ]; }; then
+        # Past the limit the writer stops reading, and a command still
+        # writing ends on SIGPIPE: that alone is the cut, not a failure.
+        status "$name" truncated "$cut"
     elif [ "$produced" != 0 ]; then
-        failed "$name" "could not be read (exit ${produced:-unknown})${error:+: $error}"
+        # Any other status, or none recorded, is a read that failed, cut or
+        # not: a long output does not make a failed read a good one.
+        failed "$name" "could not be read (exit ${produced:-unknown})${error:+: $error}${cut:+; $cut}"
     elif [ "${size:-0}" = 0 ]; then
         status "$name" empty "${error:+$error}"
     else

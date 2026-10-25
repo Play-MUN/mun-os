@@ -152,6 +152,40 @@ esac
                                     else text.rstrip().endswith("journal line 039999 " + "0" * 80),
                                     "the beginning at boot, the end at shutdown")
 
+    def test_a_failed_read_stays_failed_when_its_output_is_also_cut(self):
+        # At shutdown journalctl has finished, with its own error, before the
+        # end is taken: a long journal that failed to be read is not a cut.
+        self.tool("journalctl", """#!/bin/sh
+case "$*" in
+    *"-u mun-shell"*) echo "shell line" ;;
+    *) awk 'BEGIN { for (i = 0; i < 40000; ++i) printf "journal line %06d %080d\\n", i, 0 }'
+       echo "journal corrupted" >&2; exit 5 ;;
+esac
+""")
+        for shell in self.each_shell():
+            run, status, _ = self.run_diag(shell, mode="shutdown")
+            self.assertEqual(status["journal.txt"][0], "failed")
+            self.assertIn("could not be read (exit 5): journal corrupted", status["journal.txt"][1])
+            self.assertIn("output went past", status["journal.txt"][1], "the cut is said too")
+            self.assertEqual(status["run"][0], "incomplete")
+            self.assertIn("failed or skipped: journal.txt", status["run"][1])
+            self.assertIn("cut at its limit: journal.txt", status["run"][1])
+
+    def test_a_command_stopped_by_the_cut_is_only_cut(self):
+        # More than a pipe holds past the limit: the command is still writing
+        # when the writer stops, and ends on SIGPIPE. That is the cut itself.
+        self.tool("journalctl", """#!/bin/sh
+case "$*" in
+    *"-u mun-shell"*) awk 'BEGIN { for (i = 0; i < 4000; ++i) printf "shell line %06d %080d\\n", i, 0 }' ;;
+    *) echo "kernel: Linux version test" ;;
+esac
+""")
+        for shell in self.each_shell():
+            run, status, _ = self.run_diag(shell)
+            self.assertEqual(status["shell.txt"][0], "truncated")
+            self.assertEqual(status["run"][0], "complete")
+            self.assertIn("cut at its limit: shell.txt", status["run"][1])
+
     def test_a_write_that_stops_part_way_is_failed(self):
         # Writes to regular files stop at 512 bytes for the journal's writer
         # alone (the only limit above 300 000 bytes).

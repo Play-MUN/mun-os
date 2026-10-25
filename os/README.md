@@ -26,8 +26,8 @@ it builds). A published preview comes with the source of its Debian packages
 | `mkosi/mkosi.extra/` | The systemd preset that enables the console services and leaves tty1 to the shell; the journal's bound (32 MiB) and no forwarding to a syslog the image does not have |
 | `mkosi/mkosi.repart/` | Partitions: a 512 MiB EFI system partition and a 6 GiB ext4 root |
 | `builder/provision.sh` | Prepares a fresh builder: APT pointed only at the snapshot, the builder brought to it, the image tools installed from it |
-| `builder/build.sh` | Fetches and verifies external sources, runs mkosi on a copy of `mkosi/`, converts the disk to qcow2 and writes `BUILD-INFO.json` and `SHA256SUMS` |
-| `builder/build_info.py`, `builder/inputs.py` | BUILD-INFO generation and `inputs.json` access, Python standard library only |
+| `builder/build.sh` | Fetches and verifies external sources and the profile's pinned packages, runs mkosi on a copy of `mkosi/`, writes the disk in the profile's format (qcow2, or raw compressed with xz) and writes `BUILD-INFO.json` and `SHA256SUMS` |
+| `builder/build_info.py`, `builder/inputs.py`, `builder/profiles.py` | BUILD-INFO generation, `inputs.json` access, and a profile's image format and pinned packages ([profiles](#profiles)), Python standard library only |
 
 ## How a build runs
 
@@ -45,8 +45,10 @@ it builds). A published preview comes with the source of its Debian packages
    list becomes part of BUILD-INFO.
 4. `build.sh` fetches the sources of each game recipe the host copied in
    (`--recipe`, [below](#game-recipes)) at their pinned commits and applies
-   their checked patches, then runs mkosi 25.3. APT inside mkosi resolves every package from
-   the same snapshot, with signatures checked against Debian's archive keyring.
+   their checked patches, and downloads and verifies the profile's pinned
+   packages, if it has any ([profiles](#pinned-packages)), then runs mkosi
+   25.3. APT inside mkosi resolves every other package from the same
+   snapshot, with signatures checked against Debian's archive keyring.
    Build scripts run without network.
 5. The host copies the results back, checks them against `SHA256SUMS`, powers
    the builder off and deletes it (its disk and key included). Nothing of it
@@ -57,6 +59,7 @@ The output in `.local/mun/builds/<name>/`:
 | File | Content |
 | --- | --- |
 | `mun-os-<version>-qemu-arm64.qcow2` | The disk image (zstd-compressed qcow2). A guest never writes it: each guest gets its own copy-on-write disk over it |
+| `mun-os-<version>-<environment>.img.xz` | Instead of the qcow2, for a profile whose image format is `raw` ([profiles](#profiles)): the whole disk, compressed with xz, to write to a board's storage. No guest runs it |
 | `BUILD-INFO.json` | The build record (below) |
 | `SHA256SUMS` | SHA-256 of every file above and below except the logs |
 | `manifest.json`, `initrd-manifest.json` | mkosi's package manifests of the image and its initrd |
@@ -66,6 +69,80 @@ The output in `.local/mun/builds/<name>/`:
 | `games/<name>/…` | A game compiled from a recipe, with `--recipe` only; no game data is ever a build input |
 | `recipes.json` | With `--recipe`: each recipe's name, licence, sources, patches and digest |
 | `logs/` | Host, provisioning, build and builder console logs |
+
+## Profiles
+
+A profile is a directory of `mkosi/mkosi.profiles/`, built with
+`./mun dev build --profile NAME` (`qemu-dev` by default). Its `mkosi.conf`
+adds what is particular to it to the common composition (boot, kernel,
+development access) and states in `[Build]` `Environment=`:
+
+| Setting | Meaning |
+| --- | --- |
+| `MUN_ENVIRONMENT` | The environment the image identifies itself with, also part of the image's file name |
+| `MUN_RELEASE` | `false`: every profile here is a development profile |
+| `MUN_IMAGE_FORMAT` | `qcow2`, the default: the laboratory's image, which guests run. `raw`: the whole disk, compressed with xz (on every core of the builder, a CRC64 check in each block), as `mun-os-<version>-<environment>.img.xz` |
+
+A raw image is written to a board's storage, a microSD card for instance,
+with a flashing tool that reads `.img.xz` files, or on Linux with
+`xz -dc IMAGE | sudo dd of=/dev/DEVICE bs=4M conv=fsync` (DEVICE is the
+whole card, never a partition, and everything on it is replaced). The
+laboratory does not run it: `./mun dev run`, `./mun play`, `./mun dev smoke`,
+`./mun dev shape` and `./mun dev bundle` refuse a raw build and say why,
+and without `--build` the first four take the latest qcow2 build.
+
+### Pinned packages
+
+A development profile for a board may need a package Debian does not have,
+such as the kernel, its modules and its device tree as the board's vendor
+builds them. The profile declares each such `.deb` in `pinned-packages.json`
+beside its `mkosi.conf` and installs it through its `Packages=`, as any
+other package:
+
+```json
+{
+  "format": "mun-pinned-packages/1",
+  "packages": [
+    {
+      "name": "linux-image-<version>-<flavour>",
+      "version": "<version>",
+      "url": "https://<host>/<path>/linux-image-<version>-<flavour>_<version>_arm64.deb",
+      "sha256": "<SHA-256 of the file>",
+      "license": "GPL-2.0-only",
+      "source": {"repository": "https://<host>/<kernel source>", "commit": "<full commit hash>"}
+    }
+  ]
+}
+```
+
+| Field | Holds |
+| --- | --- |
+| `name`, `version` | The Debian package name and version; the file's own control fields must say the same |
+| `url` | Where the file is downloaded from: https, without credentials, query or fragment, ending in the file's plain `.deb` name |
+| `sha256` | The file's SHA-256 |
+| `license` | The package's licence |
+| `source` | The public source it was built from: its `repository` (https) and either the full `commit` or a `tag` |
+
+Nothing else is accepted, in the document or in an entry, but a
+`_comment` note at the top. Everything in it is untrusted input:
+
+- the host checks the declaration and the profile's image format
+  (`builder/profiles.py`) before a builder starts;
+- in the builder, `build.sh` downloads each file over https, following a
+  redirect only to another https URL, and keeps it only if it matches its
+  SHA-256 and if `dpkg-deb` reads the declared package and version, for
+  the arm64 or the all architecture, from its control file;
+- mkosi gets the directory of verified files (`--package-directory`) and
+  makes it a local APT repository, with `reprepro`, for the image and its
+  initrd;
+- the image must have installed the pinned version: if APT took a package of
+  the same name and another version from elsewhere, the build fails.
+
+`BUILD-INFO.json` records each pinned package. A build with pinned packages
+is a laboratory build: `./mun dev sources` fetches the source of Debian
+packages only and refuses it, as the pinned packages' sources are the
+repositories they name. A profile without `pinned-packages.json` fetches
+nothing, and mkosi gets no package directory.
 
 ## Game recipes
 
@@ -97,19 +174,26 @@ records the recipe. The game's data, and the card you make with it, stay in
 ## BUILD-INFO
 
 `BUILD-INFO.json` (`format: mun-build-info/1`) records: `name`, `version`,
-`environment`, `release`, `profile` and `build_id`; build start and end in
-UTC; the source (`commit`, `tree`, `clean`, `describe`, archive SHA-256 and
-whether the builder image came from the verified cache); the Debian suite,
-snapshot, archives, components and keyring; the kernel, Mesa and firmware
-packages (firmware: not installed, QEMU's virtio devices need none); the
-build overlay's toolchain; the builder's image, tools, package count and list
-hash; SHA-256 of `inputs.json` and of every file of the mkosi configuration;
-every image package and every initrd package with its exact version; the
+`environment`, `release`, `profile`, `image_format` (`qcow2` or `raw`;
+builds made before it was recorded are qcow2) and `build_id`; build start
+and end in UTC; the source (`commit`, `tree`, `clean`, `describe`, archive
+SHA-256 and whether the builder image came from the verified cache); the
+Debian suite, snapshot, archives, components and keyring; the kernel, Mesa
+and firmware packages (the kernel's packages from the snapshot in
+`kernel.packages`, a pinned kernel in `kernel.pinned`; firmware: not
+installed when the profile has none, as `qemu-dev`, whose virtio devices
+need none); the build overlay's toolchain; the builder's image, tools,
+package count and list hash; SHA-256 of `inputs.json` and of every file of
+the mkosi configuration; each pinned package (`pinned_packages`: URL,
+SHA-256, size, name, version, architecture, licence, source and whether the
+image installed it; empty for a profile without any); every image package
+and every initrd package with its exact version; the
 initrd's hash; each game with size and SHA-256 (a recipe's game also with
 its recipe: sources, commits, patches, licence and digest); the MUN Shape
 format the image's console reads (`shape.format`, `mun-shape/1`, taken from
 the checker the card service uses; builds made before it was recorded have
-no `shape`); and the image with its hash.
+no `shape`); and the image with its hash, beside the hash of the raw disk it
+was made from (for a raw image, what it decompresses to).
 
 Inside the image, `/usr/lib/mun/release` carries the identity (name, version,
 environment, release, profile, build id, source commit, snapshot); the

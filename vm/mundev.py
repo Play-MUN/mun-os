@@ -40,6 +40,7 @@ import bundle  # noqa: E402
 import sources as package_sources  # noqa: E402
 import munvm as vm  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "os" / "builder"))
+import profiles as build_profiles  # noqa: E402
 import recipes as game_recipes  # noqa: E402
 
 REPO_ROOT = vm.REPO_ROOT
@@ -53,8 +54,15 @@ SOURCES_ROOT = MUN_ROOT / "sources"
 CARD_TOOL = REPO_ROOT / "tools" / "mun-card" / "mun-card"
 GUESTS_ROOT = vm.GUESTS_ROOT
 INPUTS_FILE = REPO_ROOT / "os" / "inputs.json"
-PROFILES = ("qemu-dev",)
+PROFILES_ROOT = REPO_ROOT / "os" / "mkosi" / "mkosi.profiles"
+# A profile's name reaches the builder's command line: plain names only.
+PROFILE_NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,31}")
 NAME = re.compile(r"[a-z0-9][a-z0-9-]{1,15}")
+# The image a guest runs: what each image format a build may have is called
+# (os/builder/profiles.py, build.sh). Only the qcow2 runs as a guest; the raw
+# one is written to a board's storage.
+IMAGE_SUFFIXES = {"qcow2": ".qcow2", "raw": ".img.xz"}
+GUEST_FORMAT = "qcow2"
 
 BUILDER_VCPUS = int(os.environ.get("MUN_BUILDER_VCPUS", str(max(2, min(8, (os.cpu_count() or 4) - 2)))))
 BUILDER_MEMORY = os.environ.get("MUN_BUILDER_MEMORY", "8G")
@@ -65,6 +73,15 @@ RECIPE_LIMIT = 16 * 1024 * 1024
 
 def inputs() -> Dict[str, Any]:
     return json.loads(INPUTS_FILE.read_text())
+
+
+def profiles() -> List[str]:
+    """The composition profiles this checkout has: the directories of
+    os/mkosi/mkosi.profiles/ with a mkosi.conf."""
+    if not PROFILES_ROOT.is_dir():
+        return []
+    return sorted(p.name for p in PROFILES_ROOT.iterdir()
+                  if p.is_dir() and PROFILE_NAME.fullmatch(p.name) and (p / "mkosi.conf").is_file())
 
 
 def sha256_file(path: Path) -> str:
@@ -324,8 +341,16 @@ def cmd_build(args: argparse.Namespace) -> None:
     if not vm.HOST.daemonizes:
         raise vm.LabError(f"building is not supported on {vm.HOST.label}; build inside WSL 2 (Linux), "
                           "or download an image with `./mun get`")
-    if args.profile not in PROFILES:
-        raise vm.LabError(f"unknown profile {args.profile}; available: {', '.join(PROFILES)}")
+    available = profiles()
+    if args.profile not in available:
+        raise vm.LabError(f"unknown profile {args.profile}; available: {', '.join(available)}")
+    # The profile's own settings, checked before a builder starts, as the
+    # recipes are (os/builder/profiles.py).
+    try:
+        profile_format = build_profiles.image_format(PROFILES_ROOT / args.profile)
+        build_profiles.pinned(PROFILES_ROOT / args.profile)
+    except (build_profiles.ProfileError, OSError) as exc:
+        raise vm.LabError(str(exc)) from exc
     name = args.name or time.strftime("b%m%d-%H%M%S")
     if not NAME.fullmatch(name):
         raise vm.LabError("build name: 2-16 lowercase letters, digits or '-', starting with a letter or digit")
@@ -406,7 +431,8 @@ def cmd_build(args: argparse.Namespace) -> None:
     HOST_LOG = final / "logs" / "host.log"
     log(f"build {name} done in {elapsed // 60} min {elapsed % 60} s: {info['name']} {info['version']} "
         f"({info['environment']}, release={str(info['release']).lower()}), build id {info['build_id']}")
-    log(f"image: {final / image_name(info)}")
+    log(f"image: {final / image_name(info)}" + ("" if profile_format == GUEST_FORMAT else
+        f" ({profile_format}: a disk to write to the board's storage; it does not run as a guest)"))
 
 
 def publish_build(partial: Path, final: Path, note: str) -> Dict[str, Any]:
@@ -429,11 +455,39 @@ def publish_build(partial: Path, final: Path, note: str) -> Dict[str, Any]:
     return json.loads((final / "BUILD-INFO.json").read_text())
 
 
+def image_format(info: Dict[str, Any]) -> str:
+    """The format of a build's image. Builds made before BUILD-INFO recorded
+    it have none and are all qcow2."""
+    found = info.get("image_format", GUEST_FORMAT)
+    if found not in IMAGE_SUFFIXES:
+        raise vm.LabError(f"BUILD-INFO names an image format this checkout does not know: {found!r}")
+    return found
+
+
 def image_name(info: Dict[str, Any]) -> str:
-    names = [name for name in info["artifacts"] if name.endswith(".qcow2")]
+    suffix = IMAGE_SUFFIXES[image_format(info)]
+    names = [name for name in info["artifacts"] if name.endswith(suffix)]
     if len(names) != 1:
         raise vm.LabError("BUILD-INFO does not name exactly one image")
     return names[0]
+
+
+def guest_image(build: Path, info: Optional[Dict[str, Any]] = None) -> str:
+    """The name of the build's image if a guest can run it; otherwise why not."""
+    if info is None:
+        info = json.loads((build / "BUILD-INFO.json").read_text())
+    found = image_format(info)
+    if found != GUEST_FORMAT:
+        raise vm.LabError(f"build {build.name} is a {found} disk image ({image_name(info)}) to write to a board's "
+                          f"storage; a guest runs a {GUEST_FORMAT} image, such as a build of the qemu-dev profile")
+    return image_name(info)
+
+
+def runs_in_guest(build: Path) -> bool:
+    try:
+        return image_format(json.loads((build / "BUILD-INFO.json").read_text())) == GUEST_FORMAT
+    except (OSError, ValueError, vm.LabError):
+        return False
 
 
 def verify_sums(directory: Path) -> None:
@@ -466,7 +520,7 @@ def builds() -> List[Path]:
 def create_guest(name: str, build: Path) -> None:
     """A new guest disk: copy-on-write over the build's image, which stays untouched."""
     info = json.loads((build / "BUILD-INFO.json").read_text())
-    image = build / image_name(info)
+    image = build / guest_image(build, info)
     root = GUESTS_ROOT / name
     if (root / "guest.json").exists():
         raise vm.LabError(f"guest {name} exists")
@@ -502,9 +556,14 @@ def guest_build(name: str, build: Optional[str]) -> Tuple[Path, bool]:
         chosen = BUILDS_ROOT / build
         if chosen not in available:
             raise vm.LabError(f"no finished build {build} in {BUILDS_ROOT}")
+        guest_image(chosen)
         return chosen, False
+    runnable = [b for b in available if runs_in_guest(b)]
+    if runnable:
+        return runnable[-1], False
     if available:
-        return available[-1], False
+        raise vm.LabError("no build here runs as a guest (they are disk images for a board): "
+                          "run `./mun dev build` first")
     raise vm.LabError("no build yet: run `./mun dev build` first")
 
 
@@ -537,7 +596,7 @@ def cmd_shape(args: argparse.Namespace) -> int:
     # Which console it would be, before a guest is made or started: one whose
     # build records no MUN Shape is refused, the guest left as it is.
     build_dir, recorded = guest_build(args.guest, args.build)
-    available = builds()
+    available = [b for b in builds() if runs_in_guest(b)]
     shapepreview.check_build(args.guest, build_dir, available[-1] if available else None, recorded)
     build_dir = ensure_guest(args.guest, args.build)
     base = None
@@ -651,6 +710,8 @@ def cmd_bundle(args: argparse.Namespace) -> None:
     if (build / "ORIGIN.json").exists():
         raise vm.LabError(f"build {args.build} was downloaded; bundle the build it came from instead")
     info = json.loads((build / "BUILD-INFO.json").read_text())
+    # A bundle is something `./mun get` installs and `./mun play` runs.
+    guest_image(build, info)
     others = sorted(set(info.get("games", {})) - OWN_GAMES)
     if others:
         raise vm.LabError(f"build {args.build} also built {', '.join(others)}: a download carries MUN's own software "
@@ -684,6 +745,11 @@ def cmd_sources(args: argparse.Namespace) -> None:
     if build not in builds():
         raise vm.LabError(f"no finished build {args.build} in {BUILDS_ROOT}")
     info = json.loads((build / "BUILD-INFO.json").read_text())
+    pinned = [f"{p.get('name')} {p.get('version')}" for p in info.get("pinned_packages") or []]
+    if pinned:
+        raise vm.LabError(f"build {args.build} has packages pinned from outside the Debian snapshot "
+                          f"({', '.join(pinned)}): this tool fetches Debian sources only, and theirs are the "
+                          "repositories BUILD-INFO names (pinned_packages)")
     out = Path(args.out) if args.out else SOURCES_ROOT / info["build_id"]
     try:
         manifest = package_sources.collect(info, out, fetch_files=not args.list, report=log)
@@ -826,9 +892,12 @@ def cmd_smoke(args: argparse.Namespace) -> int:
     if args.bundle:
         build: Optional[str] = install(args.bundle).name
     else:
-        build = args.build or (builds()[-1].name if builds() else None)
+        runnable = [b for b in builds() if runs_in_guest(b)]
+        build = args.build or (runnable[-1].name if runnable else None)
     if not build:
         raise vm.LabError("no build to check: give --build or --bundle")
+    if (BUILDS_ROOT / build / "BUILD-INFO.json").is_file():
+        guest_image(BUILDS_ROOT / build)
     card = args.card
     if not (vm.CARD_ROOT / f"{card}.img").is_file():
         raise vm.LabError(f"no card {card} in {vm.CARD_ROOT} (a bundle brings one)")
@@ -913,7 +982,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
     p = sub.add_parser("build", help="build a development image in a new disposable builder")
     p.add_argument("--name", help="build name (default: time-based)")
-    p.add_argument("--profile", default="qemu-dev", help="composition profile (only qemu-dev exists)")
+    p.add_argument("--profile", default="qemu-dev",
+                   help="composition profile, a directory of os/mkosi/mkosi.profiles/ (default qemu-dev)")
     p.add_argument("--recipe", action="append", metavar="DIR",
                    help="also compile a game from a recipe kept outside this repository (os/builder/recipes.py); "
                         "repeatable")

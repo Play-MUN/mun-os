@@ -1,0 +1,132 @@
+#!/usr/bin/env python3
+"""q6a-dev: the boot menu of the finished disk image.
+
+mkosi writes one Type 1 entry, after every script that runs inside the image,
+so its siblings are added here, on the boot partition of mun-os.raw, by
+copying that entry with other kernel arguments:
+
+    default           initcall_blacklist=sysfb_init: no firmware framebuffer
+                      is registered, msm is card0
+    no-simpledrm      the firmware framebuffer is registered but simpledrm,
+                      which would take card0 for it, is not started
+    firmware-fb       the firmware framebuffer kept: early output on HDMI,
+                      msm as card1 (the shell then reports its display on
+                      card1 and does not start)
+    diagnostic        as firmware-fb, without the shell and with a root shell
+                      on tty1
+
+The menu stays up for 5 seconds. The partition must keep room for the
+diagnostic dump (/usr/lib/mun/board-diag) or the build fails.
+
+Python's standard library and mtools only, both in the builder.
+"""
+import os
+import re
+import subprocess
+import sys
+import tempfile
+import uuid
+from pathlib import Path
+
+ESP_TYPE = uuid.UUID("c12a7328-f81f-11d2-ba4b-00a0c93ec93b").bytes_le
+SECTOR = 512
+DEFAULT_ARG = "initcall_blacklist=sysfb_init"
+# board-diag needs 64 MiB free plus what it writes (5 boots of up to 4 MiB).
+MIN_FREE = 96 * 1024 * 1024
+VARIANTS = (
+    # (suffix, title, arguments taken out, arguments added)
+    ("", "MUN OS", (), ()),
+    ("+no-simpledrm", "MUN OS (firmware framebuffer without simpledrm)",
+     (DEFAULT_ARG,), ("initcall_blacklist=simpledrm_platform_driver_init",)),
+    ("+firmware-fb", "MUN OS (firmware framebuffer kept; display on card1)", (DEFAULT_ARG,), ()),
+    ("+diagnostic", "MUN OS diagnostic (no interface, root shell on tty1)",
+     (DEFAULT_ARG,), ("systemd.mask=mun-shell.service", "systemd.debug_shell=tty1")),
+)
+
+
+def die(message: str) -> None:
+    print(f"q6a-dev postoutput: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def esp_offset(image: Path) -> int:
+    """The byte offset of the EFI system partition, from the GPT."""
+    with image.open("rb") as disk:
+        disk.seek(SECTOR)
+        header = disk.read(92)
+        if header[:8] != b"EFI PART":
+            die(f"{image.name} has no GPT header at LBA 1")
+        entries_lba = int.from_bytes(header[72:80], "little")
+        count = int.from_bytes(header[80:84], "little")
+        size = int.from_bytes(header[84:88], "little")
+        disk.seek(entries_lba * SECTOR)
+        table = disk.read(count * size)
+    starts = [int.from_bytes(table[i + 32:i + 40], "little")
+              for i in range(0, len(table), size) if table[i:i + 16] == ESP_TYPE]
+    if len(starts) != 1:
+        die(f"{image.name} has {len(starts)} EFI system partitions, not one")
+    return starts[0] * SECTOR
+
+
+def mtools(tool: str, image: str, *args: str) -> str:
+    result = subprocess.run([tool, "-i", image, *args], capture_output=True, text=True,
+                            env=dict(os.environ, MTOOLS_SKIP_CHECK="1"))
+    if result.returncode:
+        die(f"{tool} {' '.join(args)}: {result.stderr.strip()}")
+    return result.stdout
+
+
+def main() -> None:
+    image = Path(os.environ.get("OUTPUTDIR", ".")) / "mun-os.raw"
+    if not image.is_file():
+        die(f"no disk image at {image}")
+    esp = f"{image}@@{esp_offset(image)}"
+
+    names = mtools("mdir", esp, "-b", "::/loader/entries").split()
+    entries = [n.rsplit("/", 1)[-1] for n in names if n.endswith(".conf")]
+    if len(entries) != 1:
+        die(f"expected the one entry mkosi writes, found {entries}")
+    base = entries[0]
+    text = mtools("mtype", esp, f"::/loader/entries/{base}")
+    options = re.findall(r"(?m)^options (.*)$", text)
+    if len(options) != 1 or options[0].split().count(DEFAULT_ARG) != 1:
+        die(f"{base}: expected one options line with {DEFAULT_ARG}")
+    linux = re.findall(r"(?m)^linux (/\S+)$", text)
+    devicetree = re.findall(r"(?m)^devicetree (/\S+)$", text)
+    if len(linux) != 1 or len(devicetree) != 1:
+        die(f"{base}: expected one linux and one devicetree line")
+
+    with tempfile.TemporaryDirectory() as work:
+        # The firmware starts only an EFI executable: the kernel must not be
+        # the package's gzip-wrapped Image (mkosi.postinst.chroot).
+        for path, magic, what in ((linux[0], b"MZ", "an EFI executable"),
+                                  (devicetree[0], b"\xd0\x0d\xfe\xed", "a device tree blob")):
+            local = Path(work) / "check"
+            mtools("mcopy", esp, "-o", f"::{path}", str(local))
+            if local.read_bytes()[:len(magic)] != magic:
+                die(f"{path} on the boot partition is not {what}")
+            local.unlink()
+        for order, (suffix, title, taken, added) in enumerate(VARIANTS, start=1):
+            args = [a for a in options[0].split() if a not in taken] + list(added)
+            lines = [line for line in text.splitlines() if not line.startswith(("title ", "options ", "sort-key "))]
+            entry = "\n".join([f"title {title}", f"sort-key mun-{order}", *lines, f"options {' '.join(args)}"]) + "\n"
+            name = base[:-len(".conf")] + suffix + ".conf"
+            local = Path(work) / name
+            local.write_text(entry)
+            mtools("mcopy", esp, "-o", str(local), f"::/loader/entries/{name}")
+            print(f"q6a-dev postoutput: entry {name}: {title}")
+        loader = Path(work) / "loader.conf"
+        loader.write_text(f"timeout 5\ndefault {base}\nconsole-mode keep\n")
+        mtools("mcopy", esp, "-o", str(loader), "::/loader/loader.conf")
+
+    free = re.search(r"([\d ]+) bytes free", mtools("mdir", esp, "::/"))
+    if not free:
+        die("could not read the boot partition's free space")
+    free_bytes = int(free.group(1).replace(" ", ""))
+    print(f"q6a-dev postoutput: boot partition {free_bytes // (1024 * 1024)} MiB free")
+    if free_bytes < MIN_FREE:
+        die(f"the boot partition keeps {free_bytes} bytes free, under the {MIN_FREE} the diagnostic dump needs")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,17 @@
+{
+  "format": "mun-pinned-packages/1",
+  "_comment": "Radxa's kernel for the Dragon Q6A, from its qcs6490-trixie apt suite (Release 2026-09-24). Its packaging repository at tag 7.0.11-7 pins the kernel tree radxa/kernel at a50eb5b71984bd82b49cd5d31b1e2eb5505c6512 (submodule src), built with defconfig + radxa.config and bindeb-pkg.",
+  "packages": [
+    {
+      "name": "linux-image-7.0.11-7-qcom",
+      "version": "7.0.11-7",
+      "url": "https://radxa-repo.github.io/qcs6490-trixie/pool/main/l/linux-upstream/linux-image-7.0.11-7-qcom_7.0.11-7_arm64.deb",
+      "sha256": "4a0fb9319d8147da1c1400b2717bca593bcd4b27453e5cded5aff37870b34e6f",
+      "license": "GPL-2.0-only (Linux kernel)",
+      "source": {
+        "repository": "https://github.com/radxa-pkg/linux-qcom",
+        "commit": "f848b5ff352aaae7dcf27fd1ac978219fb428e4d"
+      }
+    }
+  ]
+}

@@ -1,0 +1,160 @@
+#!/bin/sh
+# Development image for a board (profile q6a-dev): what this boot did, written
+# to the boot partition, which the Mac reads after a clean power-off. There
+# is no serial console, so this is how a boot that shows nothing on HDMI is
+# diagnosed.
+#
+#   board-diag boot       90 s after boot (mun-board-diag.timer)
+#   board-diag shutdown   when the system stops (mun-board-diag.service)
+#
+# Each run goes to a hidden directory first and is renamed into
+# mun-diag/boot-NNNN-BOOTID/<run>/ when complete, with STATUS.txt; a run cut
+# short leaves no directory that looks finished. Limits, so that the boot
+# partition is never filled:
+# - nothing is written unless 64 MiB stay free after the run's budget;
+# - a run writes at most 2 MiB (a boot, its two runs, at most 4 MiB): each
+#   file is cut at its limit while it is written;
+# - the 5 newest boots are kept; only boot-* directories are ever removed.
+# A failed write is recorded and the run reported as incomplete, in the
+# journal and in STATUS.txt. The boot is never failed by this script.
+set -u
+mode=${1:-}
+case "$mode" in boot|shutdown) ;; *) echo "usage: board-diag boot|shutdown" >&2; exit 64 ;; esac
+
+MIB=1048576
+RUN_BUDGET=$((2 * MIB))
+KEEP_FREE=$((64 * MIB))
+KEEP_BOOTS=5
+
+say() { printf 'board-diag: %s\n' "$*"; }
+
+# The boot partition (vfat), wherever systemd mounted it; looking at the path
+# mounts it if it is an automount.
+base=
+for p in /boot /efi; do
+    ls "$p" >/dev/null 2>&1 || true
+    # An automount shows as autofs with the vfat mount on top of it.
+    if findmnt -n -t vfat --mountpoint "$p" >/dev/null 2>&1; then
+        base=$p/mun-diag
+        break
+    fi
+done
+[ -n "$base" ] || { say "no vfat boot partition mounted; nothing written"; exit 0; }
+mkdir -p "$base" 2>/dev/null || { say "cannot create $base; nothing written"; exit 0; }
+
+free_bytes() { echo $(($(df -Pk "$base" | awk 'NR == 2 { print $4 }') * 1024)); }
+if [ "$(free_bytes)" -lt $((KEEP_FREE + RUN_BUDGET)) ]; then
+    say "under $((KEEP_FREE / MIB)) MiB would stay free on the boot partition; nothing written"
+    exit 0
+fi
+
+# boot-NNNN-BOOTID: the number counts boots (the clock may be wrong), the id
+# ties both runs of a boot together.
+bootid=$(tr -d '-' </proc/sys/kernel/random/boot_id | cut -c1-8)
+state=/var/lib/mun-board-diag
+mkdir -p "$state"
+# current: "BOOTID NUMBER" of the boot that last ran.
+set -- $(cat "$state/current" 2>/dev/null)
+if [ "${1:-}" = "$bootid" ] && [ -n "${2:-}" ]; then
+    number=$2
+else
+    number=$((${2:-0} + 1))
+    echo "$bootid $number" >"$state/current"
+fi
+bootdir=$base/$(printf 'boot-%04d-%s' "$number" "$bootid")
+tmp=$base/.partial-$bootid-$mode
+rm -rf "$tmp"
+mkdir -p "$tmp" || { say "cannot create $tmp; nothing written"; exit 0; }
+
+used=0
+incomplete=0
+status() { printf '%s\t%s\t%s\n' "$1" "$2" "$3" >>"$tmp/STATUS.txt" || incomplete=1; }
+
+# put NAME LIMIT COMMAND...: COMMAND's output into NAME, cut at LIMIT bytes
+# (and at what is left of the run's budget) while it is written.
+put() {
+    name=$1 limit=$2
+    shift 2
+    left=$((RUN_BUDGET - used))
+    [ "$limit" -le "$left" ] || limit=$left
+    if [ "$limit" -lt 1024 ]; then
+        status "$name" skipped "run budget used up"
+        incomplete=1
+        return
+    fi
+    # `true`, not `:`: a failed redirection on `:` ends dash.
+    if ! true >"$tmp/.writer" 2>/dev/null; then
+        status "$name" failed "cannot write"
+        incomplete=1
+        return
+    fi
+    { "$@"; } 2>&1 | { head -c "$((limit + 1))" >"$tmp/$name"; echo "$?" >"$tmp/.writer"; }
+    size=$(wc -c <"$tmp/$name" 2>/dev/null | tr -d ' ')
+    used=$((used + ${size:-0}))
+    if [ "$(cat "$tmp/.writer" 2>/dev/null)" != 0 ]; then
+        status "$name" failed "not written in full"
+        incomplete=1
+    elif [ "$size" -gt "$limit" ]; then
+        status "$name" truncated "output went past $limit bytes; the first $size kept"
+    else
+        status "$name" ok "$size bytes"
+    fi
+}
+
+# printf, not echo: dash's echo reads backslashes, and the kernel's command
+# line holds paths like \mun-os\7.0.11-7-qcom.
+summary() {
+    printf '%s\n' "run: $mode, $(date -u +%Y-%m-%dT%H:%M:%SZ) (the board's clock), uptime $(cut -d' ' -f1 /proc/uptime) s"
+    printf '%s\n' "cmdline: $(cat /proc/cmdline)" "kernel: $(uname -a)"
+    cat /usr/lib/mun/release 2>/dev/null
+    echo
+    printf '%s\n' "mun-shell: $(systemctl show mun-shell -p ActiveState -p SubState -p Result -p NRestarts -p ExecMainStatus | tr '\n' ' ')"
+    echo
+    for card in /sys/class/drm/card[0-9]*; do
+        case "${card##*/}" in *-*) continue ;; esac
+        printf '%s\n' "${card##*/}: driver $(basename "$(readlink -f "$card/device/driver" 2>/dev/null)" 2>/dev/null)"
+        for c in "$card"-*; do
+            [ -e "$c/status" ] || continue
+            printf '%s\n' "  ${c##*/}: $(cat "$c/status") enabled=$(cat "$c/enabled" 2>/dev/null) modes=$(tr '\n' ' ' <"$c/modes" 2>/dev/null)"
+        done
+    done
+    for fb in /sys/class/graphics/fb[0-9]*; do
+        [ -e "$fb/name" ] && printf '%s\n' "${fb##*/}: $(cat "$fb/name") $(cat "$fb/virtual_size" 2>/dev/null)"
+    done
+    echo
+    lsmod | grep -E "^(msm|drm|simpledrm|panel|bridge)" || true
+    echo
+    systemctl --failed --no-legend --no-pager
+    echo
+    df -h "$base" | tail -n 1
+}
+
+put summary.txt $((64 * 1024)) summary
+put shell.txt $((256 * 1024)) journalctl -b -u mun-shell -o short-monotonic --no-pager
+put kms.json $((16 * 1024)) cat /run/mun-shell/kms.json
+for c in /sys/class/drm/card*-*; do
+    [ "$(cat "$c/status" 2>/dev/null)" = connected ] && [ -e "$c/edid" ] || continue
+    put "edid-${c##*/}.bin" $((32 * 1024)) cat "$c/edid"
+done
+# The rest of the budget for the journal: at boot its beginning (the kernel,
+# the display coming up), at shutdown its end.
+room=$((RUN_BUDGET - used - 4096))
+if [ "$mode" = boot ]; then
+    put journal.txt "$room" journalctl -b -o short-monotonic --no-pager
+else
+    put journal.txt "$room" sh -c "journalctl -b -o short-monotonic --no-pager | tail -c $room"
+fi
+
+status run "$([ "$incomplete" = 0 ] && echo complete || echo incomplete)" "$used bytes"
+rm -f "$tmp/.writer"
+mkdir -p "$bootdir" && rm -rf "${bootdir:?}/$mode" && mv "$tmp" "$bootdir/$mode" || {
+    say "could not move the run into $bootdir; left in $tmp"
+    exit 0
+}
+
+# Keep the newest boots; remove only directories this script names.
+ls -d "$base"/boot-[0-9][0-9][0-9][0-9]-* 2>/dev/null | sort -r | tail -n +$((KEEP_BOOTS + 1)) | while read -r old; do
+    rm -rf "$old"
+done
+sync -f "$base" 2>/dev/null || sync
+say "$mode run $([ "$incomplete" = 0 ] && echo complete || echo INCOMPLETE): $bootdir/$mode ($used bytes)"

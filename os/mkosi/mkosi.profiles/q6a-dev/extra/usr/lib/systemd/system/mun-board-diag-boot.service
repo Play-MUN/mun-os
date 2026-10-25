@@ -1,0 +1,11 @@
+# Development image for a board (profile q6a-dev): the diagnostic dump of
+# the boot so far (/usr/lib/mun/board-diag), started by mun-board-diag.timer.
+[Unit]
+Description=MUN board diagnostics: dump 90 s after boot
+RequiresMountsFor=/boot
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/mun/board-diag boot
+TimeoutStartSec=120

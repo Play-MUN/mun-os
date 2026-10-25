@@ -1,0 +1,20 @@
+#!/bin/sh
+# q6a-dev: store the kernel uncompressed. Radxa's package installs it as
+# Image.gz (no EFI zboot), which no UEFI firmware can start; the arm64 Image
+# inside is an EFI executable (EFI stub). mkosi then copies it to the boot
+# partition for the Type 1 entry as it is. Both copies are converted: the
+# package's in /boot, and the one already in /usr/lib/modules/<version>/,
+# which mkosi takes when it exists.
+set -eu
+found=0
+for kernel in /boot/vmlinuz-* /usr/lib/modules/*/vmlinuz; do
+    [ -f "$kernel" ] && [ ! -L "$kernel" ] || continue
+    found=1
+    if [ "$(head -c 2 "$kernel" | od -An -tx1 | tr -d ' \n')" = 1f8b ]; then
+        gzip -dc "$kernel" >"$kernel.image"
+        mv "$kernel.image" "$kernel"
+    fi
+    [ "$(head -c 2 "$kernel")" = MZ ] || { echo "q6a-dev: $kernel is not an EFI executable" >&2; exit 1; }
+    echo "q6a-dev: $kernel stored uncompressed ($(wc -c <"$kernel") bytes)"
+done
+[ "$found" = 1 ] || { echo "q6a-dev: no kernel found" >&2; exit 1; }

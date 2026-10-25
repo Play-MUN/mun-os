@@ -15,6 +15,12 @@
 
 namespace {
 
+// The exit status when the interface cannot be loaded (EX_SOFTWARE): a
+// failure the unit restarts and the journal shows. Not 1, which is how Qt's
+// framebuffer platform ends after SIGTERM, a clean stop
+// (deploy/mun-shell.service).
+constexpr int kInterfaceFailedStatus = 70;
+
 // The start-up sequence plays once per boot. The launcher stops and starts
 // the shell around every game, and a return from a game must land on Home
 // with the session result, never on the splash again. The runtime directory
@@ -42,12 +48,18 @@ int main(int argc, char *argv[])
     // display (displaymode.h), with the canvas scaled to it.
     QCoreApplication::setApplicationName(QStringLiteral("mun-shell"));
     QCoreApplication::setOrganizationName(QStringLiteral("MUN"));
+    // A display driver can come up after the unit starts; without a display
+    // the shell exits and systemd starts it again (displaymode.h).
+    if (!display::awaitDisplay())
+        return display::kNoDisplayStatus;
     {
         QSettings settings(ShellSettings::filePath(), QSettings::IniFormat);
         display::prepare(settings);
     }
     QGuiApplication app(argc, argv);
     app.setApplicationVersion(QStringLiteral(MUN_SHELL_VERSION));
+    // Qt has set the display's mode by now.
+    display::reportApplied();
 
     // Archivo (a variable font: width and weight axes) for everything read and
     // Michroma for the short labels are compiled in, so the interface looks
@@ -64,7 +76,7 @@ int main(int argc, char *argv[])
 
     QQmlApplicationEngine engine;
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app,
-                     [] { QCoreApplication::exit(1); }, Qt::QueuedConnection);
+                     [] { QCoreApplication::exit(kInterfaceFailedStatus); }, Qt::QueuedConnection);
     engine.rootContext()->setContextProperty(QStringLiteral("shellFirstStart"), firstStartThisBoot());
 
     // Optional UI iteration path: load QML from a directory instead of the
@@ -77,6 +89,6 @@ int main(int argc, char *argv[])
         engine.loadFromModule("MUN.Shell", "Main");
     }
     if (engine.rootObjects().isEmpty())
-        return 1;
+        return kInterfaceFailedStatus;
     return app.exec();
 }

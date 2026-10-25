@@ -16,6 +16,9 @@ find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Network Qml Quick)
 # the games' profile already brings into the image.
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(ALSA REQUIRED IMPORTED_TARGET alsa)
+# The display's modes and the mode actually set are read from DRM directly
+# (src/displaymode.cpp); Qt's KMS support is not public API.
+pkg_check_modules(DRM REQUIRED IMPORTED_TARGET libdrm)
 find_package(Threads REQUIRED)
 qt_standard_project_setup(REQUIRES 6.5)
 
@@ -23,6 +26,8 @@ qt_add_executable(mun-shell
     src/main.cpp
     src/displaymode.cpp
     src/displaymode.h
+    src/displaydevice.cpp
+    src/displaydevice.h
     src/systeminfo.cpp
     src/systeminfo.h
     src/powercontrol.cpp
@@ -119,7 +124,7 @@ qt_add_qml_module(mun-shell
         images/boot-engraving.png
 )
 
-target_link_libraries(mun-shell PRIVATE Qt6::Core Qt6::Gui Qt6::Network Qt6::Qml Qt6::Quick PkgConfig::ALSA Threads::Threads)
+target_link_libraries(mun-shell PRIVATE Qt6::Core Qt6::Gui Qt6::Network Qt6::Qml Qt6::Quick PkgConfig::ALSA PkgConfig::DRM Threads::Threads)
 
 include(GNUInstallDirs)
 install(TARGETS mun-shell RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

@@ -17,8 +17,9 @@ display, and a game drawing on `/dev/fb0` has it (see *Display path*).
 
 | Path | Role |
 | --- | --- |
-| `src/main.cpp` | Process entry: has the display mode chosen before Qt starts, loads the compiled-in fonts, tells QML whether this is the first start since boot, loads the QML module |
-| `src/displaymode.*` | The display mode: the player's resolution if the display takes it, else the display's own; Qt's KMS configuration and the canvas's scale for it; the one-shot trial of a new mode |
+| `src/main.cpp` | Process entry: waits for the display and has its mode chosen before Qt starts, loads the compiled-in fonts, tells QML whether this is the first start since boot, loads the QML module |
+| `src/displaymode.*` | The display mode: the player's resolution if the display takes it, else the display's own (or, under a board's cap, the mode the cap picks); Qt's KMS configuration and the canvas's scale for it; the one-shot trial of a new mode; the wait for the display and the mode actually set, in the journal |
+| `src/displaydevice.*` | The rules behind it, in standard C++ (no Qt, no libdrm): which DRM device is usable, what to say when none is, and which mode to start in under a cap |
 | `src/systeminfo.*` | Real system facts read from `/proc`, `/sys`, `/etc/os-release`, `/usr/lib/mun/release`, `statvfs` and `getifaddrs` (identity, hardware, display, time zone, network interfaces), raw so the interface words them in its language |
 | `src/shellsettings.*` | The player's settings, validated and kept in the service's state directory |
 | `src/systemsounds.*` | The menus' sounds (move, enter, back), mixed on a worker thread and played through ALSA |
@@ -39,6 +40,7 @@ display, and a game drawing on `/dev/fb0` has it (see *Display path*).
 | `qml/Theme.qml`, `qml/I18n.qml` | Design tokens and motion; the two languages |
 | `qml/ArcMenu.qml`, `ArcNode`, `DetailPanel`, `OptionRow`, `StatusBar`, `MoonPhase`, `ModalLayer`, `BootLayer`, `UiText`, `MarkText`, `Shadow`, `Material`, `Logo.js` | Components: the arcs and their entries, the panel and its options, the status line, dialogs, the start-up and power-off screen, text and shadows; the MUN logo |
 | `tests/behaviour.py`, `tests/scenes/` | Behaviour regressions run on the compiled binary, offscreen (*A Game Card's identity*) |
+| `tests/displaydevice_test.cpp`, `tests/Makefile` | The display rules on fake sysfs trees and mode lists, compiled and run on the host by `make check` |
 | `fonts/` | Archivo and Michroma, compiled in, with their licences |
 | `sounds/` | The interface's sounds, compiled in: the menus' `move.wav`, `enter.wav`, `back.wav` and the start-up's `startup.wav` |
 | `deploy/mun-shell.service` | systemd unit on tty1 as user `mun-shell` with the display (DRM) and evdev environment and the state directory |
@@ -191,6 +193,29 @@ rendered in 1–3 ms either way, about 15 frames per second reached the
 display through `/dev/fb0` and about 44 through DRM. Games keep drawing on
 `/dev/fb0` (or DRM, for the GL profile): the launcher stops the shell
 first, and the shell takes the display again when it restarts.
+
+The device is `/dev/dri/card0`: Qt 6.8's linuxfb plugin opens that one
+whatever its KMS configuration names. Before Qt starts, the shell waits for
+card0 to be a usable display (`src/displaydevice.*`): driven by the real
+display driver, not a framebuffer the firmware left (simpledrm and the
+like), with a connector `connected`. It looks every 250 ms, and has the
+kernel read the connectors again every 2 s while none is, for
+`MUN_DISPLAY_WAIT_SECONDS` (30 by default; 0 to 600). The journal says what
+it found:
+
+```text
+mun-shell: display: card0 HDMI-A-1 (virtio_gpu)
+```
+
+or, when the wait ran out, every DRM device with its driver and connectors,
+the framebuffer devices, and why none is usable; a display connected on
+another card is named, since only the image (its kernel and command line)
+can make it card0. The shell then exits with 69, and the unit, which has no
+condition on the display, starts it again 5 seconds later, with no limit.
+So a display driver that comes up late, or a display plugged in later,
+still gets the interface. An interface that does not load exits with 70;
+both are failures, never the clean stop (1) or the restart for a new mode
+(75).
 
 ### A Game Card's identity (MUN Shape)
 
@@ -399,11 +424,38 @@ The choice is the console's: a game on the GL profile starts in it, the
 launcher keeping the display in that mode between the shell and the game
 ([docs/runtime.md](../../docs/runtime.md#display)); a framebuffer game gets
 the size the kernel set at boot. One display is handled, the first connected
-connector of `/dev/dri/card0`. An explicit `QT_SCALE_FACTOR` in the
+connector of `/dev/dri/card0` (*Display path*); its modes are read from DRM
+(libdrm). An explicit `QT_SCALE_FACTOR` in the
 environment wins over the scale, and a KMS configuration given in the
 environment (`QT_QPA_KMS_CONFIG`, `QT_QPA_EGLFS_KMS_CONFIG`) over the choice,
 which is then not offered. *Safe area* scales the interface to 97, 94 or 91 % for
 displays that crop their edges.
+
+A board's image may cap Automatic: `MUN_DISPLAY_MAX=1920x1080@60` in the
+unit's environment (a drop-in of the board's profile; the QEMU image sets
+none, and Automatic is then the display's own mode). The shell then starts
+in, from the modes the display lists:
+
+1. the cap's size at its rate, 60.000 Hz before 59.940 Hz (the television
+   rate, 60/1.001), then the preferred mode, then the list's order;
+2. the largest mode within the cap at that rate (1280×720 at 60 Hz);
+3. the cap's size at a lower rate (1920×1080 at 50 Hz);
+4. the largest mode within the cap at any rate up to it;
+5. the display's preferred mode, above the cap, so that there is a picture.
+
+Interlaced modes are never chosen. The mode is given to Qt as its own
+modeline (the connector's timings, its clock written so that Qt's parser
+reads it back exact), since a size and a whole rate would get the first
+mode that matches them. Options 2 to 5 are logged as warnings. Once Qt has
+opened the display, the shell reads the mode actually set and logs it
+against the request:
+
+```text
+mun-shell: display: requested 1920x1080@60.000 (the cap 1920x1080@60), applied 1920x1080@60.000 on card0 HDMI-A-1
+```
+
+A difference is logged as an error. The player's own choice in Settings is
+not capped.
 
 ## Settings
 
@@ -573,6 +625,9 @@ Under a desktop session (X11/Wayland) the same binary runs in a window: unset
 - The unit treats exit status 1 as success: Qt's framebuffer VT handler exits
   with 1 after SIGTERM, which is how the launcher stops the shell for a game.
   Status 75 is the shell asking to be started again (a new resolution).
+  Status 69 (no usable display) and 70 (the interface did not load) are
+  failures, restarted after 5 seconds without a limit; `./mun vm shell-log`
+  shows the shell's own account of each.
 - A resolution that leaves the screen dark goes back by itself after 15
   seconds, and a restart or power cut before it is kept does the same. The
   choice is `display/resolution` in the settings file; removing the line

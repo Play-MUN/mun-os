@@ -81,6 +81,7 @@ node_modules/
 dist/
 examples/mun-collect/mun-collect
 examples/mun-collect/tests/test_save
+services/mun-shell/tests/displaydevice_test
 examples/mun-gl-probe/mun-gl-probe
 
 # Commercial game installers stay out of the repository

@@ -13,4 +13,6 @@ qml6-module-qtqml-workerscript
 fonts-inter
 # interface sounds (ALSA)
 libasound2t64
+# the display's modes, read from DRM (src/displaymode.cpp)
+libdrm2
 sudo

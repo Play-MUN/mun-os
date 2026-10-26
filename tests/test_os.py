@@ -174,6 +174,39 @@ class ShellTests(unittest.TestCase):
         self.assertIn(status, success)
         self.assertIn("1", success, "Qt's VT handler exits 1 after SIGTERM: a stop, not a failure")
 
+    def test_the_shell_waits_for_its_display_and_failures_restart_it(self):
+        # A display driver can come up after the unit: no condition may skip
+        # the unit (a skipped unit is never retried), the shell waits itself
+        # and exits with its own status without a display, and systemd keeps
+        # starting it. Its failure statuses must not count as clean stops.
+        unit = (self.SHELL / "deploy" / "mun-shell.service").read_text()
+        self.assertNotRegex(unit, r"(?m)^Condition", "a condition would skip the unit for good")
+        unit_section = unit.split("[Service]", 1)[0]
+        self.assertRegex(unit_section, r"(?m)^StartLimitIntervalSec=0$", "never stop restarting")
+        self.assertRegex(unit, r"(?m)^Restart=on-failure$")
+        self.assertRegex(unit, r"(?m)^RestartSec=5$")
+        self.assertEqual(re.search(r"(?m)^SuccessExitStatus=(.+)$", unit).group(1).split(), ["1", "75"])
+        no_display = re.search(r"kNoDisplayStatus = (\d+);", (self.SHELL / "src" / "displaydevice.h").read_text()).group(1)
+        no_interface = re.search(r"kInterfaceFailedStatus = (\d+);", (self.SHELL / "src" / "main.cpp").read_text()).group(1)
+        self.assertEqual((no_display, no_interface), ("69", "70"))
+        main = (self.SHELL / "src" / "main.cpp").read_text()
+        self.assertIn("return display::kNoDisplayStatus;", main)
+        self.assertNotRegex(main, r"exit\(1\)|return 1;", "1 is Qt's clean stop, not a failure")
+        self.assertLess(main.index("display::awaitDisplay()"), main.index("QGuiApplication app("),
+                        "the wait comes before Qt opens the display")
+
+    def test_the_display_rules_are_tested_on_the_host(self):
+        # src/displaydevice.* is standard C++ so that `make check` runs its
+        # rules (tests/displaydevice_test.cpp); the shell compiles the same file.
+        cmake = (self.SHELL / "CMakeLists.txt").read_text()
+        self.assertIn("src/displaydevice.cpp", cmake)
+        self.assertRegex(cmake, r"pkg_check_modules\(DRM REQUIRED IMPORTED_TARGET libdrm\)")
+        header = (self.SHELL / "src" / "displaydevice.h").read_text()
+        self.assertNotRegex(header + (self.SHELL / "src" / "displaydevice.cpp").read_text(), r"#include <(Q|xf86)",
+                            "no Qt and no libdrm in the rules")
+        makefile = (ROOT / "Makefile").read_text()
+        self.assertIn("services/mun-shell/tests test", makefile)
+
     def test_every_offered_resolution_has_a_modeline_of_its_size(self):
         # A virtual connector gets each mode as a modeline: its displayed size
         # must be the mode's, or the canvas would be scaled for another one.

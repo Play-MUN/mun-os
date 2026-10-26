@@ -6,7 +6,11 @@ Description=MUN Shell (console UI on tty1)
 Documentation=file:///opt/mun/shell/README.md
 Conflicts=getty@tty1.service
 After=systemd-user-sessions.service getty@tty1.service systemd-udevd.service
-ConditionPathExists=/dev/dri/card0
+# No condition on the display: a display driver can come up after this unit
+# starts. The shell waits for card0 itself (MUN_DISPLAY_WAIT_SECONDS) and,
+# without one, exits with 69; it is then started again, without a limit, so
+# the console never stays without its interface in silence.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -58,10 +62,12 @@ Environment=QT_LOGGING_RULES=qt.qpa.*=false
 
 ExecStart=/opt/mun/shell/bin/mun-shell
 Restart=on-failure
-RestartSec=2
+RestartSec=5
 # Qt's framebuffer VT handler exits with status 1 after SIGTERM; that is a clean stop.
 # 75 is the shell asking to start again: Qt opens the display once, so a new
-# resolution takes a new process (src/displaymode.h).
+# resolution takes a new process (src/displaymode.h). Failures are other
+# statuses, never these: 69 without a display, 70 when the interface does
+# not load (src/main.cpp).
 SuccessExitStatus=1 75
 RestartForceExitStatus=75
 

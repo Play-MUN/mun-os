@@ -7,3 +7,4 @@ ninja-build
 g++
 pkgconf
 libasound2-dev
+libdrm-dev

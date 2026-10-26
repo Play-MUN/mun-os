@@ -58,6 +58,13 @@ same guest. A guest stays bound to the build it was created from; a new build
 needs a new guest name. Guest names are 2–16 lowercase letters, digits or
 `-`, starting with a letter or digit.
 
+`./mun dev build --profile NAME` builds another profile of
+`os/mkosi/mkosi.profiles/` (`qemu-dev` by default). A profile whose image
+is a raw disk to write to a board ([profiles](../os/README.md#profiles)) is
+not a guest: `run`, `play`, `smoke`, `shape` and `bundle` refuse such a
+build and say why, and without `--build` the first four take the latest
+qcow2 build.
+
 ## Guests
 
 - **No network interface** (`-nic none`): the guest has only `lo`. There is

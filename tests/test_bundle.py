@@ -83,6 +83,15 @@ class MakeTests(Fixture):
         self.assertEqual(lzma.decompress((destination / "card-demo.img.xz").read_bytes()), b"demo" * 100)
         self.assertFalse((self.root / "bundle.partial").exists())
 
+    def test_a_raw_disk_image_for_a_board_is_not_bundled(self):
+        build = self.build()
+        info = json.loads((build / "BUILD-INFO.json").read_text())
+        (build / "BUILD-INFO.json").write_text(json.dumps(dict(info, image_format="raw")))
+        with self.assertRaises(bundle.BundleError) as refused:
+            bundle.make(build, self.root / "bundle", {})
+        self.assertIn("raw disk image", str(refused.exception))
+        self.assertFalse((self.root / "bundle").exists())
+
     def test_an_image_that_does_not_match_its_record_is_not_bundled(self):
         build = self.build()
         (build / IMAGE).write_bytes(b"changed")

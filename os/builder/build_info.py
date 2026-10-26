@@ -3,7 +3,8 @@
 
 Every field comes from something the build used or produced: os/inputs.json,
 the host's description of the source tree, the builder's package list, the
-mkosi manifest of the image, the build overlay's toolchain record and the
+mkosi manifest of the image, the build overlay's toolchain record, the
+record of the profile's pinned packages (os/builder/profiles.py) and the
 files themselves. A value that is not known is recorded as absent with the
 reason, never guessed.
 """
@@ -25,7 +26,11 @@ FIRMWARE_PREFIXES = ("firmware-", "linux-firmware", "raspi-firmware")
 TOOLCHAIN_PACKAGES = ("gcc", "g++", "cpp", "binutils", "libc6-dev", "make", "cmake", "ninja-build", "pkgconf",
                       "qt6-base-dev", "qt6-declarative-dev", "libsdl2-dev", "libopenal-dev")
 BUILDER_TOOLS = ("mkosi", "systemd", "systemd-repart", "systemd-ukify", "systemd-boot-efi", "apt", "dpkg",
-                 "qemu-utils", "python3", "e2fsprogs", "dosfstools", "mtools", "git")
+                 "qemu-utils", "xz-utils", "reprepro", "python3", "e2fsprogs", "dosfstools", "mtools", "git")
+# What the recorded raw disk is to the image, for each image format a profile
+# may choose (os/builder/profiles.py).
+RAW_NOTES = {"qcow2": "the uncompressed disk the qcow2 was converted from; not shipped",
+             "raw": "the disk the image decompresses to, byte for byte; not shipped"}
 # The source tree this script is part of: os/builder/ in the checkout the
 # image is built from.
 SOURCE_ROOT = Path(__file__).resolve().parents[2]
@@ -72,10 +77,12 @@ def read_tsv(path: Path) -> dict:
 
 def main(argv: list) -> int:
     parser = argparse.ArgumentParser()
-    for name in ("inputs", "source-info", "profile", "build-id", "started", "image", "raw", "manifest",
-                 "initrd-manifest", "initrd", "builder-packages", "toolchain", "config", "out"):
+    for name in ("inputs", "source-info", "profile", "build-id", "started", "image", "raw", "image-format",
+                 "pinned", "manifest", "initrd-manifest", "initrd", "builder-packages", "toolchain", "config", "out"):
         parser.add_argument(f"--{name}", required=True)
     args = parser.parse_args(argv)
+    if args.image_format not in RAW_NOTES:
+        parser.error(f"--image-format: one of {', '.join(RAW_NOTES)}")
 
     inputs = json.loads(Path(args.inputs).read_text())
     source = json.loads(Path(args.source_info).read_text())
@@ -92,7 +99,27 @@ def main(argv: list) -> int:
     release = Path(args.config) / "mkosi.profiles" / args.profile / "mkosi.conf"
     environment = dict(re.findall(r"^\s*(MUN_[A-Z_]+)=(\S+)", release.read_text(), flags=re.MULTILINE))
 
-    kernels = sorted(name for name in installed if KERNEL_PACKAGE.fullmatch(name))
+    # Packages the profile pinned outside the Debian snapshot, as fetched and
+    # verified, and whether the image installed them. APT installs the
+    # highest version any of its sources offers: a same-named package of
+    # another version would mean the image is not what the profile pinned,
+    # and fails the build here.
+    pinned = json.loads(Path(args.pinned).read_text())
+    for package in pinned:
+        version = installed.get(package["name"])
+        if version is not None and version != package["version"]:
+            print(f"build_info: the image installed {package['name']} {version}, not the pinned "
+                  f"{package['version']}", file=sys.stderr)
+            return 1
+        package["installed"] = version is not None
+    pinned_names = {package["name"] for package in pinned}
+    kernels = sorted(name for name in installed if KERNEL_PACKAGE.fullmatch(name) and name not in pinned_names)
+    pinned_kernels = {package["name"]: package["version"] for package in pinned
+                      if package["name"].startswith("linux-image") and package["installed"]}
+    kernel: dict = {"packages": {name: installed[name] for name in kernels}
+                    or "absent: no linux-image package from the Debian snapshot in this profile"}
+    if pinned_kernels:
+        kernel["pinned"] = pinned_kernels
     firmware = sorted(name for name in installed if name.startswith(FIRMWARE_PREFIXES))
     out = Path(args.out)
     games = {}
@@ -113,6 +140,7 @@ def main(argv: list) -> int:
         "environment": environment.get("MUN_ENVIRONMENT"),
         "release": environment.get("MUN_RELEASE") == "true",
         "profile": args.profile,
+        "image_format": args.image_format,
         "build_id": args.build_id,
         "built": {"started": args.started, "finished": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())},
         "source": source,
@@ -123,11 +151,10 @@ def main(argv: list) -> int:
             "components": inputs["debian"]["components"],
             "keyring": inputs["debian"]["keyring"],
         },
-        "kernel": {"packages": {name: installed[name] for name in kernels}
-                   or "absent: no linux-image package in this profile"},
+        "kernel": kernel,
         "mesa": {name: installed[name] for name in MESA_PACKAGES if name in installed},
         "firmware": {name: installed[name] for name in firmware}
-                    or "not installed: QEMU's virtio devices need no device firmware",
+                    or "not installed: no firmware package in this profile",
         "toolchain": {name: toolchain[name] for name in TOOLCHAIN_PACKAGES if name in toolchain}
                      or "absent: no build scripts ran",
         "builder": {
@@ -140,6 +167,7 @@ def main(argv: list) -> int:
         },
         "config": tree_hash(Path(args.config)),
         "inputs_sha256": sha256(Path(args.inputs)),
+        "pinned_packages": pinned,
         "packages": packages,
         "initrd": {
             "configuration": "mkosi built-in mkosi-initrd, as subimage os/mkosi/mkosi.images/initrd",
@@ -152,7 +180,7 @@ def main(argv: list) -> int:
         "artifacts": {
             Path(args.image).name: {"sha256": sha256(Path(args.image)), "size": Path(args.image).stat().st_size},
             "raw_image": {"sha256": sha256(Path(args.raw)), "size": Path(args.raw).stat().st_size,
-                          "note": "the uncompressed disk the qcow2 was converted from; not shipped"},
+                          "note": RAW_NOTES[args.image_format]},
         },
     }
     json.dump(info, sys.stdout, indent=2, sort_keys=False)

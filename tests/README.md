@@ -19,8 +19,8 @@ use temporary directories and fake process, protocol and device boundaries.
 | `test_launch_cleanup.py` | The cleanup helper and unit |
 | `test_deploy.py` | The services' staging scripts, run into temporary roots |
 | `test_reset.py` | The console reset: its plan against its README, a reset run twice and cut short after each step, links not followed, a card's files untouched, the mark written whole, the refusals |
-| `test_os.py` | The image composition, pinned inputs, BUILD-INFO and the `./mun` entry point |
-| `test_mundev.py` | Builds, the builder and image guests of `./mun dev` |
+| `test_os.py` | The image composition, pinned inputs, a profile's image format and pinned packages, BUILD-INFO and the `./mun` entry point |
+| `test_mundev.py` | Builds, profiles, the builder and image guests of `./mun dev`, which take only a qcow2 build |
 | `test_vm.py` | The laboratory tool: QMP and qemu-ga framing, card attach/detach, the attach registry, lifecycle locks, release reconciliation, audio, downloads |
 | `test_foundation.py` | The documentation check: GitHub's anchors (repeated and accented headings), links, the translation map and its pairs, links from a translation, an original changed after its review |
 

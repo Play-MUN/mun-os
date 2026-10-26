@@ -2,21 +2,30 @@
 the service installers. No builder, mkosi or QEMU is needed; the image build
 itself is exercised in a builder VM (os/README.md)."""
 
+import contextlib
 import hashlib
 import importlib.util
+import io
 import json
 import re
+import shutil
 import stat
 import subprocess
 import sys
 import tempfile
 import unittest
+import urllib.request
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 OS = ROOT / "os"
 MKOSI = OS / "mkosi"
-PROFILE = MKOSI / "mkosi.profiles" / "qemu-dev" / "mkosi.conf"
+# The QEMU development profile: what only the laboratory's guests have
+# (qemu-ga, the lab display, the host's time zone) is checked against it.
+QEMU_DEV = MKOSI / "mkosi.profiles" / "qemu-dev" / "mkosi.conf"
+# Every profile this checkout has (os/mkosi/mkosi.profiles/<name>/).
+PROFILES = sorted(MKOSI.glob("mkosi.profiles/*/mkosi.conf"))
 
 
 def load(name, path):
@@ -28,6 +37,7 @@ def load(name, path):
 
 inputs_tool = load("mun_inputs", OS / "builder" / "inputs.py")
 build_info = load("mun_build_info", OS / "builder" / "build_info.py")
+profiles = load("mun_profiles", OS / "builder" / "profiles.py")
 
 
 def mkosi_list(path, key):
@@ -68,20 +78,32 @@ class CompositionTests(unittest.TestCase):
             self.assertFalse(missing, f"{path.relative_to(ROOT)}: {sorted(missing)} missing from BuildPackages")
 
     def test_compilers_stay_out_of_the_image(self):
-        image = set(mkosi_list(MKOSI / "mkosi.conf", "Packages")) | set(mkosi_list(PROFILE, "Packages"))
-        for tool in ("gcc", "g++", "cmake", "make", "qt6-base-dev", "libsdl2-dev"):
-            self.assertNotIn(tool, image)
+        for profile in PROFILES:
+            image = set(mkosi_list(MKOSI / "mkosi.conf", "Packages")) | set(mkosi_list(profile, "Packages"))
+            for tool in ("gcc", "g++", "cmake", "make", "qt6-base-dev", "libsdl2-dev"):
+                self.assertNotIn(tool, image, profile.parent.name)
 
     def test_the_qemu_profile_says_it_is_a_development_build(self):
-        text = PROFILE.read_text()
+        text = QEMU_DEV.read_text()
         self.assertIn("MUN_ENVIRONMENT=qemu-arm64", text)
         self.assertIn("MUN_RELEASE=false", text)
         self.assertNotIn("MUN_RELEASE=true", (MKOSI / "mkosi.conf").read_text())
+        self.assertEqual(profiles.image_format(QEMU_DEV.parent), "qcow2", "the guests' image, by default")
+        self.assertEqual(profiles.pinned(QEMU_DEV.parent), [], "Debian's kernel, from the snapshot")
+
+    def test_every_profile_is_a_development_profile_with_a_known_format(self):
+        self.assertIn(QEMU_DEV, PROFILES)
+        for profile in PROFILES:
+            settings = profiles.settings(profile.parent)
+            self.assertEqual(settings.get("MUN_RELEASE"), ["false"], profile.parent.name)
+            self.assertEqual(len(settings.get("MUN_ENVIRONMENT", [])), 1, profile.parent.name)
+            self.assertIn(profiles.image_format(profile.parent), profiles.FORMATS)
+            profiles.pinned(profile.parent)
 
     def test_settings_sit_in_the_sections_mkosi_expects(self):
         # mkosi warns, and a later version may refuse, when a setting is in
         # another section: Environment= belongs to [Build].
-        for path in (MKOSI / "mkosi.conf", PROFILE):
+        for path in (MKOSI / "mkosi.conf", *PROFILES):
             section = None
             for line in path.read_text().splitlines():
                 if re.match(r"^\[\w+\]$", line):
@@ -93,18 +115,18 @@ class CompositionTests(unittest.TestCase):
         # Everything the profile adds beyond booting (the kernel and systemd-boot)
         # is development access or tooling, and none of it is common.
         boot = {"linux-image-arm64", "systemd-boot-efi"}
-        development = set(mkosi_list(PROFILE, "Packages")) - boot
+        development = set(mkosi_list(QEMU_DEV, "Packages")) - boot
         self.assertTrue(any(name.startswith("qemu-guest") for name in development), "qemu-ga comes with the profile")
         self.assertFalse(development & set(mkosi_list(MKOSI / "mkosi.conf", "Packages")))
         common = (MKOSI / "mkosi.conf").read_text() + (MKOSI / "mkosi.postinst.chroot").read_text()
         for access in ("qemu-guest", "openssh-server", "RootPassword", "Autologin", "Ssh="):
             self.assertNotIn(access, common)
-        self.assertNotIn("RootPassword", PROFILE.read_text())
-        self.assertNotIn("Autologin", PROFILE.read_text())
+        self.assertNotIn("RootPassword", QEMU_DEV.read_text())
+        self.assertNotIn("Autologin", QEMU_DEV.read_text())
 
     def test_the_image_boots_quietly(self):
         # Firmware, then a blank display, then the shell's splash.
-        cmdline = mkosi_list(PROFILE, "KernelCommandLine")
+        cmdline = mkosi_list(QEMU_DEV, "KernelCommandLine")
         for parameter in ("quiet", "loglevel=3", "vt.global_cursor_default=0"):
             self.assertIn(parameter, cmdline)
         self.assertIn("systemd.firstboot=off", cmdline, "first boot must never wait for an answer")
@@ -117,8 +139,8 @@ class CompositionTests(unittest.TestCase):
         self.assertIn("disable getty@.service", preset)
 
     def test_the_lab_image_resolves_its_own_name(self):
-        hostname = re.search(r"(?m)^Hostname=(\S+)$", PROFILE.read_text()).group(1)
-        hosts = (PROFILE.parent / "extra" / "etc" / "hosts").read_text()
+        hostname = re.search(r"(?m)^Hostname=(\S+)$", QEMU_DEV.read_text()).group(1)
+        hosts = (QEMU_DEV.parent / "extra" / "etc" / "hosts").read_text()
         self.assertRegex(hosts, rf"(?m)^127\.0\.1\.1\s+{re.escape(hostname)}$")
         self.assertRegex(hosts, r"(?m)^127\.0\.0\.1\s+localhost$")
 
@@ -415,56 +437,78 @@ class InputTests(unittest.TestCase):
         self.assertEqual(inputs_tool.get(self.inputs, "debian.snapshot"), self.inputs["debian"]["snapshot"])
 
 
+DEBIAN_KERNEL = {"type": "deb", "name": "linux-image-6.12.107+deb13-arm64", "version": "6.12.107-1",
+                 "architecture": "arm64"}
+PINNED_KERNEL = {"name": "linux-image-7.1.2-example", "version": "7.1.2-3", "architecture": "arm64",
+                 "url": "https://example.invalid/pool/linux-image-7.1.2-example_7.1.2-3_arm64.deb",
+                 "sha256": "b" * 64, "size": 1234, "license": "GPL-2.0-only",
+                 "source": {"repository": "https://example.invalid/kernel.git", "commit": "f" * 40}}
+
+
 class BuildInfoTests(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.tmp = Path(directory.name)
+
+    def build_info(self, image_name="mun-os-0.1.0-dev-qemu-arm64.qcow2", image_format="qcow2", pinned=(),
+                   kernel=DEBIAN_KERNEL, check=True):
+        """BUILD-INFO of a fake build of the qemu-dev profile's configuration,
+        as build_info.py writes it, or the finished process with check=False."""
+        tmp = self.tmp
+        (tmp / "games" / "mun-collect").mkdir(parents=True, exist_ok=True)
+        game = tmp / "games" / "mun-collect" / "mun-collect"
+        game.write_bytes(b"\x7fELF game")
+        game.chmod(0o755)
+        image = tmp / image_name
+        image.write_bytes(b"image")
+        raw = tmp / "mun-os.raw"
+        raw.write_bytes(b"raw")
+        manifest = tmp / "manifest.json"
+        manifest.write_text(json.dumps({"packages": [
+            {"type": "deb", "name": "systemd", "version": "257.13-1~deb13u1", "architecture": "arm64"},
+            kernel,
+            {"type": "deb", "name": "libgl1-mesa-dri", "version": "25.0.7-2+deb13u1", "architecture": "arm64"}]}))
+        builder = tmp / "builder-packages.tsv"
+        builder.write_text("mkosi\t25.3-7\tall\nsystemd\t257.13-1~deb13u1\tarm64\n")
+        toolchain = tmp / "toolchain.tsv"
+        toolchain.write_text("gcc\t4:14.2.0-1\tarm64\ncmake\t3.31.6-2\tarm64\n")
+        initrd_manifest = tmp / "initrd-manifest.json"
+        initrd_manifest.write_text(json.dumps({"packages": [
+            {"type": "deb", "name": "lvm2", "version": "2.03.31-2", "architecture": "arm64"}]}))
+        initrd = tmp / "initrd.cpio.zst"
+        initrd.write_bytes(b"cpio")
+        source = tmp / "source.json"
+        source.write_text(json.dumps({"commit": "c" * 40, "clean": True}))
+        record = tmp / "pinned.json"
+        record.write_text(json.dumps(list(pinned)))
+        result = subprocess.run([sys.executable, str(OS / "builder" / "build_info.py"),
+                                 "--inputs", str(OS / "inputs.json"), "--source-info", str(source), "--profile", "qemu-dev",
+                                 "--build-id", "20260927T000000Z-cccccccccccc", "--started", "2026-09-27T00:00:00Z",
+                                 "--image", str(image), "--raw", str(raw), "--image-format", image_format,
+                                 "--pinned", str(record), "--manifest", str(manifest),
+                                 "--initrd-manifest", str(initrd_manifest), "--initrd", str(initrd),
+                                 "--builder-packages", str(builder), "--toolchain", str(toolchain),
+                                 "--config", str(MKOSI), "--out", str(tmp)],
+                                capture_output=True, text=True)
+        if not check:
+            return result
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout)
+
     def test_build_info_names_identity_inputs_and_absences(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp = Path(tmp)
-            (tmp / "games" / "mun-collect").mkdir(parents=True)
-            game = tmp / "games" / "mun-collect" / "mun-collect"
-            game.write_bytes(b"\x7fELF game")
-            game.chmod(0o755)
-            image = tmp / "mun-os-0.1.0-dev-qemu-arm64.qcow2"
-            image.write_bytes(b"qcow2")
-            raw = tmp / "mun-os.raw"
-            raw.write_bytes(b"raw")
-            manifest = tmp / "manifest.json"
-            manifest.write_text(json.dumps({"packages": [
-                {"type": "deb", "name": "systemd", "version": "257.13-1~deb13u1", "architecture": "arm64"},
-                {"type": "deb", "name": "linux-image-6.12.107+deb13-arm64", "version": "6.12.107-1", "architecture": "arm64"},
-                {"type": "deb", "name": "libgl1-mesa-dri", "version": "25.0.7-2+deb13u1", "architecture": "arm64"}]}))
-            builder = tmp / "builder-packages.tsv"
-            builder.write_text("mkosi\t25.3-7\tall\nsystemd\t257.13-1~deb13u1\tarm64\n")
-            toolchain = tmp / "toolchain.tsv"
-            toolchain.write_text("gcc\t4:14.2.0-1\tarm64\ncmake\t3.31.6-2\tarm64\n")
-            initrd_manifest = tmp / "initrd-manifest.json"
-            initrd_manifest.write_text(json.dumps({"packages": [
-                {"type": "deb", "name": "lvm2", "version": "2.03.31-2", "architecture": "arm64"}]}))
-            initrd = tmp / "initrd.cpio.zst"
-            initrd.write_bytes(b"cpio")
-            (tmp / "games" / "mygame").mkdir()
-            ported = tmp / "games" / "mygame" / "mygame"
-            ported.write_bytes(b"\x7fELF ported")
-            ported.chmod(0o755)
-            recipe = {"name": "mygame", "license": "GPL-2.0", "recipe_sha256": "d" * 64,
-                      "sources": [{"path": "source", "git": "https://example.invalid/mygame", "commit": "e" * 40}],
-                      "patches": []}
-            (tmp / "recipes.json").write_text(json.dumps([recipe]))
-            source = tmp / "source.json"
-            source.write_text(json.dumps({"commit": "c" * 40, "clean": True}))
-            out = tmp / "info.json"
-            with out.open("w") as handle:
-                subprocess.run([sys.executable, str(OS / "builder" / "build_info.py"),
-                                "--inputs", str(OS / "inputs.json"), "--source-info", str(source), "--profile", "qemu-dev",
-                                "--build-id", "20260927T000000Z-cccccccccccc", "--started", "2026-09-27T00:00:00Z",
-                                "--image", str(image), "--raw", str(raw), "--manifest", str(manifest),
-                                "--initrd-manifest", str(initrd_manifest), "--initrd", str(initrd),
-                                "--builder-packages", str(builder), "--toolchain", str(toolchain),
-                                "--config", str(MKOSI), "--out", str(tmp)],
-                               check=True, stdout=handle)
-            info = json.loads(out.read_text())
+        (self.tmp / "games" / "mygame").mkdir(parents=True)
+        ported = self.tmp / "games" / "mygame" / "mygame"
+        ported.write_bytes(b"\x7fELF ported")
+        ported.chmod(0o755)
+        recipe = {"name": "mygame", "license": "GPL-2.0", "recipe_sha256": "d" * 64,
+                  "sources": [{"path": "source", "git": "https://example.invalid/mygame", "commit": "e" * 40}],
+                  "patches": []}
+        (self.tmp / "recipes.json").write_text(json.dumps([recipe]))
+        info = self.build_info()
         self.assertEqual((info["name"], info["environment"], info["release"]), ("MUN OS", "qemu-arm64", False))
         self.assertTrue(info["version"].endswith("-dev"))
-        self.assertEqual(info["kernel"]["packages"], {"linux-image-6.12.107+deb13-arm64": "6.12.107-1"})
+        self.assertEqual(info["kernel"], {"packages": {"linux-image-6.12.107+deb13-arm64": "6.12.107-1"}})
         self.assertEqual(info["mesa"], {"libgl1-mesa-dri": "25.0.7-2+deb13u1"})
         self.assertTrue(info["firmware"].startswith("not installed"), "an absent component says so")
         self.assertEqual(info["toolchain"], {"gcc": "4:14.2.0-1", "cmake": "3.31.6-2"})
@@ -473,13 +517,235 @@ class BuildInfoTests(unittest.TestCase):
         self.assertEqual(info["games"]["mun-collect"]["sha256"], hashlib.sha256(b"\x7fELF game").hexdigest())
         self.assertNotIn("recipe", info["games"]["mun-collect"])
         self.assertEqual(info["games"]["mygame"]["recipe"], recipe, "a recipe's game records its recipe")
-        self.assertIn("mun-os-0.1.0-dev-qemu-arm64.qcow2", info["artifacts"])
         self.assertIn("mkosi.conf", info["config"]["files"])
         self.assertEqual(info["initrd"]["packages"], [{"name": "lvm2", "version": "2.03.31-2", "architecture": "arm64"}])
         self.assertEqual(info["initrd"]["sha256"], hashlib.sha256(b"cpio").hexdigest())
         self.assertEqual(info["debian"]["snapshot"], json.loads((OS / "inputs.json").read_text())["debian"]["snapshot"])
         self.assertEqual(info["shape"], {"format": "mun-shape/1"},
                          "the MUN Shape format the console reads, from the checker the card service uses")
+
+    def test_a_qemu_build_records_its_qcow2_and_no_pinned_package(self):
+        info = self.build_info()
+        self.assertEqual(info["image_format"], "qcow2")
+        self.assertEqual(info["pinned_packages"], [])
+        self.assertEqual(set(info["artifacts"]), {"mun-os-0.1.0-dev-qemu-arm64.qcow2", "raw_image"})
+        self.assertEqual(info["artifacts"]["raw_image"]["note"],
+                         "the uncompressed disk the qcow2 was converted from; not shipped")
+
+    def test_a_board_build_records_its_raw_image_and_pinned_kernel(self):
+        installed = {"type": "deb", "name": PINNED_KERNEL["name"], "version": PINNED_KERNEL["version"],
+                     "architecture": "arm64"}
+        info = self.build_info("mun-os-0.1.0-dev-example-arm64.img.xz", "raw", [PINNED_KERNEL], kernel=installed)
+        self.assertEqual(info["image_format"], "raw")
+        self.assertIn("mun-os-0.1.0-dev-example-arm64.img.xz", info["artifacts"])
+        self.assertIn("decompresses to", info["artifacts"]["raw_image"]["note"])
+        self.assertEqual(info["pinned_packages"], [dict(PINNED_KERNEL, installed=True)],
+                         "where it came from, its digest, licence and source")
+        self.assertEqual(info["kernel"]["pinned"], {PINNED_KERNEL["name"]: PINNED_KERNEL["version"]})
+        self.assertTrue(info["kernel"]["packages"].startswith("absent"),
+                        "a pinned kernel is not listed as one from the Debian snapshot")
+        self.assertNotIn("QEMU", info["firmware"])
+
+    def test_a_pinned_package_installed_at_another_version_fails_the_build(self):
+        other = {"type": "deb", "name": PINNED_KERNEL["name"], "version": "7.1.3-1", "architecture": "arm64"}
+        result = self.build_info("mun-os-0.1.0-dev-example-arm64.img.xz", "raw", [PINNED_KERNEL], kernel=other,
+                                 check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("not the pinned 7.1.2-3", result.stderr)
+
+    def test_an_unknown_image_format_is_refused(self):
+        result = self.build_info(image_format="vhd", check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--image-format", result.stderr)
+
+
+class ProfileTests(unittest.TestCase):
+    """A profile's image format and pinned packages (os/builder/profiles.py),
+    on temporary profiles: none of this repository's profiles pins one."""
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.root = Path(directory.name)
+
+    def profile(self, environment="", declaration=None, name="example-dev"):
+        profile = self.root / name
+        profile.mkdir(exist_ok=True)
+        (profile / "mkosi.conf").write_text(
+            "[Build]\nEnvironment=\n        MUN_ENVIRONMENT=example-arm64\n        MUN_RELEASE=false\n" + environment)
+        target = profile / "pinned-packages.json"
+        if declaration is not None:
+            target.write_text(declaration if isinstance(declaration, str) else json.dumps(declaration))
+        elif target.exists():
+            target.unlink()
+        return profile
+
+    @staticmethod
+    def entry(**changes):
+        entry = {"name": "linux-image-7.1.2-example", "version": "7.1.2-3",
+                 "url": "https://example.invalid/pool/linux-image-7.1.2-example_7.1.2-3_arm64.deb",
+                 "sha256": hashlib.sha256(b"deb").hexdigest(), "license": "GPL-2.0-only",
+                 "source": {"repository": "https://example.invalid/kernel.git", "commit": "f" * 40}}
+        entry.update(changes)
+        return {key: value for key, value in entry.items() if value is not None}
+
+    def declaration(self, *entries):
+        return {"format": "mun-pinned-packages/1", "packages": list(entries) or [self.entry()]}
+
+    def refused(self, declaration, message):
+        with self.assertRaises(profiles.ProfileError) as refused:
+            profiles.pinned(self.profile(declaration=declaration))
+        self.assertIn(message, str(refused.exception))
+
+    def test_the_format_is_qcow2_unless_the_profile_says_raw(self):
+        self.assertEqual(profiles.image_format(self.profile()), "qcow2")
+        self.assertEqual(profiles.image_format(self.profile("        MUN_IMAGE_FORMAT=raw\n", name="raw-dev")), "raw")
+        for index, setting in enumerate(("MUN_IMAGE_FORMAT=vhd\n", "MUN_IMAGE_FORMAT=\n",
+                                         "MUN_IMAGE_FORMAT=raw\n        MUN_IMAGE_FORMAT=qcow2\n")):
+            with self.assertRaises(profiles.ProfileError, msg=setting) as refused:
+                profiles.image_format(self.profile("        " + setting, name=f"bad{index}-dev"))
+            self.assertIn("MUN_IMAGE_FORMAT", str(refused.exception))
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(profiles.main(["format", str(self.root / "raw-dev")]), 0)
+        self.assertEqual(out.getvalue(), "raw\n", "what build.sh reads")
+
+    def test_no_declaration_pins_nothing(self):
+        profile = self.profile()
+        self.assertEqual(profiles.pinned(profile), [])
+        self.assertEqual(profiles.fetch(profile, self.root / "packages", opener=self.fail_open), [])
+        self.assertFalse((self.root / "packages").exists(), "nothing for mkosi to see")
+
+    def fail_open(self, url, timeout):
+        raise AssertionError("nothing may be downloaded")
+
+    def test_a_complete_entry_is_accepted_with_a_commit_or_a_tag(self):
+        tagged = self.entry(name="linux-dtb-example", url="https://example.invalid/linux-dtb-example_1.0_arm64.deb",
+                            source={"repository": "https://example.invalid/kernel.git", "tag": "v1.0"})
+        entries = profiles.pinned(self.profile(declaration=self.declaration(self.entry(), tagged)))
+        self.assertEqual([e["name"] for e in entries], ["linux-image-7.1.2-example", "linux-dtb-example"])
+
+    def test_a_digest_that_is_not_sha256_is_refused(self):
+        self.refused(self.declaration(self.entry(sha256="ab" * 20)), "sha256")
+
+    def test_only_https_is_allowed(self):
+        self.refused(self.declaration(self.entry(url="http://example.invalid/pool/x_1_arm64.deb")), "https")
+        self.refused(self.declaration(self.entry(url="ftp://example.invalid/x_1_arm64.deb")), "https")
+        self.refused(self.declaration(self.entry(url="https://user:secret@example.invalid/x_1_arm64.deb")),
+                     "credentials")
+        self.refused(self.declaration(self.entry(
+            source={"repository": "http://example.invalid/kernel.git", "commit": "f" * 40})), "https")
+
+    def test_the_file_name_is_one_plain_deb_name(self):
+        for url in ("https://example.invalid/pool/..%2F..%2Fetc%2Fpasswd.deb", "https://example.invalid/pool/",
+                    "https://example.invalid/pool/.hidden.deb", "https://example.invalid/pool/kernel.tar",
+                    "https://example.invalid/pool/a%2Fb.deb"):
+            self.refused(self.declaration(self.entry(url=url)), "file name")
+
+    def test_a_missing_or_unknown_field_is_refused(self):
+        self.refused(self.declaration(self.entry(license=None)), "missing license")
+        self.refused(self.declaration(self.entry(mirror="https://example.invalid/")), "unknown mirror")
+        self.refused(self.declaration(self.entry(source={"repository": "https://example.invalid/k.git"})), "source")
+        self.refused(self.declaration(self.entry(source={"repository": "https://example.invalid/k.git",
+                                                          "commit": "f" * 40, "tag": "v1"})), "source")
+        self.refused(self.declaration(self.entry(source={"repository": "https://example.invalid/k.git",
+                                                          "commit": "main"})), "commit")
+        self.refused(dict(self.declaration(), extra=True), "unknown extra")
+
+    def test_names_versions_and_the_document_itself_are_checked(self):
+        self.refused(self.declaration(self.entry(name="Linux Image")), "package name")
+        self.refused(self.declaration(self.entry(version="latest")), "Debian version")
+        self.refused(self.declaration(self.entry(), self.entry()), "given twice")
+        self.refused({"format": "mun-pinned-packages/2", "packages": [self.entry()]}, "not a mun-pinned-packages/1")
+        self.refused({"format": "mun-pinned-packages/1", "packages": []}, "at least one")
+        self.refused("{not json", str(self.root))
+
+    @staticmethod
+    def response(data):
+        return contextlib.closing(io.BytesIO(data))
+
+    def test_a_download_is_kept_only_if_it_matches_its_digest(self):
+        target = self.root / "x.deb"
+        profiles.download("https://example.invalid/x.deb", target, hashlib.sha256(b"deb").hexdigest(),
+                          opener=lambda url, timeout: self.response(b"deb"))
+        self.assertEqual(target.read_bytes(), b"deb")
+        other = self.root / "y.deb"
+        with self.assertRaises(profiles.ProfileError) as refused:
+            profiles.download("https://example.invalid/y.deb", other, hashlib.sha256(b"deb").hexdigest(),
+                              opener=lambda url, timeout: self.response(b"not the pinned file"))
+        self.assertIn("does not match", str(refused.exception))
+        self.assertEqual(sorted(p.name for p in self.root.iterdir()), ["x.deb"], "nothing else is left behind")
+
+    def test_a_download_larger_than_the_limit_stops(self):
+        with patch.object(profiles, "SIZE_LIMIT", 4), patch.object(profiles, "CHUNK", 2):
+            with self.assertRaises(profiles.ProfileError):
+                profiles.download("https://example.invalid/x.deb", self.root / "x.deb", "0" * 64,
+                                  opener=lambda url, timeout: self.response(b"too large"))
+        self.assertEqual(list(self.root.iterdir()), [])
+
+    def test_a_redirect_is_followed_only_to_https(self):
+        handler = profiles.HttpsOnly()
+        request = urllib.request.Request("https://example.invalid/x.deb")
+        with self.assertRaises(profiles.ProfileError):
+            handler.redirect_request(request, None, 302, "Found", {}, "http://example.invalid/x.deb")
+        followed = handler.redirect_request(request, None, 302, "Found", {}, "https://mirror.example.invalid/x.deb")
+        self.assertEqual(followed.full_url, "https://mirror.example.invalid/x.deb")
+
+    def fetch(self, fields):
+        profile = self.profile(declaration=self.declaration())
+        output = "".join(f"{key}: {value}\n" for key, value in fields.items())
+
+        def run(command, **kwargs):
+            self.assertEqual(command[:2], ["dpkg-deb", "--field"])
+            return subprocess.CompletedProcess(command, 0, output, "")
+        with contextlib.redirect_stderr(io.StringIO()):
+            return profiles.fetch(profile, self.root / "packages", opener=lambda url, timeout: self.response(b"deb"),
+                                  run=run)
+
+    def test_a_fetched_package_must_be_the_declared_one(self):
+        records = self.fetch({"Package": "linux-image-7.1.2-example", "Version": "7.1.2-3", "Architecture": "arm64"})
+        self.assertEqual(records[0]["architecture"], "arm64")
+        self.assertEqual((records[0]["size"], records[0]["license"]), (3, "GPL-2.0-only"))
+        self.assertTrue((self.root / "packages" / "linux-image-7.1.2-example_7.1.2-3_arm64.deb").is_file())
+        for fields, message in (({"Package": "linux-image-other", "Version": "7.1.2-3", "Architecture": "arm64"},
+                                 "not the declared"),
+                                ({"Package": "linux-image-7.1.2-example", "Version": "7.1.2-4", "Architecture": "arm64"},
+                                 "not the declared"),
+                                ({"Package": "linux-image-7.1.2-example", "Version": "7.1.2-3", "Architecture": "amd64"},
+                                 "amd64")):
+            shutil.rmtree(self.root / "packages")
+            with self.assertRaises(profiles.ProfileError) as refused:
+                self.fetch(fields)
+            self.assertIn(message, str(refused.exception))
+            self.assertEqual(list((self.root / "packages").iterdir()), [], "a refused file is not offered to mkosi")
+
+
+class BuildScriptTests(unittest.TestCase):
+    """What os/builder/build.sh does with a profile's format and pinned
+    packages; the script itself runs only in a builder."""
+
+    def setUp(self):
+        self.script = (OS / "builder" / "build.sh").read_text()
+
+    def test_a_qcow2_build_converts_the_disk_as_before(self):
+        self.assertIn('IMAGE="mun-os-$VERSION-${ENVIRONMENT:-$PROFILE}.qcow2"', self.script)
+        self.assertIn('qemu-img convert -O qcow2 -c -o compression_type=zstd "$WORK/image/mun-os.raw" "$OUT/$IMAGE"',
+                      self.script)
+
+    def test_a_raw_build_is_the_disk_compressed_with_xz(self):
+        self.assertIn('IMAGE="mun-os-$VERSION-${ENVIRONMENT:-$PROFILE}.img.xz"', self.script)
+        self.assertRegex(self.script, r'xz --threads=0 --check=crc64 --stdout "\$WORK/image/mun-os.raw" > "\$OUT/\$IMAGE"')
+        self.assertIn('IMAGE_FORMAT="$(python3 "$HERE/profiles.py" format "$PROFILE_DIR")"', self.script)
+        builder = json.loads((OS / "inputs.json").read_text())["builder"]["packages"]
+        self.assertIn("xz-utils", builder)
+
+    def test_pinned_packages_reach_mkosi_only_through_a_declaration(self):
+        self.assertIn(f'[ ! -f "$PROFILE_DIR/{profiles.DECLARATION}" ] || PINNED_DIR="$WORK/packages"', self.script)
+        self.assertIn('${PINNED_DIR:+--package-directory="$PINNED_DIR"}', self.script)
+        self.assertLess(self.script.index('profiles.py" fetch'), self.script.index("{ mkosi --profile"),
+                        "verified before mkosi runs")
+        self.assertIn('--image-format "$IMAGE_FORMAT" --pinned "$WORK/pinned.json"', self.script)
+        # mkosi 25 makes a package directory a local APT repository with reprepro.
+        self.assertIn("reprepro", json.loads((OS / "inputs.json").read_text())["builder"]["packages"])
 
 
 class EntryPointTests(unittest.TestCase):

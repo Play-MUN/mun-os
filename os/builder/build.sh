@@ -9,6 +9,11 @@
 # beside the image. The build works on a copy of os/mkosi and writes the
 # image, the games built beside it, BUILD-INFO.json and SHA256SUMS to
 # OUT_DIR. Nothing here reads the host or a previous build.
+#
+# The profile decides the image's format (os/builder/profiles.py): a qcow2
+# for the QEMU laboratory, or a raw disk compressed with xz to write to a
+# board's storage. It may also pin .deb packages from outside the Debian
+# snapshot, which are fetched and verified here before mkosi sees them.
 set -eu
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -27,8 +32,11 @@ while [ $# -gt 0 ]; do
     esac
 done
 [ -n "$OUT" ] && [ -f "$SOURCE_INFO" ] || { echo "usage: build.sh --profile P --out DIR --source-info FILE [--recipes DIR]" >&2; exit 64; }
-[ -d "$SRC/os/mkosi/mkosi.profiles/$PROFILE" ] || { echo "build.sh: no profile $PROFILE" >&2; exit 64; }
+PROFILE_DIR="$SRC/os/mkosi/mkosi.profiles/$PROFILE"
+[ -d "$PROFILE_DIR" ] || { echo "build.sh: no profile $PROFILE" >&2; exit 64; }
 [ "$(id -u)" -eq 0 ] || { echo "build.sh must run as root" >&2; exit 1; }
+# Checked before anything is fetched or built.
+IMAGE_FORMAT="$(python3 "$HERE/profiles.py" format "$PROFILE_DIR")"
 
 inputs() { python3 "$HERE/inputs.py" get "$1"; }
 VERSION="$(inputs version)"
@@ -45,6 +53,13 @@ mkdir -p "$WORK/mkosi/mkosi.sandbox/etc/apt/sources.list.d" "$WORK/mkosi/mkosi.s
 python3 "$HERE/inputs.py" sources > "$WORK/mkosi/mkosi.sandbox/etc/apt/sources.list.d/mkosi.sources"
 printf 'Acquire::Retries "5";\n' > "$WORK/mkosi/mkosi.sandbox/etc/apt/apt.conf.d/80-mun"
 
+# The profile's pinned packages, each checked against its SHA-256 and its own
+# control fields; mkosi makes the directory a local repository the
+# profile's Packages= install from (PackageDirectories=, mkosi 25).
+python3 "$HERE/profiles.py" fetch "$PROFILE_DIR" "$WORK/packages" > "$WORK/pinned.json"
+PINNED_DIR=
+[ ! -f "$PROFILE_DIR/pinned-packages.json" ] || PINNED_DIR="$WORK/packages"
+
 SOURCES="$SRC:mun"
 WITH_RECIPES=0
 if [ -n "$RECIPES" ]; then
@@ -55,7 +70,7 @@ if [ -n "$RECIPES" ]; then
     WITH_RECIPES=1
 fi
 
-echo "== mkosi $(mkosi --version 2>/dev/null | awk '{print $2}') profile $PROFILE, build $BUILD_ID"
+echo "== mkosi $(mkosi --version 2>/dev/null | awk '{print $2}') profile $PROFILE ($IMAGE_FORMAT), build $BUILD_ID"
 cd "$WORK/mkosi"
 # A pipeline loses the first command's status in sh: keep it in a file.
 set +e
@@ -65,6 +80,7 @@ set +e
     --build-directory "$WORK/builddir" \
     --workspace-directory "$WORK/ws" \
     --package-cache-directory "$WORK/pkgcache" \
+    ${PINNED_DIR:+--package-directory="$PINNED_DIR"} \
     --build-sources "$SOURCES" \
     --source-date-epoch "$COMMIT_TIME" \
     --environment "MUN_PROFILE=$PROFILE" \
@@ -78,9 +94,21 @@ set -e
 [ -f "$WORK/image/mun-os.raw" ] || { echo "mkosi produced no image; see logs/mkosi.log" >&2; exit 1; }
 
 echo "== artifacts"
-ENVIRONMENT="$(sed -n 's/^ *MUN_ENVIRONMENT=//p' "$SRC/os/mkosi/mkosi.profiles/$PROFILE/mkosi.conf")"
-IMAGE="mun-os-$VERSION-${ENVIRONMENT:-$PROFILE}.qcow2"
-qemu-img convert -O qcow2 -c -o compression_type=zstd "$WORK/image/mun-os.raw" "$OUT/$IMAGE"
+ENVIRONMENT="$(sed -n 's/^ *MUN_ENVIRONMENT=//p' "$PROFILE_DIR/mkosi.conf")"
+case "$IMAGE_FORMAT" in
+    qcow2)
+        IMAGE="mun-os-$VERSION-${ENVIRONMENT:-$PROFILE}.qcow2"
+        qemu-img convert -O qcow2 -c -o compression_type=zstd "$WORK/image/mun-os.raw" "$OUT/$IMAGE"
+        ;;
+    raw)
+        # xz is what flashing tools and `xz -dc IMAGE | dd` read directly.
+        # Every core compresses; the stream is split into blocks, which can
+        # be decompressed in parallel too, each with a CRC64 checked when it
+        # is read back.
+        IMAGE="mun-os-$VERSION-${ENVIRONMENT:-$PROFILE}.img.xz"
+        xz --threads=0 --check=crc64 --stdout "$WORK/image/mun-os.raw" > "$OUT/$IMAGE"
+        ;;
+esac
 cp "$WORK/image/mun-os.manifest" "$OUT/manifest.json"
 cp "$WORK/image/initrd.manifest" "$OUT/initrd-manifest.json"
 # mkosi gives each image its own subdirectory of the build directory.
@@ -93,6 +121,7 @@ cp -a "$ARTIFACTS/games/." "$OUT/games/"
 python3 "$HERE/build_info.py" \
     --inputs "$SRC/os/inputs.json" --source-info "$SOURCE_INFO" --profile "$PROFILE" \
     --build-id "$BUILD_ID" --started "$STARTED" --image "$OUT/$IMAGE" --raw "$WORK/image/mun-os.raw" \
+    --image-format "$IMAGE_FORMAT" --pinned "$WORK/pinned.json" \
     --manifest "$OUT/manifest.json" --initrd-manifest "$OUT/initrd-manifest.json" \
     --initrd "$(readlink -f "$WORK/image/initrd")" --builder-packages "$OUT/builder-packages.tsv" \
     --toolchain "$ARTIFACTS/toolchain.tsv" --config "$WORK/mkosi" --out "$OUT" \

@@ -50,15 +50,20 @@ class Fixture(unittest.TestCase):
         self.enterContext(patch.object(vm, "GUESTS_ROOT", self.root / "guests"))
         self.enterContext(contextlib.redirect_stdout(io.StringIO()))
 
-    def build(self, name="b1", shape=None):
+    def build(self, name="b1", shape=None, image_format=None):
+        """A finished build: a qcow2 one as builds made before BUILD-INFO
+        recorded the format, or one of `image_format`."""
         build = self.root / "builds" / name
         build.mkdir(parents=True)
-        image = build / "mun-os-0.1.0-dev-qemu-arm64.qcow2"
+        environment = "example-arm64" if image_format == "raw" else "qemu-arm64"
+        image = build / f"mun-os-0.1.0-dev-{environment}{'.img.xz' if image_format == 'raw' else '.qcow2'}"
         image.write_bytes(b"image bytes")
         digest = hashlib.sha256(b"image bytes").hexdigest()
-        info = {"build_id": f"id-{name}", "version": "0.1.0-dev", "environment": "qemu-arm64", "release": False,
+        info = {"build_id": f"id-{name}", "version": "0.1.0-dev", "environment": environment, "release": False,
                 "built": {"finished": f"2026-09-27T00:00:0{name[-1]}Z"}, "source": {"describe": f"c0ffee{name[-1]}"},
                 "artifacts": {image.name: {"sha256": digest}}}
+        if image_format:
+            info["image_format"] = image_format
         if shape:
             info["shape"] = {"format": shape}
         (build / "BUILD-INFO.json").write_text(json.dumps(info))
@@ -125,6 +130,109 @@ class SourceTests(Fixture):
         with self.assertRaises(vm.LabError) as ctx:
             mundev.cmd_build(args)
         self.assertIn("exists", str(ctx.exception))
+
+
+class ProfileTests(Fixture):
+    """Profiles are the directories of os/mkosi/mkosi.profiles/; a temporary
+    one stands in for a board's development profile."""
+
+    def profiles_root(self):
+        root = self.root / "mkosi.profiles"
+        for name in ("qemu-dev", "example-dev", "Odd Name", "notes"):
+            (root / name).mkdir(parents=True)
+        for name in ("qemu-dev", "example-dev", "Odd Name"):
+            (root / name / "mkosi.conf").write_text("[Build]\nEnvironment=\n        MUN_RELEASE=false\n")
+        self.enterContext(patch.object(mundev, "PROFILES_ROOT", root))
+        return root
+
+    def test_the_profiles_are_the_directories_with_a_mkosi_conf(self):
+        self.assertIn("qemu-dev", mundev.profiles())
+        self.profiles_root()
+        self.assertEqual(mundev.profiles(), ["example-dev", "qemu-dev"], "plain names with a configuration only")
+
+    def test_a_profile_is_checked_before_a_builder_starts(self):
+        root = self.profiles_root()
+        args = argparse.Namespace(profile="example-dev", name="b1", allow_dirty=False, recipe=None, keep_builder=False)
+        for setting, declaration, message in (
+                ("MUN_IMAGE_FORMAT=vhd", None, "MUN_IMAGE_FORMAT"),
+                ("MUN_IMAGE_FORMAT=raw", {"format": "mun-pinned-packages/1", "packages": [{"name": "x"}]}, "missing")):
+            (root / "example-dev" / "mkosi.conf").write_text(f"[Build]\nEnvironment=\n        {setting}\n")
+            if declaration:
+                (root / "example-dev" / "pinned-packages.json").write_text(json.dumps(declaration))
+            with patch.object(mundev, "source_state", side_effect=AssertionError("nothing may start")):
+                with self.assertRaises(vm.LabError) as refused:
+                    mundev.cmd_build(args)
+            self.assertIn(message, str(refused.exception))
+
+
+class ImageFormatTests(Fixture):
+    """A build's image is the qcow2 a guest runs, or a raw disk for a board,
+    which no guest command takes."""
+
+    def test_the_qemu_image_keeps_its_name(self):
+        info = json.loads((self.build() / "BUILD-INFO.json").read_text())
+        self.assertEqual(mundev.image_name(info), "mun-os-0.1.0-dev-qemu-arm64.qcow2")
+        self.assertEqual(mundev.image_format(info), "qcow2", "a build that records no format is a qcow2")
+
+    def test_a_raw_build_names_its_compressed_disk(self):
+        build = self.build("b2", image_format="raw")
+        info = json.loads((build / "BUILD-INFO.json").read_text())
+        self.assertEqual(mundev.image_name(info), "mun-os-0.1.0-dev-example-arm64.img.xz")
+        with self.assertRaises(vm.LabError):
+            mundev.image_name(dict(info, image_format="vhd"))
+
+    def refused(self, call, *args):
+        with patch.object(vm, "run") as run, patch.object(vm, "main") as main, \
+                patch.object(vm, "which", side_effect=lambda name: name):
+            with self.assertRaises(vm.LabError) as refused:
+                call(*args)
+        run.assert_not_called()
+        main.assert_not_called()
+        self.assertIn("raw disk image", str(refused.exception))
+        self.assertIn("qemu-dev", str(refused.exception), "and which build would do")
+        return refused.exception
+
+    def test_guest_commands_refuse_a_raw_build(self):
+        self.build("b1")
+        self.build("b2", image_format="raw")
+        self.refused(mundev.create_guest, "one", self.root / "builds" / "b2")
+        self.refused(mundev.cmd_run, argparse.Namespace(guest="one", build="b2", window=False, audio=None, wait=5))
+        self.refused(mundev.cmd_play, argparse.Namespace(guest="play", build="b2", card=None, audio=None))
+        self.refused(mundev.cmd_smoke, argparse.Namespace(bundle=None, build="b2", guest="smoke", card="collect",
+                                                          wait=5, card_timeout=5, play=1))
+        folder = self.root / "pkg"
+        folder.mkdir()
+        self.refused(mundev.cmd_shape, argparse.Namespace(folder=str(folder), guest="shape", build="b2", base=None,
+                                                          title="t", watch=False, window=False, audio=None))
+        self.refused(mundev.cmd_bundle, argparse.Namespace(build="b2", out=str(self.root / "bundle")))
+        self.assertFalse((self.root / "guests").exists() and any((self.root / "guests").iterdir()), "no guest made")
+        self.assertFalse((self.root / "bundle").exists())
+
+    def test_without_a_build_the_latest_qemu_image_is_taken(self):
+        self.build("b1")
+        self.build("b2", image_format="raw")
+        with patch.object(vm, "run"), patch.object(vm, "which", side_effect=lambda name: name), \
+                patch.object(vm, "main", return_value=0):
+            mundev.cmd_run(argparse.Namespace(guest="one", build=None, window=False, audio=None, wait=5))
+        self.assertEqual(json.loads((self.root / "guests" / "one" / "guest.json").read_text())["build"], "b1")
+
+    def test_only_raw_builds_are_not_a_guest(self):
+        self.build("b2", image_format="raw")
+        with patch.object(vm, "run") as run:
+            with self.assertRaises(vm.LabError) as refused:
+                mundev.cmd_run(argparse.Namespace(guest="one", build=None, window=False, audio=None, wait=5))
+        run.assert_not_called()
+        self.assertIn("./mun dev build", str(refused.exception))
+
+    def test_sources_are_not_resolved_for_pinned_packages(self):
+        build = self.build("b1")
+        info = json.loads((build / "BUILD-INFO.json").read_text())
+        info["pinned_packages"] = [{"name": "linux-image-7.1.2-example", "version": "7.1.2-3"}]
+        (build / "BUILD-INFO.json").write_text(json.dumps(info))
+        with patch.object(mundev.package_sources, "collect", side_effect=AssertionError("nothing fetched")):
+            with self.assertRaises(vm.LabError) as refused:
+                mundev.cmd_sources(argparse.Namespace(build="b1", out=None, list=True))
+        self.assertIn("linux-image-7.1.2-example 7.1.2-3", str(refused.exception))
 
 
 class BuilderTests(Fixture):

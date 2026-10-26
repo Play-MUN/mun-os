@@ -73,6 +73,11 @@ def make(build: Path, destination: Path, cards: Dict[str, Tuple[Path, str]],
     its image and BUILD-INFO.json, each card of `cards` (name -> (image,
     title)) compressed, and the `licences` texts. Returns the manifest."""
     info = json.loads((build / "BUILD-INFO.json").read_text())
+    # A bundle is played in a guest. A build that records no format was made
+    # before builds could have another and is a qcow2.
+    if info.get("image_format", "qcow2") != "qcow2":
+        raise BundleError(f"build {build.name} is a {info['image_format']} disk image for a board's storage: "
+                          "a bundle carries the qcow2 image a guest runs")
     images = [name for name in info.get("artifacts", {}) if name.endswith(".qcow2")]
     if len(images) != 1:
         raise BundleError("BUILD-INFO does not name exactly one image")

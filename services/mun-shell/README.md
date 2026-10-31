@@ -208,11 +208,20 @@ and the render loop. On a graphics API:
   shaders are compiled when the shell is built (Qt Shader Tools' `qsb`,
   `qt6-shadertools-dev`), not at run time. Up to eight waves at once: a
   ninth takes the place of the oldest.
+- The large object's layers (`HeroIcon`) are painted on a thread of their
+  own, never where frames are made, and each becomes a texture, the image
+  let go once uploaded. A frame sets their opacities, the load's sweep (a
+  clip), the gear's turn (a transform) and the copper line (a little
+  geometry), which the GPU applies; the whole loaded object is composed
+  from the three layers already painted instead of being painted again.
+  Until an object's layers are ready the previous one stays and the load
+  waits, so navigation never waits for a painting. Only the layers of the
+  object in focus and of the one fading out are kept.
 - On an accelerated renderer, and only there, `SceneClock` ticks on the
   frames the window renders (Qt Quick's animation driver, which the threaded
   render loop paces by the display) instead of its timer, and the network
-  drifts and its waves run on every frame: what moves costs the GPU, not a
-  repaint. The journal says which ("mun-shell: motion: …"). With the
+  drifts, its waves run, the gear turns and the object floats (by fractions
+  of a pixel) on every frame: what moves costs the GPU, not a repaint. The journal says which ("mun-shell: motion: …"). With the
   software renderer, or OpenGL in software, the rates above stay. Rest and
   *Reduce motion* stop the motion as before, and a still screen draws
   nothing.

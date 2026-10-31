@@ -1,6 +1,7 @@
 #include "heroicon.h"
 
 #include "blur.h"
+#include "renderinfo.h"
 #include "sceneclock.h"
 
 #include <QLinearGradient>
@@ -8,18 +9,32 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QPainterPathStroker>
+#include <QQuickWindow>
+#include <QSGClipNode>
+#include <QSGGeometryNode>
+#include <QSGImageNode>
+#include <QSGOpacityNode>
+#include <QSGRendererInterface>
+#include <QSGTransformNode>
+#include <QSGVertexColorMaterial>
 #include <QtMath>
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <iterator>
+#include <limits>
 
 namespace {
 
 constexpr qreal kPi = 3.14159265358979323846;
 constexpr qreal kLoadSeconds = 0.9;
 constexpr qreal kLineWidth = 3;
+// How far any object, its stroke and its glow reach from the centre, in the
+// object's own units.
+constexpr qreal kReach = 190;
+// The crescent is painted again when it has filled this much more.
+constexpr qreal kLitStep = 0.02;
 
 QColor rgba(int r, int g, int b, qreal a)
 {
@@ -450,12 +465,19 @@ qreal smoothstep(qreal x)
 HeroIcon::HeroIcon(QQuickItem *parent) : QQuickPaintedItem(parent)
 {
     setAntialiasing(true);
+    // One painting at a time, the newest object first in line.
+    m_painter.setMaxThreadCount(1);
     connect(SceneClock::instance(), &SceneClock::tick, this, &HeroIcon::onTick);
+    connect(SceneClock::instance(), &SceneClock::syncedChanged, this, &HeroIcon::updateDemand);
     updateDemand();
 }
 
 HeroIcon::~HeroIcon()
 {
+    // A painting in progress posts to this object: it ends before the
+    // object does (and what it posts is dropped with the object).
+    m_painter.clear();
+    m_painter.waitForDone();
     SceneClock::instance()->demand(this, 0);
 }
 
@@ -463,13 +485,19 @@ void HeroIcon::setIcon(const QString &icon)
 {
     if (icon == m_icon)
         return;
-    m_previous = m_icon;
+    // On the graphics path an object whose layers have not come yet has
+    // not shown: the one on screen stays the one that fades.
+    if (!(onGpu() && m_progress == 0 && !ready(m_icon)))
+        m_previous = m_icon;
+    if (m_previous == icon)
+        m_previous.clear();
     m_icon = icon;
     m_progress = 0;
     // Keep the layers of the two objects on screen only.
     for (auto it = m_layers.begin(); it != m_layers.end();)
         it = it.key() == m_icon || it.key() == m_previous ? std::next(it) : m_layers.erase(it);
     m_last = -1;
+    request();
     updateDemand();
     update();
     emit iconChanged();
@@ -487,10 +515,14 @@ void HeroIcon::setLit(qreal lit)
     emit litChanged();
 }
 
-// A change of the card's Shape paints its layers again, once.
+// A change of the card's Shape paints its layers again, once. The graphics
+// path shows the card as it was until they come.
 void HeroIcon::cardRestyled()
 {
-    m_layers.remove(QStringLiteral("card"));
+    if (onGpu())
+        request();
+    else
+        m_layers.remove(QStringLiteral("card"));
     update();
     emit cardChanged();
 }
@@ -556,8 +588,14 @@ bool HeroIcon::filling() const
 
 int HeroIcon::rate() const
 {
-    if (loading())
+    // On a synced clock (an accelerated renderer, the graphics path) the
+    // gear's turn and the float are transforms: every frame.
+    const bool everyFrame = SceneClock::instance()->synced();
+    // A load waits for its layers on the graphics path.
+    if (loading() && (!onGpu() || ready(m_icon)))
         return 60;
+    if (!m_pace.still() && everyFrame)
+        return SceneClock::kBaseRate;
     if (filling() || (!m_pace.still() && m_icon == QLatin1String("settings")))
         return 20;
     // The float moves at most 3.6 px/s: whole pixels at 5 frames/s miss none.
@@ -578,8 +616,9 @@ void HeroIcon::onTick(quint64 frame)
     const qreal dt = m_last >= 0 ? std::min<qreal>(0.1, now - m_last) : 1.0 / current;
     m_last = now;
 
+    const bool gpu = onGpu();
     bool repaint = false;
-    if (loading()) {
+    if (loading() && (!gpu || ready(m_icon))) {
         m_progress = std::min<qreal>(1, m_progress + dt / kLoadSeconds);
         repaint = true;
     }
@@ -587,14 +626,20 @@ void HeroIcon::onTick(quint64 frame)
         m_lit += (m_litTarget - m_lit) * std::min<qreal>(1, dt * 1.8);
         if (!filling())
             m_lit = m_litTarget;
-        repaint = repaint || m_icon == QLatin1String("card") || m_previous == QLatin1String("card");
+        // The graphics path shows the newest layers the painting thread
+        // has made, and asks for the next.
+        if (gpu)
+            request();
+        else
+            repaint = repaint || m_icon == QLatin1String("card") || m_previous == QLatin1String("card");
     }
     if (!m_pace.still()) {
         m_time += m_pace.advance(dt);
         repaint = repaint || m_icon == QLatin1String("settings");
-        const int bob = static_cast<int>(std::lround(std::sin(m_time * 0.6) * 6));
-        if (bob != m_bob) {
-            m_bob = bob;
+        const qreal bob = std::sin(m_time * 0.6) * 6;
+        const qreal shown = SceneClock::instance()->synced() ? bob : qreal(std::lround(bob));
+        if (std::abs(shown - m_bob) > 0.001) {
+            m_bob = shown;
             emit bobChanged();
         }
     }
@@ -605,6 +650,82 @@ void HeroIcon::onTick(quint64 frame)
     // A stopped clock restarts from one frame's worth, not the pause.
     if (rate() == 0)
         m_last = -1;
+}
+
+HeroIcon::Look HeroIcon::look() const
+{
+    return {m_window, m_cardShape, m_morph, m_cardGlow, m_reveal, m_lit};
+}
+
+bool HeroIcon::onGpu() const
+{
+    return RenderInfo::instance()->rhi();
+}
+
+// What the card's layers show besides its crescent.
+quint64 HeroIcon::styleKey() const
+{
+    return qHashMulti(0, m_window.isNull() ? 0 : m_window.cacheKey(), m_cardShape, m_morph, m_cardGlow.rgba(),
+                      m_cardGlow.isValid(), m_reveal);
+}
+
+bool HeroIcon::ready(const QString &key) const
+{
+    const auto it = m_layers.constFind(key);
+    return it != m_layers.cend() && it->scale > 0;
+}
+
+bool HeroIcon::stale(const QString &key, qreal scale) const
+{
+    const auto it = m_layers.constFind(key);
+    if (it == m_layers.cend() || it->scale == 0 || !qFuzzyCompare(it->scale, scale))
+        return true;
+    if (key != QLatin1String("card"))
+        return false;
+    // The software path's rule for the crescent (layersFor).
+    return it->look != styleKey() || std::abs(it->lit - m_lit) >= kLitStep || (!filling() && it->lit != m_lit);
+}
+
+void HeroIcon::request()
+{
+    if (!onGpu() || !window())
+        return;
+    const qreal scale = window()->effectiveDevicePixelRatio();
+    // The object in focus first; the one fading out while it shows.
+    for (const QString &key : {m_icon, m_previous}) {
+        if (key.isEmpty() || m_asked.contains(key) || !stale(key, scale)
+            || (key == m_previous && (m_progress >= 0.5 || key == m_icon)))
+            continue;
+        m_asked.insert(key, true);
+        const Look look = this->look();
+        const quint64 style = key == QLatin1String("card") ? styleKey() : 0;
+        const QSizeF size = this->size();
+        m_painter.start([this, key, look, scale, size, style] {
+            QElapsedTimer took;
+            took.start();
+            Layers layers = paintLayers(key, look, scale, size, true);
+            layers.look = style;
+            const qint64 ms = took.elapsed();
+            QMetaObject::invokeMethod(this, [this, key, layers, ms] { painted(key, layers, ms); }, Qt::QueuedConnection);
+        });
+    }
+}
+
+void HeroIcon::painted(const QString &key, const Layers &layers, qint64 ms)
+{
+    m_asked.remove(key);
+    static const bool timing = qEnvironmentVariableIsSet("MUN_SHELL_TIMING");
+    if (timing)
+        qInfo("mun-shell: object %s layers painted in %lld ms (painting thread)", qPrintable(key), qlonglong(ms));
+    // Kept only while the object shows.
+    if (key == m_icon || (key == m_previous && m_progress < 0.5)) {
+        m_layers.insert(key, layers);
+        // A load waiting for them starts.
+        updateDemand();
+        update();
+    }
+    // Whatever moved on meanwhile (another object, the crescent).
+    request();
 }
 
 void HeroIcon::paint(QPainter *painter)
@@ -624,11 +745,6 @@ static void enterObjectFrame(QPainter *painter, qreal width, qreal height)
     painter->scale(1.35, 1.35);
 }
 
-// How far any object, its stroke and its glow reach from the centre, in the
-// object's own units.
-constexpr qreal kReach = 190;
-// The crescent is painted again when it has filled this much more.
-constexpr qreal kLitStep = 0.02;
 
 const HeroIcon::Layers &HeroIcon::layersFor(const QString &key, qreal scale)
 {
@@ -638,14 +754,63 @@ const HeroIcon::Layers &HeroIcon::layersFor(const QString &key, qreal scale)
                        || (crescent && (std::abs(layers.lit - m_lit) >= kLitStep || (!filling() && layers.lit != m_lit)));
     if (!stale)
         return layers;
+    QElapsedTimer took;
+    took.start();
+    layers = paintLayers(key, look(), scale, size(), false);
+    // The laboratory times this (MUN_SHELL_TIMING): it runs where frames are made.
+    static const bool timing = qEnvironmentVariableIsSet("MUN_SHELL_TIMING");
+    if (timing && !layers.turning)
+        qInfo("mun-shell: object %s layers painted in %lld ms", qPrintable(key), qlonglong(took.elapsed()));
+    return layers;
+}
+
+// `parts` drawn over one another as one layer, in the device pixels they
+// were painted in (`ratio` per logical pixel): the same picture as painting
+// them all at once. Their origins share a fraction (one reference), so each
+// lands on whole pixels of the result.
+static HeroIcon::Layer composed(std::initializer_list<const HeroIcon::Layer *> parts, qreal ratio)
+{
+    QPointF first(std::numeric_limits<qreal>::max(), std::numeric_limits<qreal>::max());
+    QPointF last(std::numeric_limits<qreal>::lowest(), std::numeric_limits<qreal>::lowest());
+    for (const HeroIcon::Layer *layer : parts) {
+        if (layer->image.isNull())
+            continue;
+        first = QPointF(std::min(first.x(), layer->origin.x()), std::min(first.y(), layer->origin.y()));
+        last = QPointF(std::max(last.x(), layer->origin.x() + layer->size.width()),
+                       std::max(last.y(), layer->origin.y() + layer->size.height()));
+    }
+    if (last.x() <= first.x())
+        return {};
+    QImage image(QSize(int(std::lround(last.x() - first.x())), int(std::lround(last.y() - first.y()))),
+                 QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::transparent);
+    QPainter p(&image);
+    for (const HeroIcon::Layer *layer : parts) {
+        if (layer->image.isNull())
+            continue;
+        QImage plain = layer->image;
+        plain.setDevicePixelRatio(1);
+        const QPointF at = layer->origin - first;
+        p.drawImage(QPoint(int(std::lround(at.x())), int(std::lround(at.y()))), plain);
+    }
+    p.end();
+    image.setDevicePixelRatio(ratio);
+    return {image, first, image.size(), image.cacheKey()};
+}
+
+HeroIcon::Layers HeroIcon::paintLayers(const QString &key, const Look &look, qreal scale, const QSizeF &size,
+                                       bool composite)
+{
+    Layers layers;
     layers.scale = scale;
-    layers.lit = m_lit;
+    layers.lit = look.lit;
     layers.turning = key == QLatin1String("settings");
 
     if (layers.turning) {
         // In the object's own frame, unleaned: a frame turns and leans them.
-        // The shadow is drawn as vectors (fills only, cheap), so it keeps its
-        // offset while the gear turns.
+        // The software path draws the shadow as vectors (fills only, cheap),
+        // so it keeps its offset while the gear turns; the graphics path
+        // turns a layer of it too.
         const int side = static_cast<int>(std::ceil(2 * kReach * 1.35 * scale));
         auto render = [&](int passes) {
             QImage image(side, side, QImage::Format_ARGB32_Premultiplied);
@@ -655,41 +820,42 @@ const HeroIcon::Layers &HeroIcon::layersFor(const QString &key, qreal scale)
             p.translate(side / 2.0, side / 2.0);
             p.scale(1.35 * scale, 1.35 * scale);
             // The image's own pixels are its item units: one device pixel each.
-            drawLayers(&p, QTransform(), 1, scale, key, 1, 1, 0, passes, false);
+            drawLayers(&p, QTransform(), 1, scale, key, look, 1, 1, 0, passes, false);
             p.end();
             return cropped(image, QPointF(side / 2.0, side / 2.0), 1);
         };
-        layers.shadow = {};
         layers.wire = render(Wire);
         layers.face = render(Face);
-        layers.loaded = render(Wire | Face);
+        if (composite) {
+            layers.shadow = render(Shadow);
+            layers.loaded = composed({&layers.wire, &layers.face}, 1);
+        } else {
+            layers.loaded = render(Wire | Face);
+        }
         return layers;
     }
 
     // As the item shows them, leaned, at device resolution: a frame copies
     // them without transforming a pixel.
-    const QSize size(static_cast<int>(std::ceil(width() * scale)), static_cast<int>(std::ceil(height() * scale)));
+    const QSize device(static_cast<int>(std::ceil(size.width() * scale)), static_cast<int>(std::ceil(size.height() * scale)));
     auto render = [&](int passes) {
-        QImage image(size, QImage::Format_ARGB32_Premultiplied);
+        QImage image(device, QImage::Format_ARGB32_Premultiplied);
         image.fill(Qt::transparent);
         QPainter p(&image);
         p.setRenderHint(QPainter::Antialiasing);
         p.scale(scale, scale);
-        enterObjectFrame(&p, width(), height());
-        drawLayers(&p, QTransform::fromScale(scale, scale), scale, 1, key, 1, 1, 0, passes, true);
+        enterObjectFrame(&p, size.width(), size.height());
+        drawLayers(&p, QTransform::fromScale(scale, scale), scale, 1, key, look, 1, 1, 0, passes, true);
         p.end();
         return cropped(image, QPointF(0, 0), scale);
     };
-    QElapsedTimer took;
-    took.start();
     layers.shadow = render(Shadow);
     layers.wire = render(Wire);
     layers.face = render(Face);
-    layers.loaded = render(Shadow | Wire | Face);
-    // The laboratory times this (MUN_SHELL_TIMING): it runs on the GUI thread.
-    static const bool timing = qEnvironmentVariableIsSet("MUN_SHELL_TIMING");
-    if (timing)
-        qInfo("mun-shell: object %s layers painted in %lld ms", qPrintable(key), qlonglong(took.elapsed()));
+    // The graphics path composes the three it already has (its glow is the
+    // costly part); the software path paints it whole, as it always has.
+    layers.loaded = composite ? composed({&layers.shadow, &layers.wire, &layers.face}, scale)
+                              : render(Shadow | Wire | Face);
     return layers;
 }
 
@@ -711,7 +877,7 @@ HeroIcon::Layer HeroIcon::cropped(const QImage &image, const QPointF &reference,
         return {};
     QImage shown = image.copy(QRect(QPoint(left, top), QPoint(right, bottom)));
     shown.setDevicePixelRatio(ratio);
-    return {shown, QPointF(left, top) - reference};
+    return {shown, QPointF(left, top) - reference, shown.size(), shown.cacheKey()};
 }
 
 // The load's sweep: the part of the object's frame the wireframe has reached.
@@ -773,7 +939,7 @@ void HeroIcon::drawObject(QPainter *painter, const QString &key, qreal progress,
             painter->restore();
         };
         enterObjectFrame(painter, width(), height());
-        drawLayers(painter, item, scale, 1, key, progress, alpha, m_time, Shadow, true);
+        drawLayers(painter, item, scale, 1, key, look(), progress, alpha, m_time, Shadow, true);
         if (progress >= 1) {
             place(layers.loaded, alpha);
         } else {
@@ -800,17 +966,17 @@ void HeroIcon::drawObject(QPainter *painter, const QString &key, qreal progress,
 }
 
 void HeroIcon::drawLayers(QPainter *painter, const QTransform &item, qreal scale, qreal sigmaScale, const QString &key,
-                          qreal progress, qreal alpha, qreal time, int layers, bool offsetShadow) const
+                          const Look &look, qreal progress, qreal alpha, qreal time, int layers, bool offsetShadow)
 {
     // The card's Shape, for the card only.
     const bool card = key == QLatin1String("card");
     const auto dress = [&](Ink &ink) {
         if (!card)
             return;
-        ink.window = m_window.isNull() || m_reveal <= 0 ? nullptr : &m_window;
-        ink.reveal = m_reveal;
+        ink.window = look.window.isNull() || look.reveal <= 0 ? nullptr : &look.window;
+        ink.reveal = look.reveal;
         // The outline rounds into its Shape as the transition reaches it.
-        ink.organic = m_cardShape == QLatin1String("organic") && m_reveal > 0 ? m_morph * m_reveal : -1;
+        ink.organic = look.cardShape == QLatin1String("organic") && look.reveal > 0 ? look.morph * look.reveal : -1;
     };
     if (layers & Shadow) {
         painter->save();
@@ -820,7 +986,7 @@ void HeroIcon::drawLayers(QPainter *painter, const QTransform &item, qreal scale
         Ink ink(painter, item, scale, true, sigmaScale);
         ink.fill = rgba(6, 10, 17, 0.92);
         ink.strokeColour = rgba(6, 10, 17, 0.92);
-        ink.lit = m_lit;
+        ink.lit = look.lit;
         ink.time = time;
         dress(ink);
         ink.window = nullptr;   // a shadow shows no image
@@ -833,12 +999,12 @@ void HeroIcon::drawLayers(QPainter *painter, const QTransform &item, qreal scale
         Ink wire(painter, item, scale, false, sigmaScale);
         wire.strokeColour = rgba(226, 223, 217, 0.85);
         // MUN's light, turning into the card's as its Shape arrives.
-        const qreal share = card && m_cardGlow.isValid() ? m_reveal : 0;
-        wire.glow = rgba(int(std::lround(221 + (m_cardGlow.red() - 221) * share)),
-                         int(std::lround(233 + (m_cardGlow.green() - 233) * share)),
-                         int(std::lround(255 + (m_cardGlow.blue() - 255) * share)), 0.45);
+        const qreal share = card && look.cardGlow.isValid() ? look.reveal : 0;
+        wire.glow = rgba(int(std::lround(221 + (look.cardGlow.red() - 221) * share)),
+                         int(std::lround(233 + (look.cardGlow.green() - 233) * share)),
+                         int(std::lround(255 + (look.cardGlow.blue() - 255) * share)), 0.45);
         wire.glowSigma = 7;
-        wire.lit = m_lit;
+        wire.lit = look.lit;
         wire.time = time;
         dress(wire);
         drawShapes(key, wire);
@@ -854,10 +1020,281 @@ void HeroIcon::drawLayers(QPainter *painter, const QTransform &item, qreal scale
         light.setColorAt(1, rgba(128, 126, 122, 0.95));
         ink.fill = light;
         ink.strokeColour = rgba(236, 233, 227, 0.9);
-        ink.lit = m_lit;
+        ink.lit = look.lit;
         ink.time = time;
         dress(ink);
         drawShapes(key, ink);
         painter->restore();
+    }
+}
+
+// The graphics path's nodes: each object shown (the one fading out, then the
+// one in focus) as its layers' textures under opacities, the wireframe
+// through the load's sweep (a clip), then the copper line.
+namespace {
+
+// The object's frame in the item: enterObjectFrame()'s transform.
+QTransform objectFrame(qreal width, qreal height)
+{
+    return QTransform::fromScale(1.35, 1.35) * QTransform(0.95, -0.05, 0.04, 1, 0, 0)
+           * QTransform::fromTranslate(width / 2, height / 2);
+}
+
+// One layer: its texture under an opacity. The texture is made once per
+// picture (Layer::id) and the layer's image let go then.
+struct Part {
+    QSGOpacityNode *opacity = nullptr;
+    QSGImageNode *image = nullptr;
+    qint64 id = 0;
+
+    // False when the picture is needed again but its image was let go
+    // (the scene graph lost its textures): the layers must be painted again.
+    bool show(QQuickWindow *window, HeroIcon::Layer &layer, const QRectF &rect, qreal opacity)
+    {
+        this->opacity->setOpacity(layer.id ? opacity : 0);
+        if (!layer.id || opacity <= 0)
+            return true;
+        if (id != layer.id) {
+            if (layer.image.isNull())
+                return false;
+            if (!image) {
+                image = window->createImageNode();
+                image->setOwnsTexture(true);
+                image->setFiltering(QSGTexture::Linear);
+                this->opacity->appendChildNode(image);
+            }
+            image->setTexture(window->createTextureFromImage(layer.image));
+            id = layer.id;
+            layer.image = QImage();
+        }
+        image->setRect(rect);
+        image->setSourceRect(QRectF(QPointF(0, 0), image->texture()->textureSize()));
+        return true;
+    }
+};
+
+class ObjectNode : public QSGNode {
+public:
+    ObjectNode()
+    {
+        // The shadow; the wireframe within the sweep (the clip in the
+        // object's frame, the layer placed back from it); the face; the
+        // whole loaded object.
+        appendChildNode(m_shadowFrame);
+        m_shadowFrame->appendChildNode(m_shadow.opacity = new QSGOpacityNode);
+        appendChildNode(m_sweepFrame);
+        m_sweepFrame->appendChildNode(m_sweep);
+        m_sweep->appendChildNode(m_wireFrame);
+        m_wireFrame->appendChildNode(m_wire.opacity = new QSGOpacityNode);
+        appendChildNode(m_layerFrame);
+        m_layerFrame->appendChildNode(m_face.opacity = new QSGOpacityNode);
+        m_layerFrame->appendChildNode(m_loaded.opacity = new QSGOpacityNode);
+        m_sweep->setGeometry(&m_sweepShape);
+        m_sweep->setIsRectangular(false);
+        m_sweepShape.setDrawingMode(QSGGeometry::DrawTriangles);
+    }
+
+    // False when the layers must be painted again (Part::show).
+    bool show(QQuickWindow *window, const QSizeF &size, HeroIcon::Layers &layers, qreal progress, qreal alpha,
+              qreal turn)
+    {
+        const qreal scale = layers.scale;
+        const QTransform frame = objectFrame(size.width(), size.height());
+        // Where the layers' pixels go: the item, or (the gear) its own frame
+        // turned and leaned. The gear's shadow keeps its offset as it turns.
+        QTransform place, shadowPlace;
+        if (layers.turning) {
+            const qreal unit = 1 / (1.35 * scale);
+            const QTransform turned = QTransform::fromScale(unit, unit) * QTransform().rotate(turn);
+            place = turned * frame;
+            shadowPlace = turned * QTransform::fromTranslate(10, 9) * frame;
+        }
+        m_shadowFrame->setMatrix(QMatrix4x4(shadowPlace));
+        m_layerFrame->setMatrix(QMatrix4x4(place));
+        m_sweepFrame->setMatrix(QMatrix4x4(frame));
+        m_wireFrame->setMatrix(QMatrix4x4(place * frame.inverted()));
+        auto rect = [&](const HeroIcon::Layer &layer) {
+            return layers.turning ? QRectF(layer.origin, QSizeF(layer.size))
+                                  : QRectF(layer.origin / scale, QSizeF(layer.size) / scale);
+        };
+
+        const qreal sweep = std::min<qreal>(1, progress * 1.25);
+        const qreal face = smoothstep((progress - 0.5) / 0.5);
+        const bool loaded = progress >= 1;
+        setSweep(sweep);
+        // The gear's shadow is not in its `loaded`; a still object's is.
+        const qreal shadow = layers.turning || !loaded ? alpha * std::min<qreal>(1, progress * 1.6) : 0;
+        bool whole = m_shadow.show(window, layers.shadow, rect(layers.shadow), shadow);
+        whole = m_wire.show(window, layers.wire, rect(layers.wire), loaded ? 0 : alpha) && whole;
+        whole = m_face.show(window, layers.face, rect(layers.face), loaded ? 0 : alpha * face) && whole;
+        whole = m_loaded.show(window, layers.loaded, rect(layers.loaded), loaded ? alpha : 0) && whole;
+        return whole;
+    }
+
+private:
+    // reached(): the part of the object's frame, from the top clockwise,
+    // that the sweep has reached; all of it once it has gone round.
+    void setSweep(qreal sweep)
+    {
+        if (qFuzzyCompare(sweep, m_shownSweep))
+            return;
+        m_shownSweep = sweep;
+        const int segments = std::max(1, static_cast<int>(std::ceil(sweep * 64)));
+        m_sweepShape.allocate(3 * segments);
+        QSGGeometry::Point2D *v = m_sweepShape.vertexDataAsPoint2D();
+        for (int i = 0; i < segments; ++i) {
+            const qreal a0 = kPi * 2 * sweep * i / segments, a1 = kPi * 2 * sweep * (i + 1) / segments;
+            v[3 * i].set(0, 0);
+            v[3 * i + 1].set(float(400 * std::sin(a0)), float(-400 * std::cos(a0)));
+            v[3 * i + 2].set(float(400 * std::sin(a1)), float(-400 * std::cos(a1)));
+        }
+        m_sweep->markDirty(QSGNode::DirtyGeometry);
+    }
+
+    QSGTransformNode *m_shadowFrame = new QSGTransformNode;
+    QSGTransformNode *m_sweepFrame = new QSGTransformNode;
+    QSGClipNode *m_sweep = new QSGClipNode;
+    QSGTransformNode *m_wireFrame = new QSGTransformNode;
+    QSGTransformNode *m_layerFrame = new QSGTransformNode;
+    QSGGeometry m_sweepShape{QSGGeometry::defaultAttributes_Point2D(), 0};
+    qreal m_shownSweep = -1;
+    Part m_shadow, m_wire, m_face, m_loaded;
+};
+
+class HeroNode : public QSGNode {
+public:
+    HeroNode()
+    {
+        auto *line = new QSGGeometry(QSGGeometry::defaultAttributes_ColoredPoint2D(), 8, 18);
+        line->setDrawingMode(QSGGeometry::DrawTriangles);
+        quint16 *index = line->indexDataAsUShort();
+        // Three strips across the line, between its four columns.
+        for (int c = 0; c < 3; ++c) {
+            const quint16 a = quint16(c), b = quint16(c + 1), e = quint16(c + 4), f = quint16(c + 5);
+            for (const quint16 i : {a, b, e, e, b, f})
+                *index++ = i;
+        }
+        m_copper->setGeometry(line);
+        m_copper->setMaterial(new QSGVertexColorMaterial);
+        m_copper->setFlags(QSGNode::OwnsGeometry | QSGNode::OwnsMaterial);
+        m_copperFrame->appendChildNode(m_copperOpacity);
+        m_copperOpacity->appendChildNode(m_copper);
+        appendChildNode(m_copperFrame);
+    }
+
+    // The objects in `order` (back to front), each shown by `show`; the
+    // others removed.
+    template<typename Show>
+    void objects(const QStringList &order, Show show)
+    {
+        for (auto it = m_objects.begin(); it != m_objects.end();) {
+            if (order.contains(it.key())) {
+                ++it;
+                continue;
+            }
+            removeChildNode(it.value());
+            delete it.value();
+            it = m_objects.erase(it);
+        }
+        if (order != m_order) {
+            // Back to front, the copper line over them.
+            for (ObjectNode *node : std::as_const(m_objects))
+                removeChildNode(node);
+            removeChildNode(m_copperFrame);
+            for (const QString &key : order) {
+                ObjectNode *&node = m_objects[key];
+                if (!node)
+                    node = new ObjectNode;
+                appendChildNode(node);
+            }
+            appendChildNode(m_copperFrame);
+            m_order = order;
+        }
+        for (const QString &key : order)
+            show(key, m_objects.value(key));
+    }
+
+    // The sweep's copper line in the object's frame, 2 units wide (its edges
+    // soft over a device pixel), from the centre at `angle`; `alpha` 0
+    // hides it.
+    void copper(const QTransform &frame, qreal angle, qreal alpha, qreal pixel)
+    {
+        m_copperOpacity->setOpacity(alpha > 0 ? 1 : 0);
+        if (alpha <= 0)
+            return;
+        m_copperFrame->setMatrix(QMatrix4x4(frame));
+        const QPointF dir(std::cos(angle), std::sin(angle));
+        const QPointF across(-dir.y(), dir.x());
+        const qreal edge = pixel / 2;
+        const std::array<qreal, 4> offsets{-1 - edge, -1 + edge, 1 - edge, 1 + edge};
+        const std::array<qreal, 4> shares{0, 1, 1, 0};
+        QSGGeometry::ColoredPoint2D *v = m_copper->geometry()->vertexDataAsColoredPoint2D();
+        for (int end = 0; end < 2; ++end) {
+            const QPointF at = dir * (end ? 200.0 : 0.0);
+            for (int c = 0; c < 4; ++c) {
+                const QPointF p = at + across * offsets[c];
+                const qreal a = alpha * shares[c];
+                v[end * 4 + c].set(float(p.x()), float(p.y()), uchar(std::lround(227 * a)), uchar(std::lround(154 * a)),
+                                   uchar(std::lround(99 * a)), uchar(std::lround(255 * a)));
+            }
+        }
+        m_copper->markDirty(QSGNode::DirtyGeometry);
+    }
+
+private:
+    QHash<QString, ObjectNode *> m_objects;
+    QStringList m_order;
+    QSGTransformNode *m_copperFrame = new QSGTransformNode;
+    QSGOpacityNode *m_copperOpacity = new QSGOpacityNode;
+    QSGGeometryNode *m_copper = new QSGGeometryNode;
+};
+
+} // namespace
+
+QSGNode *HeroIcon::updatePaintNode(QSGNode *old, UpdatePaintNodeData *data)
+{
+    if (!window() || !QSGRendererInterface::isApiRhiBased(window()->rendererInterface()->graphicsApi()))
+        return QQuickPaintedItem::updatePaintNode(old, data);
+    auto *node = static_cast<HeroNode *>(old);
+    if (!node)
+        node = new HeroNode;
+    // Render thread, the GUI thread blocked: the item's state is read here,
+    // and a layer's image let go once its texture has it.
+    QStringList order;
+    if (!m_previous.isEmpty() && m_progress < 0.5 && ready(m_previous))
+        order << m_previous;
+    if (ready(m_icon))
+        order << m_icon;
+    const qreal turn = qRadiansToDegrees(m_time * 0.25);
+    bool whole = true;
+    node->objects(order, [&](const QString &key, ObjectNode *object) {
+        Layers &layers = m_layers[key];
+        const bool current = key == m_icon;
+        whole = object->show(window(), size(), layers, current ? m_progress : 1, current ? 1 : 1 - m_progress * 2,
+                             turn) && whole;
+        if (!whole)
+            layers.scale = 0;
+    });
+    // The sweep's copper line, fading as it completes.
+    const bool sweeping = ready(m_icon) && m_progress < 0.8;
+    const qreal sweep = std::min<qreal>(1, m_progress * 1.25);
+    node->copper(objectFrame(width(), height()), -kPi / 2 + 2 * kPi * sweep,
+                 sweeping ? 0.8 * (1 - m_progress / 0.8) : 0, 1 / (1.35 * window()->effectiveDevicePixelRatio()));
+    // Layers missing (the first object, a new scale) or lost: asked for on
+    // the GUI thread.
+    const qreal scale = window()->effectiveDevicePixelRatio();
+    if (!whole || stale(m_icon, scale) || (!m_previous.isEmpty() && m_progress < 0.5 && stale(m_previous, scale)))
+        QMetaObject::invokeMethod(this, &HeroIcon::request, Qt::QueuedConnection);
+    return node;
+}
+
+// The scene graph let go of the nodes, and the textures with them: the
+// layers whose images were let go are painted again when next shown.
+void HeroIcon::releaseResources()
+{
+    QQuickPaintedItem::releaseResources();
+    for (Layers &layers : m_layers) {
+        if (layers.loaded.id && layers.loaded.image.isNull())
+            layers.scale = 0;
     }
 }

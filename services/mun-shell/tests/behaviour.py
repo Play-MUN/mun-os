@@ -1394,6 +1394,22 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
                   (entering, dressed))
     whole_when_dressed("home-dialog-closed", out)
 
+    # Idle: once dimmed, the first key only brings the interface back (and
+    # held down, its repeats do nothing); the next key acts.
+    cardd, launchd = serve("home-idle-dim", [[(0, snapshot())]])
+    down = 0x01000015  # Qt::Key_Down
+    out, phases, _ = run("home-idle-dim", cardd, launchd, [
+        {"at": 1500, "probe": "awake"}, {"at": 1600, "set": {"dimmed": True}}, {"at": 1700, "probe": "dimmed"},
+        {"at": 1800, "call": "key", "args": [down, False]}, {"at": 1900, "probe": "woken"},
+        {"at": 2000, "call": "key", "args": [down, True]}, {"at": 2100, "probe": "held"},
+        {"at": 2200, "call": "key", "args": [down, False]}, {"at": 2300, "probe": "moved"}], end=3000)
+    at = {p["label"]: p for p in phases if p["label"] in ("awake", "dimmed", "woken", "held", "moved")}
+    checks.expect("home-idle-dim", "dimmed, the first key only undims: the focus stays",
+                  len(at) == 5 and at["dimmed"]["dimmed"] and not at["woken"]["dimmed"]
+                  and at["woken"]["mainIndex"] == at["awake"]["mainIndex"], at)
+    checks.expect("home-idle-dim", "that key held down does nothing; the next press moves the focus",
+                  len(at) == 5 and at["held"]["mainIndex"] == at["awake"]["mainIndex"]
+                  and at["moved"]["mainIndex"] != at["awake"]["mainIndex"], at)
 
 def boot_cases(shell: Shell, checks: Checks):
     """The start-up as the first start of a boot plays it (boot.qml)."""

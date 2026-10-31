@@ -55,6 +55,11 @@ QtObject {
     readonly property var ease: [0.25, 0.1, 0.25, 1, 1, 1]          // CSS ease, the default
     readonly property var settle: [0.2, 0.8, 0.2, 1, 1, 1]          // cubic-bezier(.2,.8,.2,1)
     readonly property var draw: [0.65, 0, 0.3, 1, 1, 1]             // the start-up arc
+    // Idle (Main.qml): how far the interface dims after ten minutes without
+    // input, and how fast it goes there and comes back.
+    readonly property real idleDim: 0.3
+    readonly property int idleDimIn: 2000
+    readonly property int idleDimOut: 250
 
     function rgba(r, g, b, a) { return Qt.rgba(r / 255, g / 255, b / 255, a) }
 

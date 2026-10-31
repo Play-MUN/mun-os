@@ -559,11 +559,19 @@ Window {
 
     // ------------------------------------------------------------ time
 
-    // Rest: three minutes after the last input the scene slows to a stop
-    // (the network's drift, the object's float, the gear), so a console left
-    // alone draws nothing; any key brings the motion back.
-    property bool resting: false
-    Timer { id: restTimer; interval: 3 * 60 * 1000; running: true; onTriggered: window.resting = true }
+    // Idle: the scene keeps moving (Reduce motion holds it still). Ten
+    // minutes after the last input the interface dims a little; the next
+    // input only brings it back and does nothing else, and the key that did
+    // it does nothing while it is held. QML timers count on the monotonic
+    // clock: setting the date or time does not move them.
+    property bool dimmed: false
+    property int wakeKey: -1   // the key that brought the interface back, while held
+    Timer {
+        id: dimTimer
+        interval: 10 * 60 * 1000
+        running: window.powered && !window.starting
+        onTriggered: window.dimmed = true
+    }
     // The automatic power off counts time without input on these menus;
     // while a game runs the shell is stopped, so it never counts.
     Timer {
@@ -576,7 +584,13 @@ Window {
     // false for a key the console does not use.
     function key(code, repeated) {
         FrameWatch.keyPressed()
-        wake()
+        if (repeated && code === wakeKey)
+            return true
+        wakeKey = -1
+        if (wake() && !boot.playing) {
+            wakeKey = code
+            return true
+        }
         // The start-up: A (or Enter, or Space) skips it once the system is
         // ready and its hint shows; until then, and for any other key,
         // nothing.
@@ -598,11 +612,16 @@ Window {
         }
         return true
     }
+    // Input, or the card changing: the interface undims and the idle and
+    // power-off times start again. True when it was dimmed: the input that
+    // woke it is spent.
     function wake() {
-        resting = false
-        restTimer.restart()
+        const was = dimmed
+        dimmed = false
+        dimTimer.restart()
         if (autoOff.running)
             autoOff.restart()
+        return was
     }
     Timer {
         interval: 10000
@@ -635,7 +654,10 @@ Window {
             acceptedButtons: Qt.NoButton
             property real travel: 0
             onWheel: (wheel) => {
-                window.wake()
+                if (window.wake()) {
+                    travel = 0
+                    return
+                }
                 travel += wheel.angleDelta.y
                 if (Math.abs(travel) >= 120 && window.interactive && !window.starting) {
                     window.move(travel > 0 ? -1 : 1)
@@ -657,7 +679,7 @@ Window {
             // read one at once.
             glowColor: Shape.phase === "ready" ? "transparent" : Shape.ambient
             tint: Shape.phase === "ready" ? "transparent" : Shape.tint
-            running: !window.resting && window.powered && !ShellSettings.reduceMotion && !world.covering
+            running: window.powered && !ShellSettings.reduceMotion && !world.covering
         }
         // The game's world (src/shapeworld.h), inside the transition's front,
         // under MUN's scrim while Settings or a dialog is shown.
@@ -676,7 +698,7 @@ Window {
             // The layers lean with the chosen entry, by their depth.
             parallax: window.inSettings ? 0 : (window.mainIndex - 1.5) * -18
             Behavior on parallax { NumberAnimation { duration: 1200; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.settle } }
-            running: !window.resting && window.powered
+            running: window.powered
             still: ShellSettings.reduceMotion
             frontLight: Shape.glow.valid ? Shape.glow : Shape.ambient.valid ? Shape.ambient : Theme.led
             frontAccent: Shape.focus
@@ -689,7 +711,7 @@ Window {
             y: Theme.orb.y - height / 2 + bob
             icon: window.focusedEntry.key
             lit: window.cardReady ? 1 : 0.16
-            running: !window.resting && window.powered && !ShellSettings.reduceMotion
+            running: window.powered && !ShellSettings.reduceMotion
             cardWindow: Shape.window
             cardShape: Shape.cardShape
             morph: Shape.morph
@@ -736,7 +758,7 @@ Window {
                     dressed: true
                     hidden: window.inSettings
                     dimmed: window.level === 2 && window.previousLevel === 0
-                    onActivated: (index) => { window.wake(); window.clickEntry(0, index) }
+                    onActivated: (index) => { if (!window.wake()) window.clickEntry(0, index) }
                 }
                 ArcMenu {
                     anchors.fill: parent
@@ -747,7 +769,7 @@ Window {
                     compact: true
                     hidden: !window.inSettings
                     dimmed: window.level === 2 && window.previousLevel === 1
-                    onActivated: (index) => { window.wake(); window.clickEntry(1, index) }
+                    onActivated: (index) => { if (!window.wake()) window.clickEntry(1, index) }
                 }
             }
 
@@ -758,7 +780,7 @@ Window {
                 overWorld: world.drawn && !window.inSettings
                 selected: window.level === 2 ? window.optionIndex : -1
                 note: window.note
-                onOptionClicked: (index) => { window.wake(); window.clickOption(index) }
+                onOptionClicked: (index) => { if (!window.wake()) window.clickOption(index) }
             }
 
             MarkText {
@@ -860,7 +882,8 @@ Window {
             content: window.modal
             selected: window.modalIndex
             onChosen: (index) => {
-                window.wake()
+                if (window.wake())
+                    return
                 if (window.modal && window.modal.actions[index]) {
                     window.modalIndex = index
                     window.modal.actions[index].run()
@@ -875,6 +898,30 @@ Window {
                 window.powered = true
                 window.afterStart()
             }
+        }
+
+        // Idle (wake()): a veil over everything, in slowly, out quickly.
+        Rectangle {
+            id: idleVeil
+            anchors.fill: parent
+            color: "black"
+            opacity: 0
+            visible: opacity > 0
+            states: State {
+                name: "dimmed"
+                when: window.dimmed
+                PropertyChanges { target: idleVeil; opacity: Theme.idleDim }
+            }
+            transitions: [
+                Transition {
+                    to: "dimmed"
+                    NumberAnimation { property: "opacity"; duration: Theme.idleDimIn; easing.type: Easing.InOutQuad }
+                },
+                Transition {
+                    from: "dimmed"
+                    NumberAnimation { property: "opacity"; duration: Theme.idleDimOut; easing.type: Easing.OutQuad }
+                }
+            ]
         }
 
         // The shell restarts in a new resolution: the scene fades out first.

@@ -125,11 +125,13 @@ filling in over the second half while the previous object fades; a wave
 leaves the object through the rings and spokes; the panel's content
 changes and it slides to stay centred. Entering Settings, the main arc
 fades and moves away and the Settings arc comes in its place; while a
-panel's options have the focus, its arc dims. Three minutes after the last
-input the network, the float and the gear slow to a stop in 1.5 s and the
-scene holds still until the next key, which brings the motion back the same
-way, so a console left alone draws nothing. The menus' sounds are described
-under *Sounds*.
+panel's options have the focus, its arc dims. Left alone, the scene keeps
+moving (*Reduce motion* holds it still); ten minutes after the last input the
+interface dims a little, in 2 s, and the next key, wheel turn or click only
+brings it back, in 0.25 s: it does nothing else, and that key does nothing
+while it is held. The times count on the monotonic clock, so setting the
+date or time does not move them. The menus' sounds are described under
+*Sounds*.
 
 ### How it is drawn
 

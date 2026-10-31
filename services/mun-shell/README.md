@@ -239,9 +239,10 @@ Measured on an ARM64 development board (OpenGL ES 3.2 on Mesa's freedreno,
 1920×1080 at 60 Hz, the threaded render loop; percent of one core used by
 the shell, sampled while a virtual keyboard played the same keys): Home at
 rest with the network drifting, 60 frames/s for about 18 %; moving through
-Home's menu, 60 frames/s with no frame over 34 ms, for about 62 %; moving
-through Settings' sections about 58 frames/s; the gear turning, 60
-frames/s for about 18 %. Before this path, the shell managed 10 to 13
+Home's menu, about 60 frames/s, 99 % of frames within 25 ms and none over
+40 ms in four runs, for about 60 %; moving through Settings' sections
+about 58 frames/s, entering Settings still taking up to 90 ms once; the
+gear turning, 60 frames/s for about 18 %. Before this path, the shell managed 10 to 13
 frames/s on the same board and display.
 
 `tests/behaviour.py` ("paths") draws the same still screen both ways in the

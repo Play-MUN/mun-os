@@ -562,10 +562,11 @@ Window {
     // Idle: the scene keeps moving (Reduce motion holds it still). Ten
     // minutes after the last input the interface dims a little; the next
     // input only brings it back and does nothing else, and the key that did
-    // it does nothing while it is held. QML timers count on the monotonic
-    // clock: setting the date or time does not move them.
+    // it does nothing until it is let go, whatever other keys are pressed
+    // meanwhile. QML timers count on the monotonic clock: setting the date or
+    // time does not move them.
     property bool dimmed: false
-    property int wakeKey: -1   // the key that brought the interface back, while held
+    property int wakeKey: -1   // the key that brought the interface back, until it is let go
     Timer {
         id: dimTimer
         interval: 10 * 60 * 1000
@@ -584,9 +585,8 @@ Window {
     // false for a key the console does not use.
     function key(code, repeated) {
         FrameWatch.keyPressed()
-        if (repeated && code === wakeKey)
+        if (code === wakeKey)
             return true
-        wakeKey = -1
         if (wake() && !boot.playing) {
             wakeKey = code
             return true
@@ -611,6 +611,12 @@ Window {
         default: return false
         }
         return true
+    }
+    // A key let go (not a repeat's release): the key that woke the
+    // interface acts again from its next press.
+    function keyReleased(code) {
+        if (code === wakeKey)
+            wakeKey = -1
     }
     // Input, or the card changing: the interface undims and the idle and
     // power-off times start again. True when it was dimmed: the input that
@@ -667,6 +673,10 @@ Window {
         }
 
         Keys.onPressed: (event) => { event.accepted = window.key(event.key, event.isAutoRepeat) }
+        Keys.onReleased: (event) => {
+            if (!event.isAutoRepeat)
+                window.keyReleased(event.key)
+        }
 
         Backdrop {
             id: backdrop

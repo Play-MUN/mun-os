@@ -469,7 +469,7 @@ void HeroIcon::setIcon(const QString &icon)
     // Keep the layers of the two objects on screen only.
     for (auto it = m_layers.begin(); it != m_layers.end();)
         it = it.key() == m_icon || it.key() == m_previous ? std::next(it) : m_layers.erase(it);
-    m_clock.invalidate();
+    m_last = -1;
     updateDemand();
     update();
     emit iconChanged();
@@ -574,9 +574,9 @@ void HeroIcon::onTick(quint64 frame)
     const int current = rate();
     if (current == 0 || !SceneClock::due(frame, current))
         return;
-    const qreal dt = m_clock.isValid() ? std::min<qreal>(0.1, m_clock.restart() / 1000.0) : 1.0 / current;
-    if (!m_clock.isValid())
-        m_clock.start();
+    const qreal now = SceneClock::instance()->seconds();
+    const qreal dt = m_last >= 0 ? std::min<qreal>(0.1, now - m_last) : 1.0 / current;
+    m_last = now;
 
     bool repaint = false;
     if (loading()) {
@@ -604,7 +604,7 @@ void HeroIcon::onTick(quint64 frame)
         updateDemand();
     // A stopped clock restarts from one frame's worth, not the pause.
     if (rate() == 0)
-        m_clock.invalidate();
+        m_last = -1;
 }
 
 void HeroIcon::paint(QPainter *painter)

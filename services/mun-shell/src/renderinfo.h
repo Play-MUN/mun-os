@@ -15,7 +15,9 @@
 //   software (Mesa's llvmpipe or softpipe). Known only once the scene graph
 //   has started, from its own context on its render thread. It chooses how
 //   much motion is worth drawing (`accelerated`); until it is known it is
-//   false, the software renderer's economy.
+//   false, the software renderer's economy. When it is known, SceneClock
+//   (src/sceneclock.h) is told: an accelerated renderer moves the animation
+//   layers on every frame the window renders.
 //
 // The decision and its reason, the renderer's name and the render loop
 // (basic, on the GUI thread, or threaded) go to the journal once:

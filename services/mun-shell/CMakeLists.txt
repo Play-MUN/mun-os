@@ -12,6 +12,9 @@ set(CMAKE_AUTOMOC ON)
 set(MUN_BUILD_ID "dev" CACHE STRING "Opaque build identifier shown in the system info screen")
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Network Qml Quick)
+# Shaders for the graphics path are compiled at build time (qsb) and built
+# into the binary; nothing of Shader Tools is needed at run time.
+find_package(Qt6 6.5 REQUIRED COMPONENTS ShaderTools)
 # The interface sounds go straight to ALSA (src/systemsounds.h), the library
 # the games' profile already brings into the image.
 find_package(PkgConfig REQUIRED)
@@ -53,6 +56,8 @@ qt_add_executable(mun-shell
     src/sceneclock.h
     src/backdrop.cpp
     src/backdrop.h
+    src/networknode.cpp
+    src/networknode.h
     src/heroicon.cpp
     src/heroicon.h
     src/projectedview.cpp
@@ -124,6 +129,15 @@ qt_add_qml_module(mun-shell
         sounds/startup.wav
         images/boot-silhouette.png
         images/boot-engraving.png
+)
+
+# The graphics path's own drawing (src/networknode.h): Vulkan-style GLSL,
+# compiled for every API Qt Quick may use.
+qt_add_shaders(mun-shell "mun-shell-shaders"
+    PREFIX "/"
+    FILES
+        shaders/network.vert
+        shaders/network.frag
 )
 
 target_link_libraries(mun-shell PRIVATE Qt6::Core Qt6::Gui Qt6::Network Qt6::Qml Qt6::Quick PkgConfig::ALSA PkgConfig::DRM Threads::Threads)

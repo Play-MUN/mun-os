@@ -35,9 +35,10 @@ draws the parts that depend on it accordingly (*How it is drawn*).
 | `src/memory.*` | Once the start-up is over, most of the memory the shell frees goes back to the system (glibc's thresholds fixed, then a trim) |
 | `src/launchclient.*` | Client of `mun-launchd`: `launch(slot, serial, version)`, `release(serial)`, `acknowledge()`, launcher state and the last session result (read from `/run/mun/launch/last-result.json` at start, then over the socket) |
 | `src/backdrop.*`, `src/heroicon.*` | Home's painted layers: the network of light behind everything, and the large object of the entry in focus |
+| `src/networknode.*`, `shaders/network.*` | The network on a graphics API: one geometry, built once, that the GPU places on every frame |
 | `src/cssbox.*`, `src/blur.*` | Surfaces with CSS semantics (radii, gradients at any angle, outer and inset box shadows) and the blur they and the glows use |
 | `src/projectedview.*`, `qml/ProjectedLayer.qml` | Shows an item through a perspective transform: projected once per change into a copy (software renderer), or rendered into a layer that the GPU projects (graphics API) |
-| `src/sceneclock.*` | One frame clock for the painted layers |
+| `src/sceneclock.*` | One clock for the painted layers: a timer, or the frames the window renders |
 | `src/bootintro.*`, `src/bootintroshapes.h`, `images/boot-*.png` | The start-up's picture, part by part, as a function of the sound's time; its shapes (the MUN letters, the moon's arc, the LED) and its two images of the console's lid |
 | `qml/Main.qml` | The scene, the navigation, the actions and the key handling |
 | `qml/Panels.qml` | What each entry's panel and each dialog says, from the real state |
@@ -196,10 +197,30 @@ and the render loop. On a graphics API:
   presented on the render thread: `FrameWatch` reads a frame's time there
   and hands only that time to the GUI thread, where everything it keeps
   lives.
+- The network is one geometry, built once (`NetworkNode`): every line of
+  the rings, the spokes, the stretches a wave lights, the orbits and the
+  floor, as vertices with the light `hairline` gives a line. Its vertex
+  shader (`shaders/network.vert`) places them on every frame from a few
+  numbers (how far the rings have drifted and the spokes turned, the waves
+  in flight, the dashes' offsets, the floor's slide); the CPU computes those
+  numbers, nothing else. The gradients under it are a texture, painted and
+  uploaded once per change of the light, the image then let go. The
+  shaders are compiled when the shell is built (Qt Shader Tools' `qsb`,
+  `qt6-shadertools-dev`), not at run time. Up to eight waves at once: a
+  ninth takes the place of the oldest.
+- On an accelerated renderer, and only there, `SceneClock` ticks on the
+  frames the window renders (Qt Quick's animation driver, which the threaded
+  render loop paces by the display) instead of its timer, and the network
+  drifts and its waves run on every frame: what moves costs the GPU, not a
+  repaint. The journal says which ("mun-shell: motion: …"). With the
+  software renderer, or OpenGL in software, the rates above stay. Rest and
+  *Reduce motion* stop the motion as before, and a still screen draws
+  nothing.
 
 The same screen drawn by both renderers (the software renderer and OpenGL on
 llvmpipe, in the same binary) differs by about one level in 255 on average,
-the moving network and the clock aside.
+the moving network and the clock aside; Home's network held still differs
+by 0.03 levels on average, the orbits' dashes falling on the same pixels.
 
 The objects are drawn, not images, so they stay sharp at any resolution.
 The logo's letters and arc are vector paths (`qml/Logo.js`).

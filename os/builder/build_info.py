@@ -24,7 +24,8 @@ KERNEL_PACKAGE = re.compile(r"linux-image-\d.*")
 MESA_PACKAGES = ("libgl1-mesa-dri", "libegl-mesa0", "libglx-mesa0", "libgbm1", "mesa-libgallium")
 FIRMWARE_PREFIXES = ("firmware-", "linux-firmware", "raspi-firmware")
 TOOLCHAIN_PACKAGES = ("gcc", "g++", "cpp", "binutils", "libc6-dev", "make", "cmake", "ninja-build", "pkgconf",
-                      "qt6-base-dev", "qt6-declarative-dev", "libsdl2-dev", "libopenal-dev")
+                      "qt6-base-dev", "qt6-declarative-dev", "qt6-shadertools-dev", "libsdl2-dev",
+                      "libopenal-dev")
 BUILDER_TOOLS = ("mkosi", "systemd", "systemd-repart", "systemd-ukify", "systemd-boot-efi", "apt", "dpkg",
                  "qemu-utils", "xz-utils", "reprepro", "python3", "e2fsprogs", "dosfstools", "mtools", "git")
 # What the recorded raw disk is to the image, for each image format a profile

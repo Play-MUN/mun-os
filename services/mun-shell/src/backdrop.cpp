@@ -1,12 +1,14 @@
 #include "backdrop.h"
 
 #include "hairline.h"
+#include "networknode.h"
 
 #include <QPainter>
 #include <QPainterPath>
 #include <QQuickWindow>
 #include <QRadialGradient>
 #include <QSGImageNode>
+#include <QSGRendererInterface>
 #include <QSGTexture>
 
 #include <algorithm>
@@ -130,6 +132,7 @@ Backdrop::Backdrop(QQuickItem *parent) : QQuickItem(parent)
 {
     setFlag(ItemHasContents);
     connect(SceneClock::instance(), &SceneClock::tick, this, &Backdrop::onTick);
+    connect(SceneClock::instance(), &SceneClock::syncedChanged, this, &Backdrop::updateDemand);
     updateDemand();
 }
 
@@ -144,6 +147,7 @@ void Backdrop::setOrb(const QPointF &orb)
         return;
     m_orb = orb;
     m_base = {};
+    m_baseSize = {};
     repaint();
     emit orbChanged();
 }
@@ -222,9 +226,14 @@ void Backdrop::ripple()
 
 int Backdrop::rate() const
 {
+    // On a synced clock (an accelerated renderer, which draws the network as
+    // geometry) a frame costs the GPU, not a repaint: every frame.
+    const bool everyFrame = SceneClock::instance()->synced();
     if (!m_ripples.isEmpty())
-        return kWaveRate;
-    return m_driftRate > 0 && !m_pace.still() ? m_driftRate : 0;
+        return everyFrame ? SceneClock::kBaseRate : kWaveRate;
+    if (m_driftRate > 0 && !m_pace.still())
+        return everyFrame ? SceneClock::kBaseRate : m_driftRate;
+    return 0;
 }
 
 void Backdrop::updateDemand()
@@ -238,9 +247,9 @@ void Backdrop::onTick(quint64 frame)
     if (current == 0 || !SceneClock::due(frame, current))
         return;
     // The first frame after a pause moves one frame's worth, not the pause.
-    const qreal dt = m_clock.isValid() ? std::min<qreal>(0.1, m_clock.restart() / 1000.0) : 1.0 / current;
-    if (!m_clock.isValid())
-        m_clock.start();
+    const qreal now = SceneClock::instance()->seconds();
+    const qreal dt = m_last >= 0 ? std::min<qreal>(0.1, now - m_last) : 1.0 / current;
+    m_last = now;
     // The drift's own time, eased to a stop at rest: with driftRate 0 the
     // rings and spokes stay where they are, and a wave only brightens and
     // ripples them as it passes.
@@ -253,7 +262,7 @@ void Backdrop::onTick(quint64 frame)
         updateDemand();
     // A stopped clock restarts from one frame's worth, not the pause.
     if (rate() == 0)
-        m_clock.invalidate();
+        m_last = -1;
     repaint();
 }
 
@@ -268,6 +277,7 @@ void Backdrop::geometryChange(const QRectF &newGeometry, const QRectF &oldGeomet
     QQuickItem::geometryChange(newGeometry, oldGeometry);
     if (newGeometry.size() != oldGeometry.size()) {
         m_base = {};
+        m_baseSize = {};
         repaint();
     }
 }
@@ -288,6 +298,7 @@ void Backdrop::paintBase(const QSize &deviceSize, qreal scale)
     const Rgba g = glow();
     m_base = QImage(deviceSize, QImage::Format_RGB32);
     m_base.setDevicePixelRatio(scale);
+    m_baseSize = deviceSize;
     m_baseGlow = g;
     m_baseTint = m_tint;
     const bool tinted = m_tint.isValid() && m_tint.alpha() > 0;
@@ -348,7 +359,27 @@ QSGNode *Backdrop::updatePaintNode(QSGNode *old, UpdatePaintNodeData *)
     }
     const qreal scale = window()->effectiveDevicePixelRatio();
     const QSize deviceSize(std::lround(w * scale), std::lround(h * scale));
-    if (m_stale || !node->texture() || node->texture()->textureSize() != deviceSize) {
+    if (QSGRendererInterface::isApiRhiBased(window()->rendererInterface()->graphicsApi())) {
+        // A graphics API: the gradients are a texture, made again only when
+        // they change (the image let go once the texture has it), and the
+        // network is geometry over it that the GPU places (networknode.h).
+        if (m_baseSize != deviceSize || glowDiffers(glow(), m_baseGlow) || m_baseTint != m_tint || !node->texture()) {
+            paintBase(deviceSize, scale);
+            node->setTexture(window()->createTextureFromImage(m_base));
+            m_base = QImage();
+        }
+        auto *network = static_cast<NetworkNode *>(node->firstChild());
+        if (!network) {
+            network = new NetworkNode;
+            node->appendChildNode(network);
+            m_stale = true;
+        }
+        network->setShape(m_orb, QSizeF(w, h), 1 / scale);
+        if (m_stale) {
+            network->setFrame(networkFrame());
+            m_stale = false;
+        }
+    } else if (m_stale || !node->texture() || node->texture()->textureSize() != deviceSize) {
         if (m_base.size() != deviceSize || glowDiffers(glow(), m_baseGlow) || m_baseTint != m_tint)
             paintBase(deviceSize, scale);
         // The image the scene graph showed before last is free again: its
@@ -454,4 +485,25 @@ void Backdrop::paintFrame(QImage &frame, qreal scale) const
         const qreal y = horizon + (h - horizon) * u * u;
         painter.fillRect(QRectF(0, y - 0.5, w, 1), rgba(218, 215, 209, 0.08 * u));
     }
+}
+
+NetworkNode::Frame Backdrop::networkFrame() const
+{
+    // paintFrame()'s motion, each reduced to its period here in double
+    // precision: the shader's floats would lose it as the time grows.
+    const qreal t = m_time;
+    NetworkNode::Frame frame;
+    frame.drift = std::fmod(t * 14, 150);
+    frame.turn = std::fmod(t * 0.012, kTau);
+    frame.wobble = std::fmod(t * 2, kTau);
+    frame.floor = std::fmod(t * 0.18, 1);
+    for (int k = 0; k < 2; ++k)
+        frame.dash[k] = std::fmod(std::fmod(-t * (8 + k * 5), 12) + 12, 12);
+    // The newest waves, the last in the list.
+    const qsizetype first = std::max<qsizetype>(0, m_ripples.size() - NetworkNode::kWaves);
+    for (qsizetype i = first; i < m_ripples.size(); ++i) {
+        const qreal u = m_ripples[i];
+        frame.waves[i - first] = QPointF(200 + u * 1500, 1 - u);
+    }
+    return frame;
 }

@@ -138,7 +138,7 @@ private:
     Pace m_pace;              // of the gear and the float
     int m_bob = 0;
     qreal m_time = 0;         // seconds of motion shown, for the gear and the float
-    QElapsedTimer m_clock;
+    qreal m_last = -1;        // SceneClock's seconds at the last frame; -1 after a pause
     QHash<QString, Layers> m_layers;   // of the object in focus and the one fading out
     void cardRestyled();
     QImage m_window;          // the card's screen, from its Shape

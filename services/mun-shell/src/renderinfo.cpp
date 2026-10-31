@@ -1,5 +1,7 @@
 #include "renderinfo.h"
 
+#include "sceneclock.h"
+
 #include <QCoreApplication>
 #include <QJSEngine>
 #include <QOpenGLContext>
@@ -140,5 +142,8 @@ void RenderInfo::setDetected(const QString &api, const QString &vendor, const QS
         : QStringLiteral(" on %1 (%2, %3)").arg(renderer, vendor, version);
     qInfo("mun-shell: renderer: %s%s, %s render loop: %s, %s", qPrintable(api), qPrintable(name),
           threaded ? "threaded" : "basic", m_accelerated ? "accelerated" : "not accelerated", qPrintable(why));
+    // Motion on every frame only where drawing it costs little: an
+    // accelerated renderer, which also draws the layers on the graphics path.
+    SceneClock::instance()->setSynced(m_accelerated);
     emit detected();
 }

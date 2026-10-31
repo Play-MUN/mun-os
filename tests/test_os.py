@@ -80,7 +80,7 @@ class CompositionTests(unittest.TestCase):
     def test_compilers_stay_out_of_the_image(self):
         for profile in PROFILES:
             image = set(mkosi_list(MKOSI / "mkosi.conf", "Packages")) | set(mkosi_list(profile, "Packages"))
-            for tool in ("gcc", "g++", "cmake", "make", "qt6-base-dev", "libsdl2-dev"):
+            for tool in ("gcc", "g++", "cmake", "make", "qt6-base-dev", "qt6-shadertools-dev", "libsdl2-dev"):
                 self.assertNotIn(tool, image, profile.parent.name)
 
     def test_the_qemu_profile_says_it_is_a_development_build(self):

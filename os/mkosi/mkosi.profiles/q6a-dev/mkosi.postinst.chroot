@@ -18,3 +18,9 @@ for kernel in /boot/vmlinuz-* /usr/lib/modules/*/vmlinuz; do
     echo "q6a-dev: $kernel stored uncompressed ($(wc -c <"$kernel") bytes)"
 done
 [ "$found" = 1 ] || { echo "q6a-dev: no kernel found" >&2; exit 1; }
+
+# The laboratory's SSH: no host keys in the image, or every system written
+# from it would share them. ssh.service makes them on the installed system's
+# first start (ssh.service.d/50-mun-lab.conf).
+rm -f /etc/ssh/ssh_host_*_key /etc/ssh/ssh_host_*_key.pub
+echo "q6a-dev: SSH host keys removed; each installed system makes its own"

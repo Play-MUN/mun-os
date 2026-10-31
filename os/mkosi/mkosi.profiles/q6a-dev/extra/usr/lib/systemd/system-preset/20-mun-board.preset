@@ -1,3 +1,6 @@
-# Development image for a board (profile q6a-dev): the diagnostic dumps.
+# Development image for a board (profile q6a-dev): the diagnostic dumps, and
+# the laboratory's wired network and SSH.
 enable mun-board-diag.service
 enable mun-board-diag.timer
+enable systemd-networkd.service
+enable ssh.service

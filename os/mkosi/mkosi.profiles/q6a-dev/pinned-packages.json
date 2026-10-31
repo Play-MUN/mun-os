@@ -1,6 +1,6 @@
 {
   "format": "mun-pinned-packages/1",
-  "_comment": "Radxa's kernel for the Dragon Q6A, from its qcs6490-trixie apt suite (Release 2026-09-24). Its packaging repository at tag 7.0.11-7 pins the kernel tree radxa/kernel at a50eb5b71984bd82b49cd5d31b1e2eb5505c6512 (submodule src), built with defconfig + radxa.config and bindeb-pkg.",
+  "_comment": "Radxa's kernel for the Dragon Q6A, from its qcs6490-trixie apt suite (Release 2026-09-24). Its packaging repository at tag 7.0.11-7 pins the kernel tree radxa/kernel at a50eb5b71984bd82b49cd5d31b1e2eb5505c6512 (submodule src), built with defconfig + radxa.config and bindeb-pkg. The board's firmware for its GPU and audio: Radxa's radxa-firmware-qcs6490 (the GPU's zap shader, the audio DSP's image), the AudioReach topology and the ALSA use-case profiles of Radxa's suite, and Debian's firmware-qcom-soc (the Adreno 660 family's sqe and gmu files), which is in non-free-firmware, a component the image's snapshot does not enable. Laboratory image only: the Qualcomm binaries are not redistributed with MUN OS.",
   "packages": [
     {
       "name": "linux-image-7.0.11-7-qcom",
@@ -11,6 +11,50 @@
       "source": {
         "repository": "https://github.com/radxa-pkg/linux-qcom",
         "commit": "f848b5ff352aaae7dcf27fd1ac978219fb428e4d"
+      }
+    },
+    {
+      "name": "radxa-firmware-qcs6490",
+      "version": "0.2.43",
+      "url": "https://github.com/radxa-pkg/radxa-firmware/releases/download/0.2.43/radxa-firmware-qcs6490_0.2.43_all.deb",
+      "sha256": "e0fc2fe665ff3bdf4776250722798f6d565542d3b059d5a6b2fea9859ad213ba",
+      "license": "Packaging GPL-3+ (Radxa); the Qualcomm GPU and DSP firmware it carries states no licence of its own",
+      "source": {
+        "repository": "https://github.com/radxa-pkg/radxa-firmware",
+        "tag": "0.2.43"
+      }
+    },
+    {
+      "name": "firmware-qcom-audioreach",
+      "version": "1.0.4-3",
+      "url": "https://radxa-repo.github.io/qcs6490-trixie/pool/main/a/audioreach-topology/firmware-qcom-audioreach_1.0.4-3_all.deb",
+      "sha256": "f803b8c273e5c539153881684cdfee71433ce3b48daecfdac7aeb1994a2e7f8f",
+      "license": "Packaging GPL-3+ (Radxa); the topologies come from Linaro's audioreach-topology under its own licence",
+      "source": {
+        "repository": "https://github.com/radxa-pkg/audioreach-topology",
+        "tag": "1.0.4-3"
+      }
+    },
+    {
+      "name": "alsa-ucm-conf",
+      "version": "1.2.16.1-radxa-2",
+      "url": "https://radxa-repo.github.io/qcs6490-trixie/pool/main/a/alsa-ucm-conf/alsa-ucm-conf_1.2.16.1-radxa-2_all.deb",
+      "sha256": "a3c495587673523b79f2014f83e1fc9934a7f93e5f64cd318426046207fb8751",
+      "license": "BSD-3-Clause",
+      "source": {
+        "repository": "https://github.com/radxa-pkg/alsa-ucm-conf",
+        "tag": "1.2.16.1-radxa-2"
+      }
+    },
+    {
+      "name": "firmware-qcom-soc",
+      "version": "20250410-2",
+      "url": "https://snapshot.debian.org/archive/debian/20260926T000000Z/pool/non-free-firmware/f/firmware-nonfree/firmware-qcom-soc_20250410-2_all.deb",
+      "sha256": "793d3b514e6d79644a2fa8ce97abc82570b8db3d17c2f723708841c9affb151f",
+      "license": "Qualcomm firmware, redistributable under its linux-firmware licence (Debian non-free-firmware)",
+      "source": {
+        "repository": "https://salsa.debian.org/kernel-team/firmware-nonfree",
+        "tag": "debian/20250410-2"
       }
     }
   ]

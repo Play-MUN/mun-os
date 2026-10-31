@@ -8,6 +8,8 @@
 //
 // Lengths are logical pixels, angles degrees. GUI thread only, like any
 // Qt Quick item; painting happens where Qt Quick's software renderer calls it.
+// On a graphics API the GPU draws them instead (src/surfacenode.h): no image,
+// and nothing to paint when they change.
 //
 // Values arrive from QML as plain lists and maps, and a malformed entry is
 // skipped rather than trusted: a shadow is {x, y, blur, spread, color}, a
@@ -16,7 +18,9 @@
 // [top-left, top-right, bottom-right, bottom-left], as in CSS.
 #pragma once
 
+#include <QBrush>
 #include <QColor>
+#include <QGradient>
 #include <QQuickPaintedItem>
 #include <QVariantList>
 #include <QVariantMap>
@@ -36,10 +40,26 @@ struct Radii {
     qreal tl = 0, tr = 0, br = 0, bl = 0;
 };
 
+// A CSS linear-gradient(angle, ...) from `start` to `end`, or a
+// radial-gradient(circle at ..., ...) around `start` of `radius`, over a box.
+struct Gradient {
+    enum Kind { None, Linear, Radial };
+    Kind kind = None;
+    QPointF start, end;
+    qreal radius = 0;
+    QGradientStops stops;
+};
+
 Radii parseRadii(const QVariantList &list);
 QList<Shadow> parseShadows(const QVariantList &list);
+// A gradient description from QML over `rect`; Gradient::None when it is
+// not usable.
+Gradient gradientFor(const QVariantMap &description, const QRectF &rect);
+QBrush gradientBrush(const Gradient &gradient);
 // The radii a box of `size` really draws with (CSS Backgrounds 3, 5.5).
 Radii fitted(const Radii &radii, const QSizeF &size);
+// How a shadow's spread changes the corners' radii (CSS Backgrounds 3, 7.2).
+Radii spreadRadii(const Radii &radii, qreal spread);
 QPainterPath roundedRect(const QRectF &rect, const Radii &radii);
 
 } // namespace css
@@ -72,6 +92,9 @@ signals:
 
 protected:
     void geometryChange(const QRectF &newGeometry, const QRectF &oldGeometry) override;
+    // On a graphics API, a BoxNode (src/surfacenode.h) when it can draw the
+    // box; otherwise the painted image.
+    QSGNode *updatePaintNode(QSGNode *old, UpdatePaintNodeData *data) override;
 
 private:
     QColor m_color = Qt::transparent;
@@ -113,6 +136,9 @@ signals:
 
 protected:
     void geometryChange(const QRectF &newGeometry, const QRectF &oldGeometry) override;
+    // On a graphics API, a ShadowNode (src/surfacenode.h) when it can draw
+    // the shadows; otherwise the painted image.
+    QSGNode *updatePaintNode(QSGNode *old, UpdatePaintNodeData *data) override;
 
 private:
     void recompute();

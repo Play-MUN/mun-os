@@ -52,6 +52,8 @@ qt_add_executable(mun-shell
     src/hairline.h
     src/cssbox.cpp
     src/cssbox.h
+    src/surfacenode.cpp
+    src/surfacenode.h
     src/sceneclock.cpp
     src/sceneclock.h
     src/backdrop.cpp
@@ -138,6 +140,10 @@ qt_add_shaders(mun-shell "mun-shell-shaders"
     FILES
         shaders/network.vert
         shaders/network.frag
+        shaders/box.vert
+        shaders/box.frag
+        shaders/shadow.vert
+        shaders/shadow.frag
 )
 
 target_link_libraries(mun-shell PRIVATE Qt6::Core Qt6::Gui Qt6::Network Qt6::Qml Qt6::Quick PkgConfig::ALSA PkgConfig::DRM Threads::Threads)

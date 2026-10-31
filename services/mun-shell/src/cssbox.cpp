@@ -1,11 +1,14 @@
 #include "cssbox.h"
 
 #include "blur.h"
+#include "surfacenode.h"
 
 #include <QLinearGradient>
 #include <QPainter>
 #include <QPainterPath>
+#include <QQuickWindow>
 #include <QRadialGradient>
+#include <QSGRendererInterface>
 #include <QtMath>
 
 #include <algorithm>
@@ -40,10 +43,6 @@ qreal spreadRadius(qreal radius, qreal spread)
     return ratio < 1 ? radius + spread * (1 + std::pow(ratio - 1, 3)) : radius + spread;
 }
 
-Radii spreadRadii(const Radii &r, qreal spread)
-{
-    return {spreadRadius(r.tl, spread), spreadRadius(r.tr, spread), spreadRadius(r.br, spread), spreadRadius(r.bl, spread)};
-}
 
 QGradientStops parseStops(const QVariantList &list)
 {
@@ -61,26 +60,24 @@ QGradientStops parseStops(const QVariantList &list)
     return stops;
 }
 
-// The brush of a CSS linear-gradient(angle, ...) or radial-gradient(circle at
-// fx fy, ...) over `rect`, or none when the description is not usable. Qt
-// interpolates gradient colours premultiplied, as CSS does.
-QBrush gradientBrush(const QVariantMap &description, const QRectF &rect)
+} // namespace
+
+Gradient gradientFor(const QVariantMap &description, const QRectF &rect)
 {
-    const QGradientStops stops = parseStops(description.value(QStringLiteral("stops")).toList());
-    if (stops.size() < 2 || rect.isEmpty())
+    Gradient gradient;
+    gradient.stops = parseStops(description.value(QStringLiteral("stops")).toList());
+    if (gradient.stops.size() < 2 || rect.isEmpty())
         return {};
     const QString type = description.value(QStringLiteral("type"), QStringLiteral("linear")).toString();
     if (type == QLatin1String("radial")) {
         const QVariantList at = description.value(QStringLiteral("at")).toList();
         const qreal fx = at.size() == 2 ? finite(at[0], 0.5) : 0.5;
         const qreal fy = at.size() == 2 ? finite(at[1], 0.5) : 0.5;
-        const QPointF centre(rect.x() + fx * rect.width(), rect.y() + fy * rect.height());
+        gradient.kind = Gradient::Radial;
+        gradient.start = QPointF(rect.x() + fx * rect.width(), rect.y() + fy * rect.height());
         // A circle's default size is farthest-corner.
-        qreal radius = 0;
         for (const QPointF &corner : {rect.topLeft(), rect.topRight(), rect.bottomLeft(), rect.bottomRight()})
-            radius = std::max(radius, std::hypot(corner.x() - centre.x(), corner.y() - centre.y()));
-        QRadialGradient gradient(centre, radius);
-        gradient.setStops(stops);
+            gradient.radius = std::max(gradient.radius, std::hypot(corner.x() - gradient.start.x(), corner.y() - gradient.start.y()));
         return gradient;
     }
     // 0deg points up and angles turn clockwise; the gradient line crosses the
@@ -90,12 +87,28 @@ QBrush gradientBrush(const QVariantMap &description, const QRectF &rect)
     const QPointF direction(std::sin(angle), -std::cos(angle));
     const qreal length = std::abs(rect.width() * std::sin(angle)) + std::abs(rect.height() * std::cos(angle));
     const QPointF half = direction * (length / 2);
-    QLinearGradient gradient(rect.center() - half, rect.center() + half);
-    gradient.setStops(stops);
+    gradient.kind = Gradient::Linear;
+    gradient.start = rect.center() - half;
+    gradient.end = rect.center() + half;
     return gradient;
 }
 
-} // namespace
+// The brush of a gradient, or none. Qt interpolates gradient colours
+// premultiplied, as CSS does.
+QBrush gradientBrush(const Gradient &gradient)
+{
+    if (gradient.kind == Gradient::Radial) {
+        QRadialGradient brush(gradient.start, gradient.radius);
+        brush.setStops(gradient.stops);
+        return brush;
+    }
+    if (gradient.kind == Gradient::Linear) {
+        QLinearGradient brush(gradient.start, gradient.end);
+        brush.setStops(gradient.stops);
+        return brush;
+    }
+    return {};
+}
 
 Radii parseRadii(const QVariantList &list)
 {
@@ -121,6 +134,11 @@ QList<Shadow> parseShadows(const QVariantList &list)
             shadows << shadow;
     }
     return shadows;
+}
+
+Radii spreadRadii(const Radii &r, qreal spread)
+{
+    return {spreadRadius(r.tl, spread), spreadRadius(r.tr, spread), spreadRadius(r.br, spread), spreadRadius(r.bl, spread)};
 }
 
 Radii fitted(const Radii &r, const QSizeF &size)
@@ -159,6 +177,22 @@ QPainterPath roundedRect(const QRectF &rect, const Radii &r)
 }
 
 } // namespace css
+
+namespace {
+
+// Whether `item` is drawn on a graphics API, and one device pixel in its
+// units there.
+bool onGraphicsApi(const QQuickItem *item)
+{
+    return item->window() && QSGRendererInterface::isApiRhiBased(item->window()->rendererInterface()->graphicsApi());
+}
+
+qreal devicePixel(const QQuickItem *item)
+{
+    return 1 / item->window()->effectiveDevicePixelRatio();
+}
+
+} // namespace
 
 // ---------------------------------------------------------------- Box
 
@@ -212,6 +246,31 @@ void Box::geometryChange(const QRectF &newGeometry, const QRectF &oldGeometry)
         update();
 }
 
+QSGNode *Box::updatePaintNode(QSGNode *old, UpdatePaintNodeData *data)
+{
+    const QRectF rect = boundingRect();
+    auto *surface = dynamic_cast<BoxNode *>(old);
+    // A painted node, once made, stays: the painted item keeps track of it.
+    if (onGraphicsApi(this) && (surface || !old)) {
+        const css::Gradient gradient = css::gradientFor(m_gradient, rect);
+        if (BoxNode::supports(gradient, m_insets)) {
+            if (rect.isEmpty()) {
+                delete surface;
+                return nullptr;
+            }
+            if (!surface)
+                surface = new BoxNode;
+            surface->set(rect, css::fitted(m_radii, rect.size()), m_color, gradient, m_insets, devicePixel(this));
+            return surface;
+        }
+    }
+    if (surface) {
+        delete surface;
+        old = nullptr;
+    }
+    return QQuickPaintedItem::updatePaintNode(old, data);
+}
+
 void Box::paint(QPainter *painter)
 {
     const QRectF rect = boundingRect();
@@ -223,7 +282,7 @@ void Box::paint(QPainter *painter)
     if (m_color.alpha() > 0)
         painter->fillPath(shape, m_color);
     if (!m_gradient.isEmpty()) {
-        const QBrush brush = css::gradientBrush(m_gradient, rect);
+        const QBrush brush = css::gradientBrush(css::gradientFor(m_gradient, rect));
         if (brush.style() != Qt::NoBrush)
             painter->fillPath(shape, brush);
     }
@@ -315,6 +374,27 @@ void BoxShadow::geometryChange(const QRectF &newGeometry, const QRectF &oldGeome
     QQuickPaintedItem::geometryChange(newGeometry, oldGeometry);
     if (newGeometry.size() != oldGeometry.size())
         update();
+}
+
+QSGNode *BoxShadow::updatePaintNode(QSGNode *old, UpdatePaintNodeData *data)
+{
+    auto *surface = dynamic_cast<ShadowNode *>(old);
+    if (onGraphicsApi(this) && (surface || !old) && ShadowNode::supports(m_shadows)) {
+        const QRectF box(m_margin, m_margin, m_boxWidth, m_boxHeight);
+        if (box.isEmpty() || m_shadows.isEmpty() || boundingRect().isEmpty()) {
+            delete surface;
+            return nullptr;
+        }
+        if (!surface)
+            surface = new ShadowNode;
+        surface->set(boundingRect(), box, css::fitted(m_radii, box.size()), m_shadows, devicePixel(this));
+        return surface;
+    }
+    if (surface) {
+        delete surface;
+        old = nullptr;
+    }
+    return QQuickPaintedItem::updatePaintNode(old, data);
 }
 
 void BoxShadow::paint(QPainter *painter)

@@ -37,6 +37,7 @@ draws the parts that depend on it accordingly (*How it is drawn*).
 | `src/backdrop.*`, `src/heroicon.*` | Home's painted layers: the network of light behind everything, and the large object of the entry in focus |
 | `src/networknode.*`, `shaders/network.*` | The network on a graphics API: one geometry, built once, that the GPU places on every frame |
 | `src/cssbox.*`, `src/blur.*` | Surfaces with CSS semantics (radii, gradients at any angle, outer and inset box shadows) and the blur they and the glows use |
+| `src/surfacenode.*`, `shaders/box.*`, `shaders/shadow.*` | The same surfaces on a graphics API, drawn by the GPU from their parameters |
 | `src/projectedview.*`, `qml/ProjectedLayer.qml` | Shows an item through a perspective transform: projected once per change into a copy (software renderer), or rendered into a layer that the GPU projects (graphics API) |
 | `src/sceneclock.*` | One clock for the painted layers: a timer, or the frames the window renders |
 | `src/bootintro.*`, `src/bootintroshapes.h`, `images/boot-*.png` | The start-up's picture, part by part, as a function of the sound's time; its shapes (the MUN letters, the moon's arc, the LED) and its two images of the console's lid |
@@ -172,8 +173,8 @@ about 10 % (a frame takes 5.5 ms to paint and compose, and linuxfb then
 composes the screen and copies it to the display), and 0 % at rest; one move about
 13 % over the 3 s around it; Settings in focus (the gear turning) about
 20 %; moving through the menu every 0.7 s about 31 %, while QEMU counts
-about 73 display updates a second. These are virtual-machine figures; a
-console with a GPU renderer was not measured.
+about 73 display updates a second. These are virtual-machine figures; the
+graphics path's are below.
 
 #### On a graphics API
 
@@ -208,6 +209,14 @@ and the render loop. On a graphics API:
   shaders are compiled when the shell is built (Qt Shader Tools' `qsb`,
   `qt6-shadertools-dev`), not at run time. Up to eight waves at once: a
   ninth takes the place of the oldest.
+- Surfaces and their shadows (`Box`, `BoxShadow`) are drawn by the GPU
+  from their parameters (`src/surfacenode.*`): the rounded box from its
+  distance, its gradient and its inset lines, and each outer shadow as
+  its shape blurred by a Gaussian computed in the shader, exactly across
+  and by eight samples along, the corners following each row. Nothing is
+  painted or kept when a panel grows or a bar's glow changes colour. What
+  the shaders do not draw (an inset with blur, more than four stops,
+  insets or shadows; none is used today) is painted as before.
 - The large object's layers (`HeroIcon`) are painted on a thread of their
   own, never where frames are made, and each becomes a texture, the image
   let go once uploaded. A frame sets their opacities, the load's sweep (a
@@ -225,6 +234,15 @@ and the render loop. On a graphics API:
   software renderer, or OpenGL in software, the rates above stay. Rest and
   *Reduce motion* stop the motion as before, and a still screen draws
   nothing.
+
+Measured on an ARM64 development board (OpenGL ES 3.2 on Mesa's freedreno,
+1920×1080 at 60 Hz, the threaded render loop; percent of one core used by
+the shell, sampled while a virtual keyboard played the same keys): Home at
+rest with the network drifting, 60 frames/s for about 18 %; moving through
+Home's menu, 60 frames/s with no frame over 34 ms, for about 62 %; moving
+through Settings' sections about 58 frames/s; the gear turning, 60
+frames/s for about 18 %. Before this path, the shell managed 10 to 13
+frames/s on the same board and display.
 
 The same screen drawn by both renderers (the software renderer and OpenGL on
 llvmpipe, in the same binary) differs by about one level in 255 on average,

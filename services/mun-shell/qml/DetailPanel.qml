@@ -23,6 +23,10 @@ import MUN.Shell
 // reaches it, every text in MUN's text colour.
 ProjectedLayer {
     id: root
+    // Never faded as a whole: on a graphics API it is drawn through its
+    // projection directly, its options' 2-pixel focus frame and text as
+    // sharp as on the software path (ProjectedLayer).
+    layered: false
     property var content: ({ kicker: "", title: "", text: "", options: [] })
     property int selected: -1
     property string note: ""

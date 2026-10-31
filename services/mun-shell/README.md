@@ -193,6 +193,11 @@ and the render loop. On a graphics API:
   texture, so that an opacity on it applies to the whole, as on the copy)
   and drawn through the projection by the GPU, which renders the layer again
   only when the content changes; nothing is grabbed or projected on the CPU.
+  Sampling a layer through the projection softens thin lines (a 2-pixel
+  focus frame lost a tenth of its contrast), so the panel, which never fades
+  as a whole, has no layer: the GPU draws its lines and glyphs through the
+  projection at the display's own pixels, and its text and focus frame keep
+  the contrast they have on the software path.
   The transform is the projection the copy uses, the plane's projective map
   with no depth: the design's perspectives would otherwise send parts of a
   panel outside the depth range a graphics API clips to.

@@ -18,6 +18,13 @@ import MUN.Shell
 //   projection on every frame. The layer is rendered again only when the
 //   content changes; there is no copy to refresh.
 //
+// On a graphics API the layer is sampled through the projection, which
+// softens thin lines and small text a little (measured: a 2-pixel focus
+// frame lost a tenth of its contrast). Content that never fades as a whole
+// sets `layered` false: the GPU then draws it through the projection
+// directly, every line and glyph at the display's own pixels, and there is
+// no layer to keep or render again.
+//
 // The layer is the content's box; `margin` is room around it for what the
 // content draws outside (shadows). `projection` maps the flat content's
 // coordinates, margin included, to the view's. refresh() after a change;
@@ -28,6 +35,7 @@ Item {
     property real margin: 0
     property matrix4x4 projection
     property bool live: false
+    property bool layered: true
     default property alias flatItems: box.data
     readonly property bool gpu: RenderInfo.rhi
     // The projection as the copy draws it (QMatrix4x4::toTransform(): a
@@ -85,7 +93,7 @@ Item {
         height: (root.height + 2 * root.margin) * room
         opacity: root.gpu ? 1 : 0
         transform: Matrix4x4 { matrix: root.gpu ? root.planar : Qt.matrix4x4() }
-        layer.enabled: root.gpu
+        layer.enabled: root.gpu && root.layered
         layer.smooth: true
         Item {
             id: box

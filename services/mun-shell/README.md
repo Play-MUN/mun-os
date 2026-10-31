@@ -36,7 +36,7 @@ draws the parts that depend on it accordingly (*How it is drawn*).
 | `src/launchclient.*` | Client of `mun-launchd`: `launch(slot, serial, version)`, `release(serial)`, `acknowledge()`, launcher state and the last session result (read from `/run/mun/launch/last-result.json` at start, then over the socket) |
 | `src/backdrop.*`, `src/heroicon.*` | Home's painted layers: the network of light behind everything, and the large object of the entry in focus |
 | `src/cssbox.*`, `src/blur.*` | Surfaces with CSS semantics (radii, gradients at any angle, outer and inset box shadows) and the blur they and the glows use |
-| `src/projectedview.*` | Shows an item through a perspective transform, projected once per change |
+| `src/projectedview.*`, `qml/ProjectedLayer.qml` | Shows an item through a perspective transform: projected once per change into a copy (software renderer), or rendered into a layer that the GPU projects (graphics API) |
 | `src/sceneclock.*` | One frame clock for the painted layers |
 | `src/bootintro.*`, `src/bootintroshapes.h`, `images/boot-*.png` | The start-up's picture, part by part, as a function of the sound's time; its shapes (the MUN letters, the moon's arc, the LED) and its two images of the console's lid |
 | `qml/Main.qml` | The scene, the navigation, the actions and the key handling |
@@ -185,10 +185,21 @@ OpenGL renderer can itself be software, Mesa's llvmpipe). Its decision goes
 to the journal once, as "mun-shell: renderer: …", with the renderer's name
 and the render loop. On a graphics API:
 
+- `ProjectedLayer` shows its flat content itself, rendered into a layer (a
+  texture, so that an opacity on it applies to the whole, as on the copy)
+  and drawn through the projection by the GPU, which renders the layer again
+  only when the content changes; nothing is grabbed or projected on the CPU.
+  The transform is the projection the copy uses, the plane's projective map
+  with no depth: the design's perspectives would otherwise send parts of a
+  panel outside the depth range a graphics API clips to.
 - Under the threaded render loop that such an API usually runs, frames are
   presented on the render thread: `FrameWatch` reads a frame's time there
   and hands only that time to the GUI thread, where everything it keeps
   lives.
+
+The same screen drawn by both renderers (the software renderer and OpenGL on
+llvmpipe, in the same binary) differs by about one level in 255 on average,
+the moving network and the clock aside.
 
 The objects are drawn, not images, so they stay sharp at any resolution.
 The logo's letters and arc are vector paths (`qml/Logo.js`).

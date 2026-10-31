@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Behaviour regressions of MUN Shell's MUN Shape code, on the real binary.
 
-    python3 tests/behaviour.py BUILD_DIR/mun-shell [--work DIR] [--only NAME]
+    python3 tests/behaviour.py BUILD_DIR/mun-shell [--work DIR] [--only NAME] [--platform eglfs]
 
 Every case runs the compiled shell with one of tests/scenes/ in place of its
 Main.qml (MUN_SHELL_QML_DIR), offscreen with the software renderer: the
@@ -180,8 +180,8 @@ def insertion(number: int) -> str:
 # ------------------------------------------------------------------ running
 
 class Shell:
-    def __init__(self, binary: Path, work: Path):
-        self.binary, self.work = binary, work
+    def __init__(self, binary: Path, work: Path, platform: str = "offscreen"):
+        self.binary, self.work, self.platform = binary, work, platform
         self.peak_kib = {}   # each run's peak resident memory (the kernel's ru_maxrss), by name
 
     def run(self, name: str, scene: str, config: dict, runtime: Path = None, socket_path: Path = None,
@@ -216,6 +216,10 @@ class Shell:
         if display:
             env.pop("QT_QUICK_BACKEND")
             env.update(QT_QPA_PLATFORM="xcb", DISPLAY=display)
+        elif self.platform == "eglfs":
+            # A board's own display and GPU (the console's service stopped).
+            env.pop("QT_QUICK_BACKEND")
+            env.update(QT_QPA_PLATFORM="eglfs", QT_QPA_EGLFS_INTEGRATION="eglfs_kms")
         # Reaped with wait4, which also gives this process's own peak memory.
         log = case / "output.log"
         with open(log, "wb") as sink:
@@ -1672,6 +1676,9 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("binary", type=Path)
     parser.add_argument("--work", type=Path, help="keep the scenes, logs, grabs and report here")
+    parser.add_argument("--platform", choices=("offscreen", "eglfs"), default="offscreen",
+                        help="offscreen with the software renderer (default), or eglfs: a board's display and GPU, "
+                             "with the console's shell service stopped first")
     parser.add_argument("--only", choices=("card", "cue", "surfaces", "presence", "world", "memory", "boot", "home", "settings",
                                            "paths"),
                         action="append")
@@ -1688,7 +1695,7 @@ def main(argv=None) -> int:
     exports, packages = work / "exports", work / "packages"
     exports.mkdir()
     packages.mkdir()
-    shell, checks, report = Shell(binary, work), Checks(), {}
+    shell, checks, report = Shell(binary, work, args.platform), Checks(), {}
     only = set(args.only or ("card", "cue", "surfaces", "presence", "world", "memory", "boot", "home", "settings", "paths"))
     try:
         if "card" in only:

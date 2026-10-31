@@ -17,9 +17,18 @@
 //
 // With MUN_SHELL_TIMING set to a file path (laboratory only), every key's
 // latency, and each window's frame statistics, are appended to that file.
+// The log also counts the long frames while the interface moves (intervals of
+// kIdleMs or more between two frames after the key that started the motion):
+// they are stutters, shown for measurement, though not judged, so that the
+// step down behaves as it always has.
 //
-// GUI thread only: the window's frameSwapped arrives there with the basic
-// render loop the shell uses.
+// Threads: the object and all its state belong to the GUI thread. The
+// window's frameSwapped comes from the render thread under the threaded render
+// loop (a GPU's) and from the GUI thread under the basic one (the software
+// renderer's); in either case the swap's time is read at once, where it is
+// emitted, and only that time is handed to the GUI thread (queued when the
+// emitter is another thread), so a frame is timed when it was presented, not
+// when the GUI thread got round to it.
 #pragma once
 
 #include <QElapsedTimer>
@@ -53,6 +62,7 @@ public:
     static constexpr int kStrainedWindows = 2;
 
     explicit FrameWatch(QObject *parent = nullptr);
+    ~FrameWatch() override;
 
     // A key was pressed now: its latency ends at the next frame on screen.
     Q_INVOKABLE void keyPressed();
@@ -73,7 +83,8 @@ signals:
     void strained(const QString &why);
 
 private:
-    void onFrame();
+    void onSwapped();          // the emitting thread: reads the time, hands it over
+    void onFrame(qint64 at);   // GUI thread
     void judge();
     void log(const QString &line);
 
@@ -81,9 +92,14 @@ private:
     bool m_judging = false;
     bool m_animating = false;
     qint64 m_activeUntil = -1;
+    qint64 m_activeSince = -1;   // the key that started the current motion
+    // Started once in the constructor and only read afterwards, from either
+    // thread (QElapsedTimer::elapsed() changes nothing).
     QElapsedTimer m_clock;
     qint64 m_lastFrame = -1;
     qint64 m_keyAt = -1;
+    int m_long = 0;             // long frames in this window (logged, not judged)
+    qreal m_longest = 0;
     qint64 m_calmUntil = 0;
     int m_strained = 0;   // windows in a row with strain
     std::vector<qreal> m_intervals;     // while navigating: judged

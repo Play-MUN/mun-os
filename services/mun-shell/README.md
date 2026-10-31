@@ -12,6 +12,9 @@ Qt 6 Quick renders with the software scene graph through Qt's `linuxfb`
 plugin, drawing into DRM dumb buffers with page flips: no display server
 and no GPU dependency. When the shell stops for a game it releases the
 display, and a game drawing on `/dev/fb0` has it (see *Display path*).
+The same binary also runs on a graphics API (Qt's `eglfs` over a GPU's
+OpenGL ES, on hardware that has one); it finds out which at run time and
+draws the parts that depend on it accordingly (*How it is drawn*).
 
 ## Layout
 
@@ -28,6 +31,7 @@ display, and a game drawing on `/dev/fb0` has it (see *Display path*).
 | `src/shape.*`, `src/contrast.h`, `src/readpalette.*` | A Game Card's MUN Shape on the eligible surfaces: the export read and decoded off the GUI thread, its colours verified again with the contrast rule, the palette read from a cover, the phases of its coming in and leaving (*A Game Card's identity*) |
 | `src/shapeworld.*`, `src/shapefront.h` | The package's world, prepared and painted on its own thread, and the fronts of its transitions |
 | `src/framewatch.*` | The interface's frame and key timings while a world is drawn; the step down when navigation suffers |
+| `src/renderinfo.*` | How the window is drawn: the software renderer or a graphics API, whether that API is accelerated, the renderer and render loop, in the journal |
 | `src/memory.*` | Once the start-up is over, most of the memory the shell frees goes back to the system (glibc's thresholds fixed, then a trim) |
 | `src/launchclient.*` | Client of `mun-launchd`: `launch(slot, serial, version)`, `release(serial)`, `acknowledge()`, launcher state and the last session result (read from `/run/mun/launch/last-result.json` at start, then over the socket) |
 | `src/backdrop.*`, `src/heroicon.*` | Home's painted layers: the network of light behind everything, and the large object of the entry in focus |
@@ -169,6 +173,22 @@ composes the screen and copies it to the display), and 0 % at rest; one move abo
 20 %; moving through the menu every 0.7 s about 31 %, while QEMU counts
 about 73 display updates a second. These are virtual-machine figures; a
 console with a GPU renderer was not measured.
+
+#### On a graphics API
+
+The software renderer's economies above cost a GPU more than they save it.
+`RenderInfo` (`src/renderinfo.*`) says which renderer draws the window: what
+was asked for before the window exists, then what the scene graph actually
+started with (a graphics API that cannot start makes Qt fall back), and,
+from the scene graph's own context, whether that API is accelerated (an
+OpenGL renderer can itself be software, Mesa's llvmpipe). Its decision goes
+to the journal once, as "mun-shell: renderer: …", with the renderer's name
+and the render loop. On a graphics API:
+
+- Under the threaded render loop that such an API usually runs, frames are
+  presented on the render thread: `FrameWatch` reads a frame's time there
+  and hands only that time to the GUI thread, where everything it keeps
+  lives.
 
 The objects are drawn, not images, so they stay sharp at any resolution.
 The logo's letters and arc are vector paths (`qml/Logo.js`).
@@ -354,7 +374,9 @@ code (`src/shape.*`, `src/shapeworld.*`, `src/shapefront.h`):
   512x512; sounds back/enter/insert/move; world; arrival tide/tide 3.2 s;
   cue due`), when it comes in and leaves, and the world's detail level.
   With `MUN_SHELL_TIMING=FILE` (laboratory only), the interface's frame and
-  key timings go to that file, and the world's and the card object's paint
+  key timings go to that file, with the long frames while the interface
+  moves (100 ms or more between two frames of the same motion: stutters,
+  counted but not judged), and the world's and the card object's paint
   times to the journal.
 - **Behaviour regressions**: `tests/behaviour.py BUILD_DIR/mun-shell` runs
   the compiled binary offscreen with a scene of `tests/scenes/` in place of

@@ -182,6 +182,9 @@ Window {
         property: "progress"
         onFinished: to === 1 ? Shape.arrived() : Shape.left()
     }
+    // How the window is drawn (src/renderinfo.h): the drawing path and how
+    // much motion is worth drawing follow it.
+    Binding { target: RenderInfo; property: "window"; value: window }
     // Navigation first (src/framewatch.h): while a world is drawn, strain in
     // the interface's own frames or keys steps the world down one level.
     Binding { target: FrameWatch; property: "window"; value: window }

@@ -67,6 +67,8 @@ qt_add_executable(mun-shell
     src/shapeworld.h
     src/framewatch.cpp
     src/framewatch.h
+    src/renderinfo.cpp
+    src/renderinfo.h
     src/memory.cpp
     src/memory.h
 )

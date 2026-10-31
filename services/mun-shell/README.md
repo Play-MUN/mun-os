@@ -564,11 +564,9 @@ it cannot do.
 | | HDR, refresh rate | Not available yet |
 | Sound | System sounds | Works: On (default) or Off, the menus' sounds and the start-up's (*Sounds*); kept |
 | | Game sounds on the menus | Works: On (default) or Off, a Game Card's own menu sounds and cue (*A Game Card's identity*); kept |
-| | Startup sound | Informs: on or off with System sounds |
 | | Output, format | Not available yet |
 | Appearance and accessibility | MUN Shape | Works: Full (default), Colours only or Off (*A Game Card's identity*); kept |
 | | Reduce motion | Works: Off (default) or On; Home's world and objects hold still, every transition is a fade, the start-up loses its shake, tremor and flicker; kept |
-| | Status light | Not available yet |
 | Language and time | Language | Works: English (default) or Español; kept |
 | | Time format | Works: 24-hour (default) or 12-hour; kept |
 | | Time zone | Informs: the system's zone, set by the image |

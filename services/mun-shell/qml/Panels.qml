@@ -183,9 +183,6 @@ QtObject {
                        ShellSettings.gameSounds ? 0 : 1, i => ShellSettings.gameSounds = i === 0,
                        t("A Game Card's own sounds for the menus while it is in.",
                          "Los sonidos propios de una Game Card en los menús mientras está dentro.")),
-                // The start-up's sound plays with the system sounds.
-                info(t("Startup sound", "Sonido de arranque"), ShellSettings.systemSounds ? t("On", "Activado") : t("Off", "Desactivado"),
-                     t("Follows System sounds.", "Depende de Sonidos del sistema.")),
                 unavailable(t("Output", "Salida")),
                 unavailable(t("Format", "Formato"))
             ]
@@ -209,8 +206,7 @@ QtObject {
                 choice(t("Reduce motion", "Reducir movimiento"), [t("Off", "Desactivado"), t("On", "Activado")],
                        ShellSettings.reduceMotion ? 1 : 0, i => ShellSettings.reduceMotion = i === 1,
                        t("Home and its worlds hold still; the start-up loses its shake and flicker.",
-                         "Home y sus mundos se quedan quietos; el arranque pierde su temblor y sus destellos.")),
-                unavailable(t("Status light", "Luz de estado"))
+                         "Home y sus mundos se quedan quietos; el arranque pierde su temblor y sus destellos."))
             ]
         }
     }

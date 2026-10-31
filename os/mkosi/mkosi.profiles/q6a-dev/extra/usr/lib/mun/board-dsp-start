@@ -1,0 +1,13 @@
+#!/bin/sh
+# Development image for a board (profile q6a-dev): start every remote
+# processor the initrd left offline (mun-board-dsp.service).
+for r in /sys/class/remoteproc/remoteproc*; do
+    [ -e "$r/state" ] || continue
+    [ "$(cat "$r/state")" = offline ] || continue
+    if echo start >"$r/state"; then
+        echo "started $(cat "$r/name")"
+    else
+        echo "could not start $(cat "$r/name")" >&2
+    fi
+done
+exit 0

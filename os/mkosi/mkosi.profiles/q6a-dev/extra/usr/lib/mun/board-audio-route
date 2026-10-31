@@ -1,0 +1,17 @@
+#!/bin/sh
+# Development image for a board (profile q6a-dev): route HDMI's output
+# (MultiMedia2 to DisplayPort RX 0, PCM 1 of the board's card) once the card
+# has loaded its topology from the audio DSP, which takes a few seconds after
+# the DSP starts; up to 20 s.
+card=QCS6490RadxaDra
+i=0
+while [ "$i" -lt 40 ]; do
+    if amixer -q -c "$card" cset "name=DISPLAY_PORT_RX_0 Audio Mixer MultiMedia2" 1 2>/dev/null; then
+        echo "HDMI audio route set"
+        exit 0
+    fi
+    i=$((i + 1))
+    sleep 0.5
+done
+echo "the card $card did not appear: no HDMI audio route" >&2
+exit 1

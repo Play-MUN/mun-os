@@ -1,0 +1,13 @@
+# Development image for a board (profile q6a-dev): the board's sound card
+# plays to HDMI once its mixer routes it there (usr/lib/mun/board-audio-route).
+[Unit]
+Description=Route the board's sound to HDMI
+After=mun-board-dsp.service sound.target
+Wants=sound.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/mun/board-audio-route
+
+[Install]
+WantedBy=multi-user.target

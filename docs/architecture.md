@@ -106,6 +106,13 @@ to the hardware integration once one is selected:
 - sound: a virtio-sound device;
 - input: USB keyboard and tablet.
 
+The shell itself draws through whichever renderer it is started on: Qt
+Quick's software renderer, as in the laboratory, or a graphics API (OpenGL
+ES through Qt's `eglfs`) where the hardware integration provides one; it
+finds out at run time and says which in its journal
+([services/mun-shell/README.md](../services/mun-shell/README.md), *On a
+graphics API*).
+
 The hardware integration will own boot, kernel and firmware, GPU and NPU
 libraries, device permissions, display and audio configuration, reader
 discovery and power and thermal policies. Common code requests a MUN

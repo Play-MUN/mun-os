@@ -1,7 +1,8 @@
 cmake_minimum_required(VERSION 3.25)
 
-# MUN Shell: the console's first user-facing session. See README.md for why
-# this is Qt Quick with software rendering on the framebuffer.
+# MUN Shell: the console's first user-facing session. See README.md for how
+# it draws: Qt Quick's software renderer on the framebuffer, or a graphics API
+# where the hardware provides one.
 project(mun-shell VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)

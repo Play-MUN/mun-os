@@ -57,7 +57,7 @@ QtObject {
     readonly property var draw: [0.65, 0, 0.3, 1, 1, 1]             // the start-up arc
     // Idle (Main.qml): how far the interface dims after ten minutes without
     // input, and how fast it goes there and comes back.
-    readonly property real idleDim: 0.3
+    readonly property real idleDim: 0.5
     readonly property int idleDimIn: 2000
     readonly property int idleDimOut: 250
 

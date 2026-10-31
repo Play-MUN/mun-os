@@ -127,7 +127,7 @@ changes and it slides to stay centred. Entering Settings, the main arc
 fades and moves away and the Settings arc comes in its place; while a
 panel's options have the focus, its arc dims. Left alone, the scene keeps
 moving (*Reduce motion* holds it still); ten minutes after the last input the
-interface dims a little, in 2 s, and the next key, wheel turn or click only
+interface dims to half its brightness, in 2 s, and the next key, wheel turn or click only
 brings it back, in 0.25 s: it does nothing else, and that key does nothing
 while it is held. The times count on the monotonic clock, so setting the
 date or time does not move them. The menus' sounds are described under

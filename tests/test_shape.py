@@ -1197,9 +1197,22 @@ class ShellBehaviourTests(unittest.TestCase):
         line = next(text for text in build.splitlines() if run in text)
         self.assertNotIn("||", line, "a failed expectation fails the build")
         self.assertTrue(build.startswith("#!/bin/sh") and "set -eu" in build)
-        for scene in ("controller.qml", "arrival.qml", "surfaces.qml", "world.qml", "boot.qml", "home.qml"):
+        for scene in ("controller.qml", "arrival.qml", "surfaces.qml", "world.qml", "boot.qml", "home.qml", "paths.qml"):
             self.assertIn(f'"{scene}"', (self.SHELL / "tests" / "behaviour.py").read_text(encoding="utf-8"))
             self.assertTrue((self.SHELL / "tests" / "scenes" / scene).is_file(), scene)
+
+    def test_the_drawing_paths_are_compared_frame_against_frame(self):
+        # The paths case's measure: mean absolute channel difference, and the
+        # share of channels more than 16 levels apart, within a box.
+        b = self.behaviour
+        software = (2, 2, bytes([0, 0, 0, 10, 10, 10, 50, 50, 50, 0, 0, 0]))
+        opengl = (2, 2, bytes([0, 0, 0, 40, 10, 10, 50, 50, 50, 0, 0, 0]))
+        mean, share = b.difference(software, opengl)
+        self.assertAlmostEqual(mean, 30 / 12)
+        self.assertAlmostEqual(share, 1 / 12)
+        self.assertEqual(b.difference(software, opengl, (0, 1, 2, 2)), (0, 0))
+        # Its OpenGL path needs a display, which the image build's overlay has.
+        self.assertIn("\n        xvfb\n", (ROOT / "os" / "mkosi" / "mkosi.conf").read_text(encoding="utf-8"))
 
     def test_the_short_window_passes_the_checker_and_does_not_decode(self):
         with tempfile.TemporaryDirectory() as tmp:

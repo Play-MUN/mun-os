@@ -54,6 +54,12 @@ come from CardClient. The cases:
   arrives late, Eject safely, a changed choice and another card, frame by
   frame (a dressed entry whole on every frame); an arrival after Settings
   or a dialog only once Home is wholly on screen.
+- paths: the two drawing paths (paths.qml), the software renderer and
+  OpenGL (an X server from Xvfb, Mesa's llvmpipe): each says in the journal
+  which renderer and which clock it took, and the same still screen (Home's
+  network, objects loaded after a change, the panel's surface and shadow, a
+  chosen entry's bar, glow and knob) matches between them within measured
+  bounds. Skipped, and said so, where Xvfb is not installed.
 - settings: the player's settings file (settings.qml): a damaged file reads
   as the defaults and the next choice writes a valid one; a value outside
   the allowed set reads as its default; a change replaces the file whole (a
@@ -180,9 +186,11 @@ class Shell:
 
     def run(self, name: str, scene: str, config: dict, runtime: Path = None, socket_path: Path = None,
             exports: Path = None, timeout: float = 90, launcher: Path = None, settings: str = "",
-            scale: float = 1) -> str:
+            scale: float = 1, display: str = None) -> str:
         """Runs the shell with `scene` and returns its output. `scale` is the
-        display's device pixels per canvas pixel (4/3: 2560x1440)."""
+        display's device pixels per canvas pixel (4/3: 2560x1440). With an X
+        `display` it draws there through OpenGL (xcb) instead of offscreen
+        with the software renderer."""
         case = self.work / name
         qml = case / "qml"
         qml.mkdir(parents=True, exist_ok=True)
@@ -205,6 +213,9 @@ class Shell:
                    MUN_LAUNCHD_SOCKET=str(launcher or case / "no-launcher.sock"), STATE_DIRECTORY=str(state))
         for key in ("QT_QPA_KMS_CONFIG", "QT_QPA_EGLFS_KMS_CONFIG", "WAYLAND_DISPLAY", "DISPLAY", "MUN_SHELL_TIMING"):
             env.pop(key, None)
+        if display:
+            env.pop("QT_QUICK_BACKEND")
+            env.update(QT_QPA_PLATFORM="xcb", DISPLAY=display)
         # Reaped with wait4, which also gives this process's own peak memory.
         log = case / "output.log"
         with open(log, "wb") as sink:
@@ -414,7 +425,12 @@ class Checks:
     def __init__(self):
         self.failed = 0
         self.passed = 0
+        self.skipped = 0
         self.failing = []   # the cases' folders, for their logs
+
+    def skip(self, case: str, why: str):
+        self.skipped += 1
+        print(f"  skip  {case}: {why}", flush=True)
 
     def expect(self, case: str, what: str, ok: bool, detail=""):
         if ok:
@@ -1460,6 +1476,103 @@ def boot_cases(shell: Shell, checks: Checks):
                   early is not None and early["t"] >= 0.8, early)
 
 
+class Xvfb:
+    """An X server of its own for the OpenGL path, 1920x1080, or None where
+    Xvfb is not installed."""
+
+    def __init__(self):
+        self.process, self.display = None, None
+
+    def __enter__(self):
+        if not shutil.which("Xvfb"):
+            return None
+        read, write = os.pipe()
+        self.process = subprocess.Popen(["Xvfb", "-displayfd", str(write), "-screen", "0", "1920x1080x24",
+                                         "-nolisten", "tcp"], pass_fds=(write,), stdout=subprocess.DEVNULL,
+                                        stderr=subprocess.DEVNULL)
+        os.close(write)
+        with os.fdopen(read) as numbers:
+            number = numbers.readline().strip()
+        if not number.isdigit():
+            self.process.kill()
+            return None
+        self.display = f":{number}"
+        return self
+
+    def __exit__(self, *exc):
+        if self.process:
+            self.process.kill()
+            self.process.wait()
+
+
+def difference(a, b, box=None):
+    """Mean absolute channel difference of two same-size frames (within
+    `box`, x0, y0, x1, y1) and the share of channels that differ by more
+    than 16 levels."""
+    width, height, da = a
+    _, _, db = b
+    x0, y0, x1, y1 = box or (0, 0, width, height)
+    total = large = count = 0
+    for y in range(y0, y1):
+        row = (y * width + x0) * 3
+        for i in range(row, row + (x1 - x0) * 3):
+            d = abs(da[i] - db[i])
+            total += d
+            large += d > 16
+            count += 1
+    return total / count, large / count
+
+
+def paths_cases(shell: Shell, checks: Checks, report: dict):
+    """The software renderer and OpenGL draw the same still screen."""
+    steps = lambda icon: {"icon": "card", "steps": [{"at": 1500, "icon": icon}, {"at": 6000, "grab": icon},
+                                                    {"at": 9000, "quit": True}]}
+    with Xvfb() as server:
+        if server is None:
+            checks.skip("paths", "no Xvfb to give the OpenGL path a display; only the software path ran elsewhere")
+            return
+        frames = {}
+        for route in ("software", "opengl"):
+            for icon in ("none", "settings", "card"):
+                name = f"paths-{route}-{icon}"
+                config = dict(steps(icon), out=str(shell.work / name))
+                (shell.work / name).mkdir(parents=True, exist_ok=True)
+                output = shell.run(name, "paths.qml", config, display=server.display if route == "opengl" else None)
+                said = [p for p in lines(output, "PATHS") if p["label"] == "renderer"]
+                if icon == "none":
+                    if route == "software":
+                        checks.expect(name, "the software renderer says so, its clock a timer",
+                                      bool(said) and said[0]["api"] == "software" and not said[0]["rhi"]
+                                      and "motion: on a timer" in output, said)
+                    else:
+                        checks.expect(name, "OpenGL says so and that llvmpipe is not accelerated, its clock a timer",
+                                      bool(said) and said[0]["api"] == "opengl" and said[0]["rhi"]
+                                      and not said[0]["accelerated"] and "motion: on a timer" in output, said)
+                path = shell.work / name / f"{icon}.ppm"
+                frames[route, icon] = read_ppm(path) if path.exists() else None
+                checks.expect(name, "the still screen is grabbed", frames[route, icon] is not None)
+        # Measured with this scene (levels in 255, on average): the network
+        # 0.05, the objects 0.03 to 0.09, the panel 0.09, the bar and knob
+        # 0.22; the bounds leave a margin, not room for another look.
+        regions = {"the whole screen": (None, 0.15, 0.0005),
+                   "the panel's surface and shadow": ((1100, 120, 1920, 760), 0.3, 0.0005),
+                   "the chosen bar, its glow and the knob": ((940, 700, 1660, 920), 0.6, 0.001),
+                   "the object": ((150, 250, 790, 890), 0.3, 0.0005)}
+        for icon in ("none", "settings", "card"):
+            a, b = frames.get(("software", icon)), frames.get(("opengl", icon))
+            if not a or not b or a[:2] != b[:2]:
+                continue
+            for what, (box, mean, share) in regions.items():
+                if icon != "none" and box is None:
+                    continue
+                if icon == "none" and what == "the object":
+                    continue
+                got_mean, got_share = difference(a, b, box)
+                report.setdefault("paths", {})[f"{icon}: {what}"] = {"mean": round(got_mean, 3), "over16": round(got_share, 5)}
+                checks.expect(f"paths-{icon}", f"{what} matches (mean {got_mean:.3f} <= {mean}, over 16 levels "
+                              f"{got_share:.4%} <= {share:.2%})", got_mean <= mean and got_share <= share)
+
+
 def settings_cases(shell: Shell, checks: Checks):
     """The player's settings file (settings.qml)."""
     defaults = {"language": "en", "clockFormat": "24h", "safeArea": 100, "systemSounds": True, "gameSounds": True,
@@ -1543,7 +1656,8 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("binary", type=Path)
     parser.add_argument("--work", type=Path, help="keep the scenes, logs, grabs and report here")
-    parser.add_argument("--only", choices=("card", "cue", "surfaces", "presence", "world", "memory", "boot", "home", "settings"),
+    parser.add_argument("--only", choices=("card", "cue", "surfaces", "presence", "world", "memory", "boot", "home", "settings",
+                                           "paths"),
                         action="append")
     args = parser.parse_args(argv)
     binary = args.binary.resolve()
@@ -1559,7 +1673,7 @@ def main(argv=None) -> int:
     exports.mkdir()
     packages.mkdir()
     shell, checks, report = Shell(binary, work), Checks(), {}
-    only = set(args.only or ("card", "cue", "surfaces", "presence", "world", "memory", "boot", "home", "settings"))
+    only = set(args.only or ("card", "cue", "surfaces", "presence", "world", "memory", "boot", "home", "settings", "paths"))
     try:
         if "card" in only:
             print("MUN Shell behaviour: the card object")
@@ -1588,6 +1702,9 @@ def main(argv=None) -> int:
         if "settings" in only:
             print("MUN Shell behaviour: the player's settings file")
             settings_cases(shell, checks)
+        if "paths" in only:
+            print("MUN Shell behaviour: the software and OpenGL drawing paths")
+            paths_cases(shell, checks, report)
         (work / "report.json").write_text(json.dumps(report, indent=1, sort_keys=True) + "\n", encoding="utf-8")
         for folder in checks.failing:
             log = work / folder / "output.log"
@@ -1597,7 +1714,8 @@ def main(argv=None) -> int:
     finally:
         if not args.work:
             shutil.rmtree(work, ignore_errors=True)
-    print(f"MUN Shell behaviour: {checks.passed} passed, {checks.failed} failed")
+    print(f"MUN Shell behaviour: {checks.passed} passed, {checks.failed} failed"
+          + (f", {checks.skipped} skipped" if checks.skipped else ""))
     return 1 if checks.failed else 0
 
 

@@ -45,7 +45,7 @@ draws the parts that depend on it accordingly (*How it is drawn*).
 | `qml/Panels.qml` | What each entry's panel and each dialog says, from the real state |
 | `qml/Theme.qml`, `qml/I18n.qml` | Design tokens and motion; the two languages |
 | `qml/ArcMenu.qml`, `ArcNode`, `DetailPanel`, `OptionRow`, `StatusBar`, `MoonPhase`, `ModalLayer`, `BootLayer`, `UiText`, `MarkText`, `Shadow`, `Material`, `Logo.js` | Components: the arcs and their entries, the panel and its options, the status line, dialogs, the start-up and power-off screen, text and shadows; the MUN logo |
-| `tests/behaviour.py`, `tests/scenes/` | Behaviour regressions run on the compiled binary, offscreen (*A Game Card's identity*) |
+| `tests/behaviour.py`, `tests/scenes/` | Behaviour regressions run on the compiled binary, offscreen (*A Game Card's identity*), and the software and OpenGL drawing paths side by side on Xvfb (*On a graphics API*) |
 | `tests/displaydevice_test.cpp`, `tests/Makefile` | The display rules on fake sysfs trees and mode lists, compiled and run on the host by `make check` |
 | `fonts/` | Archivo and Michroma, compiled in, with their licences |
 | `sounds/` | The interface's sounds, compiled in: the menus' `move.wav`, `enter.wav`, `back.wav` and the start-up's `startup.wav` |
@@ -243,6 +243,15 @@ Home's menu, 60 frames/s with no frame over 34 ms, for about 62 %; moving
 through Settings' sections about 58 frames/s; the gear turning, 60
 frames/s for about 18 %. Before this path, the shell managed 10 to 13
 frames/s on the same board and display.
+
+`tests/behaviour.py` ("paths") draws the same still screen both ways in the
+same binary, the software renderer offscreen and OpenGL on Mesa's llvmpipe
+under Xvfb (in the image build's overlay), checks that each says in the
+journal which renderer and clock it took, and compares the frames: Home's
+network, objects loaded after a change, the panel's surface and shadow, a
+chosen entry's bar, glow and knob. Where Xvfb is missing it says the case
+was skipped. It cannot show an accelerated renderer's timing; that is
+measured on hardware.
 
 The same screen drawn by both renderers (the software renderer and OpenGL on
 llvmpipe, in the same binary) differs by about one level in 255 on average,

@@ -93,17 +93,25 @@ private:
 
         bool updateUniformData(RenderState &state, QSGMaterial *newMaterial, QSGMaterial *) override
         {
+            // The buffer is this node's own and holds what it was given
+            // last: it is written, and uploaded, only when that changed. A
+            // surface that does not change costs nothing more each frame.
             QByteArray *buffer = state.uniformData();
             Q_ASSERT(buffer->size() >= kMatrixBytes + int(sizeof(Uniforms)));
             char *data = buffer->data();
+            bool changed = false;
             if (state.isMatrixDirty()) {
                 const QMatrix4x4 matrix = state.combinedMatrix();
                 std::memcpy(data, matrix.constData(), kMatrixBytes);
+                changed = true;
             }
             Uniforms uniforms = static_cast<SurfaceMaterial *>(newMaterial)->uniforms;
             uniforms.view[0] = state.opacity();
-            std::memcpy(data + kMatrixBytes, &uniforms, sizeof(Uniforms));
-            return true;
+            if (std::memcmp(data + kMatrixBytes, &uniforms, sizeof(Uniforms)) != 0) {
+                std::memcpy(data + kMatrixBytes, &uniforms, sizeof(Uniforms));
+                changed = true;
+            }
+            return changed;
         }
     };
 

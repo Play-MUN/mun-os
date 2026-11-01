@@ -170,7 +170,7 @@ ProjectedLayer {
                     anchors.verticalCenter: parent.verticalCenter
                     width: 52
                     height: 1
-                    color: root.shaped ? Theme.alpha(root.labelColour, 0.45) : Theme.alpha(Theme.orbitalDetail, 0.75)
+                    color: Theme.alpha(root.labelColour, 0.45)
                 }
             }
             Item { width: 1; height: root.orbital ? 26 : 14 }

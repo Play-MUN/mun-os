@@ -847,6 +847,7 @@ Window {
                 cardReady: window.cardReady
                 networkText: window.networkText
                 online: window.online
+                onlineColour: window.orbital ? Theme.orbitalNetwork : Theme.patina
                 clockFormat: ShellSettings.clockFormat
                 textColour: window.statusLook.text
                 clockColour: window.statusLook.strong

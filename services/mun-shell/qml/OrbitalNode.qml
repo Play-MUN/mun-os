@@ -56,8 +56,6 @@ Item {
     property color tint: Theme.orbitalCream
     property color tintLight: Theme.orbitalCream
     readonly property color accent: gameFocus ? Shape.focus : root.tint
-    // The chosen node and its line: MUN's detail colour (cyan), or the game's.
-    readonly property color lineColour: gameFocus ? Shape.focus : Theme.orbitalDetail
     readonly property color labelColour: shaped ? (lit ? (barLook.game ? Shape.barText : Theme.inkOnMoon) : (look.game ? Shape.text : Theme.moon))
                                                 : (on ? Theme.orbitalInk : Theme.orbitalText)
     readonly property color detailColour: shaped ? labelColour : (on ? Theme.orbitalInkSoft : Theme.orbitalTextDim)
@@ -83,7 +81,7 @@ Item {
             radius: width / 2
             color: "transparent"
             border.width: root.on ? 2 : 1
-            border.color: root.on ? root.lineColour : Theme.rgba(255, 255, 255, 0.22)
+            border.color: root.on ? root.accent : Theme.rgba(255, 255, 255, 0.22)
             Behavior on width { enabled: root.moving; Fade {} }
         }
         Rectangle {
@@ -91,12 +89,12 @@ Item {
             width: root.on ? 12 : 8
             height: width
             radius: width / 2
-            color: root.on ? root.lineColour : Theme.rgba(217, 209, 199, 0.7)
+            color: root.on ? root.accent : Theme.rgba(217, 209, 199, 0.7)
             Behavior on width { enabled: root.moving; Fade {} }
             Shadow {
                 z: -1
                 radii: [6]
-                shadows: [{ blur: 14, spread: 2, color: Theme.alpha(root.lineColour, 0.55) }]
+                shadows: [{ blur: 14, spread: 2, color: Theme.alpha(root.accent, 0.55) }]
                 opacity: root.on ? 1 : 0
                 Behavior on opacity { enabled: root.moving; Fade {} }
             }
@@ -108,7 +106,7 @@ Item {
         width: Math.max(0, root.pillX - x)
         height: 1.5
         opacity: root.ornaments
-        color: root.on ? Theme.alpha(root.lineColour, 0.7) : Theme.rgba(255, 255, 255, 0.18)
+        color: root.on ? Theme.alpha(root.accent, 0.7) : Theme.rgba(255, 255, 255, 0.18)
     }
 
     Item {

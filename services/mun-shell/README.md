@@ -98,14 +98,14 @@ cold at night, pale at dawn, grey-white by day, copper at dusk.
 On a graphics API Home has the orbital design instead (`OrbitalBackdrop`,
 `OrbitalMenu`): a warm night, darker downwards, with an eclipse's warm
 haze, lit edge and halo at the top left; an orbit of rings whose gaps widen
-outwards, its centre clear, a faint polar grid, a ring of dots and,
-outside, a dial ticked in cyan; two waves along the bottom. The entries (MUN Disk, Universe, Settings, Turn off)
+outwards, its centre clear, a faint polar grid and a ring of dots; two
+waves along the bottom. The entries (MUN Disk, Universe, Settings, Turn off)
 are nodes on the orbit's node ring, each joined by a line to a pill of glass
 with its icon and label. Each section has its own light, from MUN OS's
 palette (`Theme.palette`: night, moon grey, moonlight, cyan and rose):
 MUN Disk and Universe moonlight, Settings (and its sections) moon grey,
-Turn off rose; cyan is kept for lines and details (the chosen node and its
-line, the panel's rule, the dial). The
+Turn off rose; cyan is kept, for now, for the network's light while
+Ethernet or Wi-Fi is connected. The
 chosen pill fills with its light, grows to the right and shows its detail
 after a thin rule in place of its icon, its node lit in the same colour,
 which the large icon and the panel's focus take too; with a game's MUN

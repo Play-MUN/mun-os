@@ -3,7 +3,8 @@ import MUN.Shell
 
 // The line at the top right: the slot, the network, tonight's moon and the
 // time. The slot's light is the console's LED colour while a Game Card is
-// ready; the network's is patina while an interface is connected. On a
+// ready; the network's is `onlineColour` (patina, or the orbital design's
+// cyan) while an interface is connected. On a
 // Game Card's band (Shape, docs/shape.md) its words and clock take the
 // game's text colour; the lights keep their meaning and colours, each on a
 // socket of MUN's own (`socketed`: a dark disc with a fine rim), so they show
@@ -14,6 +15,7 @@ Row {
     property bool cardReady: false
     property string networkText
     property bool online: false
+    property color onlineColour: Theme.patina
     property string clockFormat: "24h"
     property color textColour: Theme.ash
     property color clockColour: Theme.moon
@@ -103,8 +105,8 @@ Row {
         spacing: 10
         Light {
             lit: root.online
-            litColour: Theme.patina
-            glow: [{ blur: 10, spread: 2, color: Theme.rgba(127, 179, 163, 0.6) }]
+            litColour: root.onlineColour
+            glow: [{ blur: 10, spread: 2, color: Theme.alpha(root.onlineColour, 0.6) }]
         }
         Status { text: root.networkText; color: root.textColour }
     }

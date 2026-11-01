@@ -63,9 +63,9 @@ QtObject {
     readonly property color orbitalTextSoft: palette.moon[300]
     readonly property color orbitalTextDim: palette.moon[500]
     readonly property color orbitalLight: "#FEE8C7"
-    // Cyan is kept for lines and details: the chosen node and its line, the
-    // panel's rule, the orbit's outer dial (OrbitalBackdrop).
-    readonly property color orbitalDetail: palette.cyan[500]
+    // Cyan is kept, for now, for the network's light while Ethernet or Wi-Fi
+    // is connected (StatusBar).
+    readonly property color orbitalNetwork: palette.cyan[500]
     // Each section its own light: the chosen pill (from the family's light to
     // its colour), its node, the large icon and the panel's focus take the
     // colour of the entry in focus, Settings' sections all Settings' own.

@@ -28,11 +28,9 @@ constexpr qreal kPi = 3.14159265358979;
 constexpr qreal kWidth = 1920;
 constexpr qreal kHeight = 1080;
 const QPointF kCentre(OrbitalBackdrop::kCentreX, OrbitalBackdrop::kCentreY);
-// The orbit's texture: the rings, grid and axes, and the dial with its ticks
-// and a margin. The dots': their ring and a margin.
-constexpr qreal kOrbitHalf = OrbitalBackdrop::kDialRing + 20;
-// MUN's detail cyan (qml/Theme.qml, palette.cyan 500).
-QColor detail(qreal alpha) { return QColor::fromRgbF(0x5E / 255.f, 0xD1 / 255.f, 0xDE / 255.f, float(alpha)); }
+// The orbit's texture: the rings, grid and axes out to 30 px beyond the outer
+// ring. The dots': their ring and a margin.
+constexpr qreal kOrbitHalf = OrbitalBackdrop::kOuterRing + 30;
 constexpr qreal kDotsHalf = 180;
 // The eclipse's quad: the upper left corner its light reaches.
 const QRectF kEclipseRect(0, 0, 560, 590);
@@ -126,18 +124,6 @@ void paintOrbit(QPainter &p)
         q.setBrush(QColor::fromRgbF(0.957f, 0.925f, 0.878f, 0.9f));
         for (const qreal deg : {90.0, 180.0, 270.0})
             q.drawEllipse(c + QPointF(outer * std::cos(deg * kPi / 180), outer * std::sin(deg * kPi / 180)), 3.4, 3.4);
-        // The dial: a thin ring, a tick every 3 degrees pointing in, a longer
-        // and brighter one every 15.
-        const qreal dial = OrbitalBackdrop::kDialRing;
-        q.setBrush(Qt::NoBrush);
-        q.setPen(QPen(detail(0.20), 1));
-        q.drawEllipse(c, dial, dial);
-        for (int a = 0; a < 360; a += 3) {
-            const bool major = a % 15 == 0;
-            const qreal r = a * kPi / 180, inner = dial - (major ? 10 : 5);
-            q.setPen(QPen(detail(major ? 0.38 : 0.20), major ? 1.3 : 1));
-            q.drawLine(c + QPointF(inner * std::cos(r), inner * std::sin(r)), c + QPointF(dial * std::cos(r), dial * std::sin(r)));
-        }
         // Faded out from 110 px before the menu to 40 px before it.
         QLinearGradient fade(OrbitalBackdrop::kMenuX - 110, 0, OrbitalBackdrop::kMenuX - 40, 0);
         fade.setColorAt(0, QColor(0, 0, 0, 255));

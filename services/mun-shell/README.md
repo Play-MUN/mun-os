@@ -479,7 +479,10 @@ code (`src/shape.*`, `src/shapeworld.*`, `src/shapefront.h`):
   key timings go to that file, with the long frames while the interface
   moves (100 ms or more between two frames of the same motion: stutters,
   counted but not judged), and the world's and the card object's paint
-  times to the journal.
+  times to the journal. A key's judged time ends at the next frame on
+  screen, which may have been on its way before the key; the file also
+  gives the time to the frame that shows it (`shown`: the first one whose
+  scene was taken after the key).
 - **Behaviour regressions**: `tests/behaviour.py BUILD_DIR/mun-shell` runs
   the compiled binary offscreen with a scene of `tests/scenes/` in place of
   `Main.qml` (`MUN_SHELL_QML_DIR`), against exports made with the card

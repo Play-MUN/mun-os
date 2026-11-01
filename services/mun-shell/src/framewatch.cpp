@@ -51,20 +51,24 @@ void FrameWatch::setWindow(QQuickWindow *window)
     if (m_window)
         disconnect(m_window, nullptr, this, nullptr);
     m_window = window;
-    if (m_window)
+    if (m_window) {
+        connect(m_window, &QQuickWindow::beforeSynchronizing, this,
+                [this] { m_syncNs.store(m_clock.nsecsElapsed(), std::memory_order_relaxed); }, Qt::DirectConnection);
         connect(m_window, &QQuickWindow::frameSwapped, this, &FrameWatch::onSwapped, Qt::DirectConnection);
+    }
     emit windowChanged();
 }
 
 void FrameWatch::onSwapped()
 {
     // Possibly the render thread: the clock is only read, nothing else is
-    // touched here.
+    // touched here. The swap follows its own frame's synchronisation.
     const qint64 at = m_clock.elapsed();
+    const qint64 syncNs = m_syncNs.load(std::memory_order_relaxed);
     if (QThread::currentThread() == thread())
-        onFrame(at);
+        onFrame(at, syncNs);
     else
-        QMetaObject::invokeMethod(this, [this, at] { onFrame(at); }, Qt::QueuedConnection);
+        QMetaObject::invokeMethod(this, [this, at, syncNs] { onFrame(at, syncNs); }, Qt::QueuedConnection);
 }
 
 void FrameWatch::setJudging(bool judging)
@@ -92,6 +96,11 @@ void FrameWatch::keyPressed()
     const qint64 now = m_clock.elapsed();
     if (m_keyAt < 0)
         m_keyAt = now;
+    if (m_shownKeyNs < 0) {
+        m_shownKeyNs = m_clock.nsecsElapsed();
+        // A gamepad's input turns into this key at once (src/gamepads.h).
+        m_shownPad = m_lastPad >= 0 && now - m_lastPad < 100 ? m_lastPad : -1;
+    }
     if (now >= m_activeUntil)
         m_activeSince = now;
     m_activeUntil = now + kActiveMs;
@@ -100,8 +109,9 @@ void FrameWatch::keyPressed()
 void FrameWatch::inputAt(qint64 monotonicMs)
 {
     // m_clock counts from its start on the same monotonic clock.
+    m_lastPad = monotonicMs - m_clock.msecsSinceReference();
     if (m_padAt < 0)
-        m_padAt = monotonicMs - m_clock.msecsSinceReference();
+        m_padAt = m_lastPad;
 }
 
 void FrameWatch::mark(const QString &what)
@@ -109,7 +119,7 @@ void FrameWatch::mark(const QString &what)
     log(QStringLiteral("mark %1").arg(what));
 }
 
-void FrameWatch::onFrame(qint64 now)
+void FrameWatch::onFrame(qint64 now, qint64 syncNs)
 {
     if (m_lastFrame >= 0 && now - m_lastFrame < kIdleMs) {
         // A transition's frames, keys pressed during it included, are timed
@@ -137,6 +147,13 @@ void FrameWatch::onFrame(qint64 now)
     if (m_padAt >= 0 && now >= m_padAt) {
         log(QStringLiteral("pad %1").arg(qreal(now - m_padAt), 0, 'f', 1));
         m_padAt = -1;
+    }
+    if (m_shownKeyNs >= 0 && syncNs >= m_shownKeyNs) {
+        log(QStringLiteral("shown %1").arg(qreal(now) - m_shownKeyNs / 1e6, 0, 'f', 1));
+        if (m_shownPad >= 0)
+            log(QStringLiteral("pad shown %1").arg(qreal(now - m_shownPad), 0, 'f', 1));
+        m_shownKeyNs = -1;
+        m_shownPad = -1;
     }
 }
 

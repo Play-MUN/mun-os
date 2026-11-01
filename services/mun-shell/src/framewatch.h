@@ -17,6 +17,10 @@
 //
 // With MUN_SHELL_TIMING set to a file path (laboratory only), every key's
 // latency, and each window's frame statistics, are appended to that file.
+// A key's latency as judged ends at the next frame on screen, which may be
+// one already being drawn when the key came and not show it yet; the log
+// also gives "shown", the time to the first frame whose scene was taken
+// after the key (its synchronisation began later), the one that shows it.
 // The log also counts the long frames while the interface moves (intervals of
 // kIdleMs or more between two frames after the key that started the motion):
 // they are stutters, shown for measurement, though not judged, so that the
@@ -39,6 +43,7 @@
 #include <QTimer>
 #include <QtQml/qqmlregistration.h>
 
+#include <atomic>
 #include <vector>
 
 class FrameWatch : public QObject {
@@ -92,7 +97,7 @@ signals:
 
 private:
     void onSwapped();          // the emitting thread: reads the time, hands it over
-    void onFrame(qint64 at);   // GUI thread
+    void onFrame(qint64 at, qint64 syncNs);   // GUI thread
     void judge();
     void log(const QString &line);
 
@@ -107,6 +112,13 @@ private:
     qint64 m_lastFrame = -1;
     qint64 m_keyAt = -1;
     qint64 m_padAt = -1;          // a gamepad's input, on m_clock, until its frame
+    // When the latest frame's synchronisation began (ns on m_clock): written
+    // where the window emits it (the render thread under the threaded loop,
+    // with the GUI thread blocked), read where the frame's swap is.
+    std::atomic<qint64> m_syncNs{-1};
+    qint64 m_shownKeyNs = -1;     // a key, until the first frame taken after it
+    qint64 m_lastPad = -1;        // the latest gamepad input, on m_clock
+    qint64 m_shownPad = -1;       // the gamepad input behind that key, if any
     int m_long = 0;             // long frames in this window (logged, not judged)
     qreal m_longest = 0;
     qint64 m_calmUntil = 0;

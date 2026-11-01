@@ -12,7 +12,9 @@
 #include <QSize>
 
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
+#include <cstring>
 #include <optional>
 #include <string>
 #include <thread>
@@ -28,6 +30,7 @@ namespace display {
 const QStringList kModes{QStringLiteral("1280x720"), QStringLiteral("1920x1080"), QStringLiteral("2560x1440")};
 const QString kResolutionKey = QStringLiteral("display/resolution");
 const QString kTrialKey = QStringLiteral("display/resolution-trial");
+const QString kRangeKey = QStringLiteral("display/range");
 
 namespace {
 
@@ -259,7 +262,164 @@ QString takeResume(const QString &runtime)
         return {};
     const QString where = QString::fromLatin1(readFile(marker.fileName(), 32).trimmed());
     marker.remove();
-    return where == QStringLiteral("resolution") || where == QStringLiteral("reset") ? where : QString();
+    return where == QStringLiteral("resolution") || where == QStringLiteral("range") || where == QStringLiteral("reset")
+               ? where
+               : QString();
+}
+
+// One property of a DRM object, by name: its id, its value, a range
+// property's bounds and an enum's values by name.
+struct Property {
+    uint32_t id = 0;
+    uint64_t value = 0;
+    uint64_t min = 0;
+    uint64_t max = 0;
+    QHash<QString, uint64_t> enums;
+};
+
+std::optional<Property> property(int fd, uint32_t object, uint32_t type, const char *name)
+{
+    drmModeObjectPropertiesPtr props = drmModeObjectGetProperties(fd, object, type);
+    if (!props)
+        return std::nullopt;
+    std::optional<Property> found;
+    for (uint32_t i = 0; i < props->count_props && !found; ++i) {
+        drmModePropertyPtr p = drmModeGetProperty(fd, props->props[i]);
+        if (!p)
+            continue;
+        if (std::strcmp(p->name, name) == 0) {
+            Property q;
+            q.id = p->prop_id;
+            q.value = props->prop_values[i];
+            if ((p->flags & DRM_MODE_PROP_RANGE) && p->count_values >= 2) {
+                q.min = p->values[0];
+                q.max = p->values[1];
+            }
+            for (int e = 0; e < p->count_enums; ++e)
+                q.enums.insert(QString::fromLatin1(p->enums[e].name), p->enums[e].value);
+            found = q;
+        }
+        drmModeFreeProperty(p);
+    }
+    drmModeFreeObjectProperties(props);
+    return found;
+}
+
+// The CRTCs that can show `connector`: Qt picks one of them.
+std::vector<uint32_t> crtcsFor(int fd, const drmModeConnector &connector)
+{
+    drmModeResPtr resources = drmModeGetResources(fd);
+    if (!resources)
+        return {};
+    uint32_t mask = 0;
+    for (int i = 0; i < connector.count_encoders; ++i) {
+        if (drmModeEncoderPtr encoder = drmModeGetEncoder(fd, connector.encoders[i])) {
+            mask |= encoder->possible_crtcs;
+            drmModeFreeEncoder(encoder);
+        }
+    }
+    std::vector<uint32_t> crtcs;
+    for (int i = 0; i < resources->count_crtcs && i < 32; ++i) {
+        if (mask & (1u << i))
+            crtcs.push_back(resources->crtcs[i]);
+    }
+    drmModeFreeResources(resources);
+    return crtcs;
+}
+
+QString failure() { return QString::fromLocal8Bit(std::strerror(errno)); }
+
+// Sets the signal on the wire (displaydevice.h). card0 is opened only for
+// this: before Qt nobody holds it, so the open makes the shell the display's
+// master for these few calls, and what is set stays in the display's state
+// for Qt, which sets neither. Logged once, as "signal: …".
+void applySignal(const std::string &output, Range range)
+{
+    Card0 card;
+    const int fd = card.fd();
+    if (fd < 0 || !drmIsMaster(fd)) {
+        qWarning("mun-shell: display: card0 is held by another program; the signal is left as it is");
+        return;
+    }
+    drmModeConnectorPtr connector = card.connector(output, false);
+    if (!connector)
+        return;
+    QStringList said;
+
+    const QByteArray capText = qgetenv("MUN_DISPLAY_MAX_BPC");
+    if (!capText.isEmpty()) {
+        const std::optional<int> cap = parseMaxBpc(capText.toStdString());
+        const std::optional<Property> bpc = property(fd, connector->connector_id, DRM_MODE_OBJECT_CONNECTOR, "max bpc");
+        if (!cap) {
+            qWarning("mun-shell: display: MUN_DISPLAY_MAX_BPC \"%s\" is not a number of bits from 6 to 16; no cap applies",
+                     capText.constData());
+        } else if (!bpc) {
+            said << QStringLiteral("no cap on bits per channel (%1 has no \"max bpc\")").arg(text(output));
+        } else {
+            const uint64_t value = std::clamp<uint64_t>(uint64_t(*cap), bpc->min, std::max(bpc->min, bpc->max));
+            if (drmModeObjectSetProperty(fd, connector->connector_id, DRM_MODE_OBJECT_CONNECTOR, bpc->id, value) == 0)
+                said << QStringLiteral("at most %1 bits per channel (the board's cap)").arg(value);
+            else
+                said << QStringLiteral("the cap of %1 bits per channel failed (%2)").arg(value).arg(failure());
+        }
+    }
+
+    const std::optional<Property> broadcast = property(fd, connector->connector_id, DRM_MODE_OBJECT_CONNECTOR, "Broadcast RGB");
+    const RangeAction action = rangeAction(range, broadcast.has_value());
+    const QString name = text(std::string(rangeName(range)));
+    if (broadcast) {
+        const QString value = text(action.broadcast);
+        if (!broadcast->enums.contains(value))
+            said << QStringLiteral("range %1: Broadcast RGB has no \"%2\"").arg(name, value);
+        else if (drmModeObjectSetProperty(fd, connector->connector_id, DRM_MODE_OBJECT_CONNECTOR, broadcast->id,
+                                          broadcast->enums.value(value)) == 0)
+            said << QStringLiteral("range %1 (Broadcast RGB \"%2\")").arg(name, value);
+        else
+            said << QStringLiteral("range %1 failed (%2)").arg(name, failure());
+    }
+
+    // Every CRTC that can show the connector, since Qt chooses one later: its
+    // gamma table compresses, or is cleared.
+    int compressed = 0;
+    QStringList failed;
+    for (const uint32_t crtc : crtcsFor(fd, *connector)) {
+        const std::optional<Property> lut = property(fd, crtc, DRM_MODE_OBJECT_CRTC, "GAMMA_LUT");
+        const std::optional<Property> size = property(fd, crtc, DRM_MODE_OBJECT_CRTC, "GAMMA_LUT_SIZE");
+        if (!lut || (!action.compress && lut->value == 0))
+            continue;
+        uint32_t blob = 0;
+        if (action.compress) {
+            if (!size || size->value < 2)
+                continue;
+            const std::vector<std::uint16_t> ramp = limitedRamp(size->value);
+            std::vector<drm_color_lut> table(ramp.size());
+            for (size_t i = 0; i < ramp.size(); ++i)
+                table[i] = {ramp[i], ramp[i], ramp[i], 0};
+            if (drmModeCreatePropertyBlob(fd, table.data(), uint32_t(table.size() * sizeof(drm_color_lut)), &blob) != 0) {
+                failed << QStringLiteral("CRTC %1: %2").arg(crtc).arg(failure());
+                continue;
+            }
+        }
+        if (drmModeObjectSetProperty(fd, crtc, DRM_MODE_OBJECT_CRTC, lut->id, blob) != 0)
+            failed << QStringLiteral("CRTC %1: %2").arg(crtc).arg(failure());
+        else if (blob)
+            ++compressed;
+        // The display's state keeps its own reference to the table.
+        if (blob)
+            drmModeDestroyPropertyBlob(fd, blob);
+    }
+    if (!broadcast) {
+        if (!action.compress)
+            said << QStringLiteral("range %1: full, the pixels as they are (%2 has no Broadcast RGB)").arg(name, text(output));
+        else if (compressed)
+            said << QStringLiteral("range limited: 16-235 by the gamma table");
+        else
+            said << QStringLiteral("range limited: no gamma table could take it; full range goes out");
+    }
+    if (!failed.isEmpty())
+        said << QStringLiteral("gamma table failed on %1").arg(failed.join(QStringLiteral(", ")));
+    drmModeFreeConnector(connector);
+    qInfo("mun-shell: display: signal: %s", qPrintable(said.join(QStringLiteral("; "))));
 }
 
 int waitSeconds()
@@ -379,6 +539,10 @@ void prepare(QSettings &settings)
     // eglfs, or a start that did not wait: card0 as it is now.
     if (!g_display)
         g_display = usableDisplay(scanCards(kDrmClass));
+    const Range range = parseRange(settings.value(kRangeKey).toString().toStdString());
+    result.range = text(std::string(rangeName(range)));
+    if (g_display)
+        applySignal(g_display->connector, range);
     std::vector<Timing> timings;
     QStringList sizes; // "1920x1080", the preferred one first, once each
     bool isVirtual = false;

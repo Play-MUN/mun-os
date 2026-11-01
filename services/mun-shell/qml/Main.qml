@@ -485,6 +485,13 @@ Window {
             return
         ShellSettings.changeResolution(mode)
     }
+    // The colour range, likewise in a dialog; no trial, since every range
+    // shows a picture.
+    function askColourRange() { openModal(panels.colourRange()) }
+    function changeColourRange(range) {
+        modal = null
+        ShellSettings.changeColourRange(range)
+    }
     function askKeepResolution() {
         trialSeconds = trialLength
         openModal(panels.resolutionTrial())
@@ -507,8 +514,8 @@ Window {
                 window.revertResolution()
         }
     }
-    // A start that follows a change of resolution or a reset returns to where
-    // the player was.
+    // A start that follows a change of resolution or colour range, or a reset,
+    // returns to where the player was.
     // The way a player gets there, one level at a time, so each panel is
     // built for its entry before its options take the focus.
     function resumeSettings(where) {
@@ -518,7 +525,9 @@ Window {
         level = 1
         previousLevel = 1
         level = 2
-        optionIndex = where === "reset" ? options.length - 1 : firstSelectable(0, 1)
+        optionIndex = where === "reset" ? options.length - 1
+                    : where === "range" ? Math.max(0, options.findIndex(o => o.key === "range"))
+                    : firstSelectable(0, 1)
     }
     // After the start-up, or at once: the memory freed from now on goes back
     // to the system (src/memory.h); the resolution on trial asks first, then

@@ -188,6 +188,11 @@ QtObject {
                        i => ShellSettings.safeArea = areas[i],
                        t("Brings the interface in from the edges of a TV that crops them.",
                          "Aleja la interfaz de los bordes en un televisor que los recorta.")),
+                // Also chosen in a dialog: a change restarts the shell.
+                Object.assign(action(t("Colour range", "Rango de color"), rangeName(ShellSettings.colourRange), shell.askColourRange,
+                                     t("If blacks look grey, choose Full; if the darkest shades merge into black, Limited.",
+                                       "Si los negros se ven grises, elige Completo; si los tonos más oscuros se funden con el negro, Limitado.")),
+                              { key: "range" }),
                 unavailable("HDR"),
                 unavailable(t("Refresh rate", "Frecuencia"))
             ]
@@ -254,6 +259,16 @@ QtObject {
     // "2560x1440" → "1440p", "2560 × 1440".
     function resolutionName(mode) { return mode.split("x")[1] + "p" }
     function resolutionSize(mode) { return mode.replace("x", " × ") }
+    // The colour range (displaymode.h): how the console sends its colours,
+    // and so how dark a TV shows its blacks.
+    function rangeName(range) {
+        switch (range) {
+        case "full": return t("Full", "Completo")
+        case "limited": return t("Limited", "Limitado")
+        }
+        return t("Automatic", "Automático")
+    }
+
     function resolutionValue() {
         const active = ShellSettings.activeResolution
         if (active !== "auto")
@@ -373,6 +388,22 @@ QtObject {
                     + shell.trialLength + " segundos."),
             actions: actions,
             initial: Math.max(0, active === "auto" ? 0 : modes.indexOf(active) + 1)
+        }
+    }
+
+    // The colour range, chosen in a dialog; the shell restarts with it.
+    function colourRange() {
+        const active = ShellSettings.colourRange
+        const ranges = ["auto", "full", "limited"]
+        const actions = ranges.map(range => ({ label: rangeName(range), value: range === active ? t("In use", "En uso") : "",
+                                               run: () => shell.changeColourRange(range) }))
+        actions.push({ label: t("Cancel", "Cancelar"), run: shell.closeModal })
+        return {
+            title: t("Colour range", "Rango de color"),
+            text: t("Automatic suits most TVs. The screen goes dark for a moment while the console changes it.",
+                    "Automático sirve en la mayoría de televisores. La pantalla se apaga un momento mientras la consola lo cambia."),
+            actions: actions,
+            initial: Math.max(0, ranges.indexOf(active))
         }
     }
 

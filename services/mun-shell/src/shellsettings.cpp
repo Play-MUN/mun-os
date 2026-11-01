@@ -157,6 +157,26 @@ QString ShellSettings::nativeResolution() const
     return display::plan().preferred;
 }
 
+QString ShellSettings::colourRange() const
+{
+    return display::plan().range;
+}
+
+void ShellSettings::changeColourRange(const QString &range)
+{
+    static const QStringList ranges{QStringLiteral("auto"), QStringLiteral("full"), QStringLiteral("limited")};
+    if (m_restarting || !ranges.contains(range) || range == display::plan().range)
+        return;
+    if (range == ranges.first())
+        m_file->remove(display::kRangeKey);
+    else
+        m_file->setValue(display::kRangeKey, range);
+    sync();
+    // A choice that was not written would not survive the restart.
+    if (m_lastError.isEmpty())
+        restart(QStringLiteral("range"));
+}
+
 QString ShellSettings::resume() const
 {
     return display::plan().resume;
@@ -216,9 +236,11 @@ void ShellSettings::resetKeepingLanguage()
     m_file->remove(kMotionKey);
     m_file->remove(kGameSoundsKey);
     m_file->remove(display::kResolutionKey);
+    m_file->remove(display::kRangeKey);
     sync();
     emit changed();
-    if (display::plan().active != QStringLiteral("auto") && m_lastError.isEmpty())
+    const display::Plan &plan = display::plan();
+    if ((plan.active != QStringLiteral("auto") || plan.range != QStringLiteral("auto")) && m_lastError.isEmpty())
         restart(QStringLiteral("reset"));
 }
 

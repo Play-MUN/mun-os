@@ -2,7 +2,7 @@
 
 The console's interface: the start-up, Home with its menu arcs and the
 panel of the entry in focus, the Game Card states, playing and the session
-result, safe eject, settings (language, clock, resolution, safe area,
+result, safe eject, settings (language, clock, resolution, colour range, safe area,
 interface sounds, automatic power off), the menus' sounds, information about the console and a confirmed clean power-off, in
 English or Spanish. What the console cannot do yet is shown in its place as
 "Not available yet", never imitated. Launch contract:
@@ -586,6 +586,35 @@ mun-shell: display: requested 1920x1080@60.000 (the cap 1920x1080@60), applied 1
 A difference is logged as an error. The player's own choice in Settings is
 not capped.
 
+### Colour range and bits per channel
+
+Settings › Display › Colour range sets how the console sends its colours:
+*Automatic* (the default), *Full* or *Limited*. A TV that expects one and
+gets the other shows grey blacks, or merges its darkest shades into black.
+The shell sets it before Qt opens the display (`src/displaymode.cpp`, the
+rules in `src/displaydevice.*`), in the few calls for which card0 is its
+own, and it stays in the display's state for Qt, which sets neither. A
+connector with a `Broadcast RGB` property takes the choice there and tells
+the display (Automatic follows the kernel, by the display's EDID). A
+connector without one, where a bridge decides what to tell the display (the
+Radxa Dragon Q6A's RA620), sends the pixels as they are, in full range,
+which the displays tried on that path showed right; *Limited* is then made
+by the display controller's gamma table, 0–255 into 16–235, at no cost to
+the CPU or GPU. A change restarts the shell, as one of resolution does,
+without a trial (every range shows a picture), and returns to the option.
+Reset settings returns to Automatic. Games inherit what is set, since they
+take the display as the shell leaves it.
+
+A board's image may also cap the bits per channel on the wire:
+`MUN_DISPLAY_MAX_BPC` (6 to 16) sets the connector's `max bpc`. The Q6A's
+profile sets 8: its bridge turns 10-bit input into a washed-out, light grey
+picture, and the shell draws 8 bits a channel anyway. The journal says what
+was set:
+
+```text
+mun-shell: display: signal: at most 8 bits per channel (the board's cap); range auto: full, the pixels as they are (HDMI-A-1 has no Broadcast RGB)
+```
+
 ## Settings
 
 Six sections, none of which needs an account. An option either works (it
@@ -597,6 +626,7 @@ it cannot do.
 | --- | --- | --- |
 | Display | Resolution | Works: Automatic (default), or 720p, 1080p or 1440p where the display takes them; kept once confirmed, back to the previous one on its own otherwise (*Resolution*) |
 | | Safe area | Works: 100 (default), 97, 94 or 91 %; kept |
+| | Colour range | Works: Automatic (default), Full or Limited; kept; a change restarts the shell (*Colour range and bits per channel*) |
 | | HDR, refresh rate | Not available yet |
 | Sound | System sounds | Works: On (default) or Off, the menus' sounds and the start-up's (*Sounds*); kept |
 | | Game sounds on the menus | Works: On (default) or Off, a Game Card's own menu sounds and cue (*A Game Card's identity*); kept |

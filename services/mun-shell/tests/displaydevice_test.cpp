@@ -4,6 +4,7 @@
 // compiler; no Qt, no display. Run by `make check` (tests/Makefile here).
 #include "displaydevice.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -285,12 +286,48 @@ void modeTests()
     check("every clock to 2 GHz reads back exact (first wrong: " + std::to_string(firstWrong) + " kHz)", wrong == 0);
 }
 
+void signalTests()
+{
+    check("max bpc 8", parseMaxBpc("8") == 8);
+    check("max bpc 6 and 16, the ends", parseMaxBpc("6") == 6 && parseMaxBpc("16") == 16);
+    check("max bpc out of range", !parseMaxBpc("5") && !parseMaxBpc("17") && !parseMaxBpc("-8"));
+    check("max bpc not a number", !parseMaxBpc("") && !parseMaxBpc("8x") && !parseMaxBpc(" 8"));
+
+    check("range names", parseRange("full") == Range::Full && parseRange("limited") == Range::Limited &&
+                             parseRange("auto") == Range::Automatic);
+    check("an unknown range reads as Automatic", parseRange("") == Range::Automatic &&
+                                                     parseRange("Limited") == Range::Automatic);
+    bool roundTrip = true;
+    for (Range range : {Range::Automatic, Range::Full, Range::Limited})
+        roundTrip = roundTrip && parseRange(rangeName(range)) == range;
+    check("range names read back", roundTrip);
+
+    const RangeAction propAuto = rangeAction(Range::Automatic, true), propFull = rangeAction(Range::Full, true),
+                      propLimited = rangeAction(Range::Limited, true);
+    check("with Broadcast RGB: the property says it", propAuto.broadcast == "Automatic" && propFull.broadcast == "Full" &&
+                                                         propLimited.broadcast == "Limited 16:235");
+    check("with Broadcast RGB: the gamma table stays clear",
+          !propAuto.compress && !propFull.compress && !propLimited.compress);
+    const RangeAction bareAuto = rangeAction(Range::Automatic, false), bareFull = rangeAction(Range::Full, false),
+                      bareLimited = rangeAction(Range::Limited, false);
+    check("without it: no property", bareAuto.broadcast.empty() && bareFull.broadcast.empty() && bareLimited.broadcast.empty());
+    check("without it: only Limited compresses", !bareAuto.compress && !bareFull.compress && bareLimited.compress);
+
+    const std::vector<std::uint16_t> ramp = limitedRamp(1024);
+    check("ramp: 1024 levels", ramp.size() == 1024);
+    check("ramp: 16 to 235 of 255", !ramp.empty() && ramp.front() == 4112 && ramp.back() == 60395);
+    check("ramp: never falls", std::is_sorted(ramp.begin(), ramp.end()));
+    check("ramp: the middle is the middle", ramp.size() == 1024 && std::abs(int(ramp[511]) + int(ramp[512]) - (4112 + 60395)) <= 2);
+    check("ramp: one level, none", limitedRamp(1) == std::vector<std::uint16_t>{4112} && limitedRamp(0).empty());
+}
+
 } // namespace
 
 int main()
 {
     deviceTests();
     modeTests();
+    signalTests();
     std::printf("display rules: %d passed, %d failed\n", g_passed, g_failed);
     return g_failed ? EXIT_FAILURE : EXIT_SUCCESS;
 }

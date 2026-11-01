@@ -324,4 +324,54 @@ std::optional<std::string> modeline(const Timing &mode)
     return std::string(text);
 }
 
+std::optional<int> parseMaxBpc(std::string_view text)
+{
+    int value = 0;
+    const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
+    if (error != std::errc() || end != text.data() + text.size() || value < 6 || value > 16)
+        return std::nullopt;
+    return value;
+}
+
+Range parseRange(std::string_view text)
+{
+    if (text == "full")
+        return Range::Full;
+    if (text == "limited")
+        return Range::Limited;
+    return Range::Automatic;
+}
+
+std::string_view rangeName(Range range)
+{
+    switch (range) {
+    case Range::Full: return "full";
+    case Range::Limited: return "limited";
+    case Range::Automatic: break;
+    }
+    return "auto";
+}
+
+RangeAction rangeAction(Range range, bool hasBroadcastRgb)
+{
+    if (!hasBroadcastRgb)
+        return {{}, range == Range::Limited};
+    switch (range) {
+    case Range::Full: return {"Full", false};
+    case Range::Limited: return {"Limited 16:235", false};
+    case Range::Automatic: break;
+    }
+    return {"Automatic", false};
+}
+
+std::vector<std::uint16_t> limitedRamp(std::size_t size)
+{
+    std::vector<std::uint16_t> ramp(size);
+    for (std::size_t i = 0; i < size; ++i) {
+        const double level = 16 + 219.0 * (size > 1 ? double(i) / double(size - 1) : 0);
+        ramp[i] = std::uint16_t(std::lround(level / 255 * 65535));
+    }
+    return ramp;
+}
+
 } // namespace display

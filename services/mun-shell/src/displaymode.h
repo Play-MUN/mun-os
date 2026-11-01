@@ -20,6 +20,12 @@
 // for it before Qt starts (awaitDisplay). Games set their own modes once the
 // shell has released the display.
 //
+// The signal is set here too, before Qt opens the display: the board's cap
+// on bits per channel (MUN_DISPLAY_MAX_BPC) and the player's colour range
+// (Settings › Display › Colour range: automatic, full or limited), as
+// displaydevice.h describes. A change of range restarts the shell, as a
+// change of resolution does, without a trial: every range shows a picture.
+//
 // A board's image may cap the first mode under Automatic: MUN_DISPLAY_MAX
 // ("1920x1080@60") in the unit's environment. The shell then starts in the
 // mode displaydevice.h's chooseMode() picks, asked of Qt as that mode's own
@@ -49,7 +55,8 @@ struct Plan {
     QStringList offered;  // the modes of kModes this display takes
     QString active = QStringLiteral("auto");  // what this start asked for: "auto" or a mode
     bool trial = false;   // `active` is on trial: kept only if the player confirms it
-    QString resume;       // where the previous start asked this one to return: "resolution", "reset" or ""
+    QString range = QStringLiteral("auto");   // the colour range this start set: "auto", "full" or "limited"
+    QString resume;       // where the previous start asked this one to return: "resolution", "range", "reset" or ""
 };
 
 // Waits up to MUN_DISPLAY_WAIT_SECONDS (30 by default) for a usable display
@@ -81,5 +88,6 @@ void setResume(const QString &where);
 // The settings keys, shared with ShellSettings.
 extern const QString kResolutionKey;
 extern const QString kTrialKey;
+extern const QString kRangeKey;
 
 } // namespace display

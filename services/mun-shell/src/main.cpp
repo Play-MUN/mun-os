@@ -11,6 +11,8 @@
 #include <QSettings>
 
 #include "displaymode.h"
+#include "framewatch.h"
+#include "gamepads.h"
 #include "shellsettings.h"
 
 namespace {
@@ -90,5 +92,7 @@ int main(int argc, char *argv[])
     }
     if (engine.rootObjects().isEmpty())
         return kInterfaceFailedStatus;
+    // Gamepads drive the menus as the keyboard does (src/gamepads.h).
+    Gamepads gamepads(engine.singletonInstance<FrameWatch *>("MUN.Shell", "FrameWatch"));
     return app.exec();
 }

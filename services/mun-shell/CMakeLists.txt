@@ -44,6 +44,10 @@ qt_add_executable(mun-shell
     src/shellsettings.h
     src/systemsounds.cpp
     src/systemsounds.h
+    src/gamepadmap.cpp
+    src/gamepadmap.h
+    src/gamepads.cpp
+    src/gamepads.h
     src/blur.cpp
     src/blur.h
     src/bootintro.cpp

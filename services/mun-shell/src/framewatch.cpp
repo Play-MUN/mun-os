@@ -89,6 +89,13 @@ void FrameWatch::keyPressed()
     m_activeUntil = now + kActiveMs;
 }
 
+void FrameWatch::inputAt(qint64 monotonicMs)
+{
+    // m_clock counts from its start on the same monotonic clock.
+    if (m_padAt < 0)
+        m_padAt = monotonicMs - m_clock.msecsSinceReference();
+}
+
 void FrameWatch::mark(const QString &what)
 {
     log(QStringLiteral("mark %1").arg(what));
@@ -118,6 +125,10 @@ void FrameWatch::onFrame(qint64 now)
             m_keys.push_back(latency);
         log(QStringLiteral("key %1%2").arg(latency, 0, 'f', 1).arg(m_animating ? QStringLiteral(" transition") : QString()));
         m_keyAt = -1;
+    }
+    if (m_padAt >= 0 && now >= m_padAt) {
+        log(QStringLiteral("pad %1").arg(qreal(now - m_padAt), 0, 'f', 1));
+        m_padAt = -1;
     }
 }
 

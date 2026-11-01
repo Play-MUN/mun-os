@@ -66,6 +66,10 @@ public:
 
     // A key was pressed now: its latency ends at the next frame on screen.
     Q_INVOKABLE void keyPressed();
+    // A gamepad's input at its kernel time (CLOCK_MONOTONIC, ms, src/gamepads.h):
+    // the time from it to the next frame on screen goes to the laboratory's
+    // log ("pad"), the whole way from the kernel; not judged.
+    void inputAt(qint64 monotonicMs);
     // Writes a line to the laboratory's log (if any): a mark in the timings.
     Q_INVOKABLE void mark(const QString &what);
 
@@ -98,6 +102,7 @@ private:
     QElapsedTimer m_clock;
     qint64 m_lastFrame = -1;
     qint64 m_keyAt = -1;
+    qint64 m_padAt = -1;          // a gamepad's input, on m_clock, until its frame
     int m_long = 0;             // long frames in this window (logged, not judged)
     qreal m_longest = 0;
     qint64 m_calmUntil = 0;

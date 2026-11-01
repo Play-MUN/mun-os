@@ -38,18 +38,25 @@ QtObject {
     readonly property color accent: copperLight
     readonly property color accentDeep: copper
 
-    // The orbital design (Home on a graphics API, OrbitalBackdrop): its night,
-    // the glass of its pills and panel, the cream of the focus and its ink,
-    // its text in three strengths, and the eclipse's light.
-    readonly property color orbitalGlass: "#151618"
+    // The orbital design (Home on a graphics API, OrbitalBackdrop): a warm
+    // night, the glass of its pills and panel, the cream and its ink, its text
+    // in three strengths, and the eclipse's light.
+    readonly property color orbitalGlass: "#1E1813"
     readonly property color orbitalCream: "#FDF1D3"
     readonly property color orbitalCreamDeep: "#EED3BC"
-    readonly property color orbitalInk: "#17120E"       // text on the cream
-    readonly property color orbitalInkSoft: "#2A2119"   // a detail on the cream
-    readonly property color orbitalText: "#F4F0E8"
+    readonly property color orbitalInk: "#17120E"       // text on a lit pill
+    readonly property color orbitalInkSoft: "#2A2119"   // a detail on a lit pill
+    readonly property color orbitalText: "#F3ECE2"
     readonly property color orbitalTextSoft: "#D2C4B4"
-    readonly property color orbitalTextDim: "#A8A29A"
+    readonly property color orbitalTextDim: "#ABA095"
     readonly property color orbitalLight: "#FEE8C7"
+    // Each section its own light: the chosen pill, its node, the large icon
+    // and the panel's focus take the colour of the entry in focus (Settings'
+    // sections all Settings' own). Every one keeps 4.5:1 with the ink on it.
+    readonly property var orbitalAccents: ({ card: "#F2A65A", games: "#A98BEA", settings: "#8FC1A9", power: "#E07A5F" })
+    function orbitalAccent(key) { return orbitalAccents[key] || orbitalCream }
+    // `a` taken `t` of the way to `b`.
+    function mixColour(a, b, t) { return Qt.rgba(a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t, a.a + (b.a - a.a) * t) }
     // Where the orbit's centre is, its node ring, and where the menu and the
     // panel start (src/orbitalbackdrop.h).
     readonly property point orbitalCentre: Qt.point(470, 540)

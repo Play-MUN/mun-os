@@ -45,8 +45,10 @@ ProjectedLayer {
     readonly property var look: shaped ? Shape.blend(dressed ? "panel" : "neutral", reached)
                                        : ({ plate: Shape.plate, opacity: 1, material: "solid", amount: 0, game: false })
     readonly property bool gameText: dressed && shaped && look.game
-    // MUN's focus: copper, or the orbital design's cream.
-    readonly property color munFocus: orbital ? Theme.orbitalCream : Theme.accent
+    // MUN's focus: copper, or in the orbital design the light of the section
+    // in focus (Theme.orbitalAccents).
+    property color orbitalFocus: Theme.orbitalCream
+    readonly property color munFocus: orbital ? orbitalFocus : Theme.accent
     readonly property color focusColour: !dressed ? munFocus : shaped ? (look.game ? Shape.focus : munFocus)
                                          : !Shape.plated && !(orbital && Shape.source === "none") ? Shape.focus : munFocus
     // What MUN draws in ash, patina and moon on its panel; on a plate, the
@@ -124,7 +126,7 @@ ProjectedLayer {
             visible: !root.shaped
             radii: [26]
             gradient: root.orbital
-                ? ({ type: "linear", angle: 180, stops: [[0, Theme.rgba(43, 44, 46, 0.74)], [0.55, Theme.rgba(27, 28, 30, 0.70)], [1, Theme.rgba(23, 24, 26, 0.42)]] })
+                ? ({ type: "linear", angle: 180, stops: [[0, Theme.rgba(48, 41, 35, 0.74)], [0.55, Theme.rgba(31, 26, 22, 0.70)], [1, Theme.rgba(26, 22, 19, 0.42)]] })
                 : ({ type: "linear", angle: 160, stops: [[0, Theme.rgba(62, 92, 130, 0.16)], [0.6, Theme.rgba(20, 24, 32, 0.35)], [1, Theme.rgba(7, 8, 10, 0.4)]] })
             insets: root.orbital
                 ? [{ spread: 1, color: Theme.rgba(255, 255, 255, 0.16) }, { y: 1, color: Theme.rgba(255, 255, 255, 0.10) }]

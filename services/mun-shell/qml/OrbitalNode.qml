@@ -52,7 +52,9 @@ Item {
     readonly property real ornaments: faded ? 0.4 : 1
     // A lent or read accent only while a card lends one; MUN's cream otherwise.
     readonly property bool gameFocus: shaped ? look.game : dressed && !Shape.plated && Shape.source !== "none"
-    readonly property color accent: gameFocus ? Shape.focus : Theme.orbitalCream
+    // The entry's own light (Theme.orbitalAccents).
+    property color tint: Theme.orbitalCream
+    readonly property color accent: gameFocus ? Shape.focus : root.tint
     readonly property color labelColour: shaped ? (lit ? (barLook.game ? Shape.barText : Theme.inkOnMoon) : (look.game ? Shape.text : Theme.moon))
                                                 : (on ? Theme.orbitalInk : Theme.orbitalText)
     readonly property color detailColour: shaped ? labelColour : (on ? Theme.orbitalInkSoft : Theme.orbitalTextDim)
@@ -147,7 +149,7 @@ Item {
             visible: !root.shaped
             radii: [root.pillHeight / 2]
             opacity: root.on ? 1 : 0
-            gradient: ({ type: "linear", angle: 90, stops: [[0, Theme.orbitalCream], [1, Theme.orbitalCreamDeep]] })
+            gradient: ({ type: "linear", angle: 90, stops: [[0, Theme.mixColour(root.tint, Theme.orbitalCream, 0.45)], [1, root.tint]] })
             insets: [{ y: 1, color: Theme.rgba(255, 255, 255, 0.6) }]
             Behavior on opacity { enabled: root.moving; Fade {} }
         }

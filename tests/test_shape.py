@@ -1169,7 +1169,7 @@ class ShellAgreementTests(unittest.TestCase):
         self.assertIn("readonly property color accent: gameFocus ? Shape.focus : Theme.accent", arc)
         node = self.source("qml/OrbitalNode.qml")
         self.assertIn('readonly property bool gameFocus: shaped ? look.game : dressed && !Shape.plated && Shape.source !== "none"', node)
-        self.assertIn("readonly property color accent: gameFocus ? Shape.focus : Theme.orbitalCream", node)
+        self.assertIn("readonly property color accent: gameFocus ? Shape.focus : root.tint", node)
         self.assertIn("qml/Material.qml", self.source("CMakeLists.txt"))
         for name in ("shape.cpp", "readpalette.cpp"):
             self.assertIn(f"src/{name}", self.source("CMakeLists.txt"))

@@ -32,11 +32,11 @@ void main()
         vec3 colour;
         float alpha;
         if (front) {
-            colour = mix(vec3(0.137, 0.141, 0.149), vec3(0.051, 0.055, 0.063), clamp(d / 260.0, 0.0, 1.0));
+            colour = mix(vec3(0.149, 0.129, 0.110), vec3(0.059, 0.047, 0.039), clamp(d / 260.0, 0.0, 1.0));
             colour += 0.16 * exp(-pow((x - 230.0) / 330.0, 2.0)) * exp(-max(d, 0.0) / 120.0) * vec3(0.91, 0.63, 0.43);
             alpha = edge;
         } else {
-            colour = mix(vec3(0.118, 0.122, 0.129), vec3(0.057, 0.061, 0.069), clamp(d / 400.0, 0.0, 1.0));
+            colour = mix(vec3(0.129, 0.114, 0.098), vec3(0.067, 0.055, 0.047), clamp(d / 400.0, 0.0, 1.0));
             alpha = 0.85 * edge * smoothstep(700.0, 820.0, x);
         }
         fragColor = vec4(colour * alpha, alpha) * view.x;

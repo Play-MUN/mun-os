@@ -41,6 +41,7 @@ Item {
             label: entry.label || ""
             detail: entry.detail || ""
             icon: entry.icon || ""
+            tint: Theme.orbitalAccent(root.compact ? "settings" : entry.key)
             on: index === root.current
             compact: root.compact
             dressed: root.dressed

@@ -96,14 +96,17 @@ the keys (A Select, B Back). The card's crescent on the Game Card object
 cold at night, pale at dawn, grey-white by day, copper at dusk.
 
 On a graphics API Home has the orbital design instead (`OrbitalBackdrop`,
-`OrbitalMenu`): the night, darker downwards, with an eclipse's warm haze,
-lit edge and halo at the top left; an orbit of rings whose gaps widen
+`OrbitalMenu`): a warm night, darker downwards, with an eclipse's warm
+haze, lit edge and halo at the top left; an orbit of rings whose gaps widen
 outwards, its centre clear, a faint polar grid and a ring of dots; two
 waves along the bottom. The entries (MUN Disk, Universe, Settings, Turn off)
 are nodes on the orbit's node ring, each joined by a line to a pill of glass
-with its icon and label; the chosen one fills with cream, grows to the
-right and shows its detail after a thin rule in place of its icon, its node
-lit. The entry in focus also stands large at the orbit's centre, where its
+with its icon and label. Each section has its own light: MUN Disk amber,
+Universe violet, Settings (and its sections) sage, Turn off coral. The
+chosen pill fills with its light, grows to the right and shows its detail
+after a thin rule in place of its icon, its node lit in the same colour,
+which the large icon and the panel's focus take too; with a game's MUN
+Shape on, the game's colours lead as before. The entry in focus also stands large at the orbit's centre, where its
 axes cross: when the focus comes to it, it grows in and plays a gesture of
 its own, then rests (the disk turns a quarter, the satellite goes once
 round the planet and settles, the gear turns a quarter, the power sign is

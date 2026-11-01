@@ -67,7 +67,7 @@ qreal waveAt(qreal x, bool front)
 QColor nightAt(qreal x, qreal y)
 {
     const qreal t = y / kHeight;
-    const QColor top(0x13, 0x14, 0x16), middle(0x10, 0x11, 0x13), low(0x0e, 0x0f, 0x11);
+    const QColor top(0x17, 0x12, 0x0e), middle(0x12, 0x0e, 0x0b), low(0x0f, 0x0c, 0x0a);
     const QColor &a = t < 0.55 ? top : middle;
     const QColor &b = t < 0.55 ? middle : low;
     const qreal u = t < 0.55 ? t / 0.55 : (t - 0.55) / 0.45;
@@ -227,8 +227,8 @@ void paintStill(QImage &image)
         fill.lineTo(kWidth, kHeight);
         fill.closeSubpath();
         QLinearGradient shade(0, front ? 780 : 600, 0, kHeight);
-        shade.setColorAt(0, front ? QColor::fromRgbF(0.137f, 0.141f, 0.149f) : QColor::fromRgbF(0.118f, 0.122f, 0.129f, 0.85f));
-        shade.setColorAt(1, front ? QColor::fromRgbF(0.051f, 0.055f, 0.063f) : QColor::fromRgbF(0.057f, 0.061f, 0.069f, 0.85f));
+        shade.setColorAt(0, front ? QColor::fromRgbF(0.149f, 0.129f, 0.110f) : QColor::fromRgbF(0.129f, 0.114f, 0.098f, 0.85f));
+        shade.setColorAt(1, front ? QColor::fromRgbF(0.059f, 0.047f, 0.039f) : QColor::fromRgbF(0.067f, 0.055f, 0.047f, 0.85f));
         p.setPen(Qt::NoPen);
         p.setBrush(shade);
         p.drawPath(fill);

@@ -250,6 +250,8 @@ Window {
         { key: "system", label: I18n.t("System", "Sistema"), icon: "system" }
     ]
     readonly property bool inSettings: level === 1 || (level === 2 && previousLevel === 1)
+    // The orbital design's light of the section in focus (Theme.orbitalAccents).
+    readonly property color sectionLight: Theme.orbitalAccent(inSettings ? "settings" : mainEntries[mainIndex].key)
     readonly property var focusedEntry: inSettings ? settingsEntries[settingsIndex] : mainEntries[mainIndex]
     readonly property var panel: panels.build(focusedEntry.key)
     readonly property var options: panel.options
@@ -893,6 +895,7 @@ Window {
                     readonly property real mainOpacity: mainOrbit.opacity
                     OrbitalFocus {
                         icon: window.focusedEntry.icon || ""
+                        tint: window.sectionLight
                         shown: !world.covering
                     }
                     OrbitalMenu {
@@ -919,6 +922,7 @@ Window {
 
             DetailPanel {
                 orbital: window.orbital
+                orbitalFocus: window.sectionLight
                 content: window.panel
                 // The game's panel: the Game Card entry's, on the main arc.
                 dressed: window.focusedEntry.key === "card" && !window.inSettings

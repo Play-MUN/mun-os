@@ -173,8 +173,13 @@ ProjectedLayer {
                 id: window
                 width: parent.width
                 height: Math.min(root.windowHeight, list.height)
-                clip: true
                 readonly property bool overflows: list.height > root.windowHeight
+                // Drawn through the projection on a graphics API (no layer,
+                // ProjectedLayer), a clip would be cut wrongly (seen on a
+                // board: a diagonal through the options); there the options
+                // out of the window are hidden instead (below).
+                readonly property bool clips: overflows && !(root.gpu && !root.layered)
+                clip: clips
                 // Keep the chosen option's bottom 40 px above the window's.
                 readonly property real scroll: {
                     const row = root.selected >= 0 && root.selected < rows.count ? rows.itemAt(root.selected) : null
@@ -198,12 +203,16 @@ ProjectedLayer {
                             height: head ? (index === 0 ? 0 : 18) + heading.height + 4 : row.implicitHeight
 
                             // The window clips; its bottom fade is approximated
-                            // per option (the software renderer has no masks).
-                            // Only opacity: a Column leaves invisible items out
-                            // of its layout, which would move the others.
+                            // per option (the software renderer has no masks),
+                            // and where the window does not clip, an option
+                            // scrolled above it is hidden. Only opacity: a
+                            // Column leaves invisible items out of its layout,
+                            // which would move the others.
                             readonly property real windowTop: y - window.scroll
                             readonly property real middle: windowTop + height / 2
-                            opacity: !window.overflows || middle <= root.windowHeight * 0.88 ? 1
+                            opacity: !window.overflows ? 1
+                                     : !window.clips && windowTop < 0 ? 0
+                                     : middle <= root.windowHeight * 0.88 ? 1
                                      : Math.max(0, (root.windowHeight - middle) / (root.windowHeight * 0.12))
 
                             MarkText {

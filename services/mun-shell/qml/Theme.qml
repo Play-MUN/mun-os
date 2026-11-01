@@ -63,10 +63,13 @@ QtObject {
     readonly property color orbitalTextSoft: palette.moon[300]
     readonly property color orbitalTextDim: palette.moon[500]
     readonly property color orbitalLight: "#FEE8C7"
+    // Cyan is kept for lines and details: the chosen node and its line, the
+    // panel's rule, the orbit's outer dial (OrbitalBackdrop).
+    readonly property color orbitalDetail: palette.cyan[500]
     // Each section its own light: the chosen pill (from the family's light to
     // its colour), its node, the large icon and the panel's focus take the
     // colour of the entry in focus, Settings' sections all Settings' own.
-    readonly property var orbitalSections: ({ card: "moonlight", games: "cyan", settings: "moon", power: "rose" })
+    readonly property var orbitalSections: ({ card: "moonlight", games: "moonlight", settings: "moon", power: "rose" })
     function orbitalAccent(key) {
         const family = orbitalSections[key]
         return family ? palette[family][family === "moon" ? 300 : 500] : orbitalCream

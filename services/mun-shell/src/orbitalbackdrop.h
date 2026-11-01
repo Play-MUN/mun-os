@@ -2,8 +2,9 @@
 // darker downwards, with the eclipse's warm haze in its upper left; the
 // eclipse itself, the lit edge of the outer ring and its halo; the orbit,
 // rings whose gaps widen outwards (18, 26, 34, 42, 50 and 58 px), a faint
-// polar grid and axes and the nodes, its outer part fading before the menu,
-// its centre left clear; the ring of dots; and two waves along the bottom,
+// polar grid and axes and the nodes, and beyond them a dial in MUN's detail
+// cyan (66 px further, ticked every 3 and 15 degrees), its outer part fading
+// before the menu, its centre left clear; the ring of dots; and two waves along the bottom,
 // the front one's edge lit by the eclipse on the left and again on the
 // right, where it passes behind the panel.
 //
@@ -50,6 +51,7 @@ public:
     static constexpr qreal kRadii[] = {148, 166, 192, 226, 268, 318, 376};
     static constexpr qreal kNodeRing = 268;
     static constexpr qreal kOuterRing = 376;
+    static constexpr qreal kDialRing = 442;
     static constexpr qreal kMenuX = 772;
 
     explicit OrbitalBackdrop(QQuickItem *parent = nullptr);

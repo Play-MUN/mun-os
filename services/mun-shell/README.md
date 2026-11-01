@@ -98,13 +98,14 @@ cold at night, pale at dawn, grey-white by day, copper at dusk.
 On a graphics API Home has the orbital design instead (`OrbitalBackdrop`,
 `OrbitalMenu`): a warm night, darker downwards, with an eclipse's warm
 haze, lit edge and halo at the top left; an orbit of rings whose gaps widen
-outwards, its centre clear, a faint polar grid and a ring of dots; two
-waves along the bottom. The entries (MUN Disk, Universe, Settings, Turn off)
+outwards, its centre clear, a faint polar grid, a ring of dots and,
+outside, a dial ticked in cyan; two waves along the bottom. The entries (MUN Disk, Universe, Settings, Turn off)
 are nodes on the orbit's node ring, each joined by a line to a pill of glass
 with its icon and label. Each section has its own light, from MUN OS's
 palette (`Theme.palette`: night, moon grey, moonlight, cyan and rose):
-MUN Disk moonlight, Universe cyan, Settings (and its sections) moon grey,
-Turn off rose. The
+MUN Disk and Universe moonlight, Settings (and its sections) moon grey,
+Turn off rose; cyan is kept for lines and details (the chosen node and its
+line, the panel's rule, the dial). The
 chosen pill fills with its light, grows to the right and shows its detail
 after a thin rule in place of its icon, its node lit in the same colour,
 which the large icon and the panel's focus take too; with a game's MUN
@@ -115,7 +116,7 @@ round the planet and settles, the gear turns a quarter, the power sign is
 pressed; each of Settings' sections its own), drawn on every frame while
 it runs. The small icons rest. At each move the ring of dots turns a step,
 as a dial. The waves and the eclipse move slowly, at 10 frames a second.
-The panel is flat, in
+The panel leans back a little from its right edge (7 degrees), in
 the same glass. The software renderer keeps the design above;
 `MUN_SHELL_DESIGN` (`orbital` or `previous`) chooses one for the checks.
 Only the shown design's pieces are made, so neither costs the other memory

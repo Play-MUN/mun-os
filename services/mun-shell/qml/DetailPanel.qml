@@ -22,9 +22,10 @@ import MUN.Shell
 // on MUN's own plate at its proven opacity, from the moment the front
 // reaches it, every text in MUN's text colour.
 //
-// `orbital` is the orbital design's panel (Home on a graphics API): flat, no
-// lean, at the orbital design's place and size, centred on the orbit's
-// height, in its glass, with its type. Its options, focus, scrolling and
+// `orbital` is the orbital design's panel (Home on a graphics API): leaning
+// back only 7 degrees from its right edge, so that its right side stands a
+// little nearer, at the orbital design's place and size, centred on the
+// orbit's height, in its glass, with its type. Its options, focus, scrolling and
 // identity are the same.
 ProjectedLayer {
     id: root
@@ -66,7 +67,7 @@ ProjectedLayer {
 
     // Room for the shadow, flat and projected.
     margin: 170
-    projection: orbital ? Qt.matrix4x4() : Theme.perspectiveY(-16, 1600, margin + width, margin + height / 2)
+    projection: Theme.perspectiveY(orbital ? -7 : -16, 1600, margin + width, margin + height / 2)
     x: orbital ? Theme.orbitalPanelX : 1150
     width: orbital ? 606 : 640
     height: column.height + (orbital ? 104 : 88)
@@ -169,7 +170,7 @@ ProjectedLayer {
                     anchors.verticalCenter: parent.verticalCenter
                     width: 52
                     height: 1
-                    color: Theme.alpha(root.labelColour, 0.45)
+                    color: root.shaped ? Theme.alpha(root.labelColour, 0.45) : Theme.alpha(Theme.orbitalDetail, 0.75)
                 }
             }
             Item { width: 1; height: root.orbital ? 26 : 14 }

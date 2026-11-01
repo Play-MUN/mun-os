@@ -8,7 +8,9 @@
 // the right BTN_EAST, whatever their labels, the directional pad is a hat
 // (ABS_HAT0X/Y) or four buttons (BTN_DPAD_*), and the left stick is ABS_X/Y.
 // The menus use that much: the pad and the left stick move the focus, south
-// accepts and east goes back; other buttons and axes are not used here.
+// accepts and east goes back; other buttons and axes are not used here. A
+// pad with Nintendo's layout (setNintendo) accepts with A and goes back with
+// B as Nintendo's consoles do: A is on the right (east), B at the bottom.
 //
 // A direction held repeats as a keyboard's key does: first after
 // kRepeatDelayMs, then every kRepeatPeriodMs. The stick is a direction once
@@ -66,6 +68,8 @@ public:
     // The range of one of the pad's axes, from its capabilities; an axis with
     // no range (or an empty one) is not used as a stick.
     void setRange(int code, Range range);
+    // Nintendo's layout: east accepts and south goes back.
+    void setNintendo(bool nintendo) { m_nintendo = nintendo; }
 
     // One input event (type, code, value) at `ms` on a steady clock: what it
     // presses and releases. A report the kernel dropped (SYN_DROPPED) leaves
@@ -104,6 +108,7 @@ private:
     long long m_nextRepeat = 0;
     bool m_accept = false;
     bool m_back = false;
+    bool m_nintendo = false;
 };
 
 } // namespace gamepad

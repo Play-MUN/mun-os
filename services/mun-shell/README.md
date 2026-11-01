@@ -709,17 +709,21 @@ Linux's input layer reports with a gamepad's south button drives the menus
 as the keyboard does. Its directional pad and left stick are Up, Down, Left
 and Right; the bottom face button (the kernel's south) is Return and the
 right one (east) Escape, delivered to the window as those keys, so waking,
-a key held and the sounds behave the same. A direction held repeats after
+a key held and the sounds behave the same. A pad that presents itself as
+Nintendo's (vendor 057e) keeps Nintendo's layout: A, on the right, is
+Return and B, at the bottom, Escape. A direction held repeats after
 400 ms, then every 80 ms; the stick counts once pushed past 60 % of its
 travel and until it is back within 40 %, and diagonally the axis pushed
 further counts. Pads are found as they connect and let go of when they
 disconnect, nothing held after. The shell reads `/dev/input` through its
 `input` group; nothing goes back through the kernel.
 
-Tested: GameSir Nova Lite over Bluetooth (kernel `hid-generic`), on a
-laboratory board. Planned, not tested: DualShock 4 and DualSense
+Tested: GameSir Nova Lite over Bluetooth, on a laboratory board, in its
+Android mode (kernel `hid-generic`) and its Switch mode (a Pro Controller to
+the kernel, `hid-nintendo`). Planned, not tested: DualShock 4 and DualSense
 (`hid-playstation`), Xbox controllers (`xpad`, `hid-microsoft`) and
-Nintendo's (`hid-nintendo`), which the kernel reports with the same codes.
+Nintendo's own (`hid-nintendo`), which the kernel reports with the same
+codes.
 Pairing is the system's (BlueZ), not the shell's.
 
 ## Build and run

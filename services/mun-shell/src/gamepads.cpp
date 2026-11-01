@@ -133,6 +133,10 @@ void Gamepads::open(const QString &path)
     }
     input_id id{};
     ioctl(fd, EVIOCGID, &id);
+    // Nintendo's pads (and others that present themselves as one) keep
+    // Nintendo's layout: A on the right accepts.
+    constexpr quint16 kNintendo = 0x057e;
+    pad->mapper.setNintendo(id.vendor == kNintendo);
     qInfo("mun-shell: gamepad %s connected (%04x:%04x, %s)", qPrintable(pad->name), id.vendor, id.product,
           qPrintable(path));
 

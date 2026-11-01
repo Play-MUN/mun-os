@@ -51,6 +51,16 @@ void buttons()
     check("a button held does not repeat", m.nextDue() == -1);
 }
 
+void nintendo()
+{
+    Mapper m = pad();
+    m.setNintendo(true);
+    check("Nintendo's layout: A (east) accepts", m.feed(kEvKey, kBtnEast, 1, 0) == Events{press(Action::Accept)});
+    check("Nintendo's layout: A let go", m.feed(kEvKey, kBtnEast, 0, 10) == Events{release(Action::Accept)});
+    check("Nintendo's layout: B (south) goes back", m.feed(kEvKey, kBtnSouth, 1, 20) == Events{press(Action::Back)});
+    check("Nintendo's layout: B let go", m.feed(kEvKey, kBtnSouth, 0, 30) == Events{release(Action::Back)});
+}
+
 void pad_directions()
 {
     Mapper m = pad();
@@ -130,6 +140,7 @@ void gone()
 int main()
 {
     buttons();
+    nintendo();
     pad_directions();
     last_pressed_acts();
     stick();

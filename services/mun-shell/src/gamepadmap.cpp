@@ -103,19 +103,20 @@ std::vector<Event> Mapper::feed(int type, int code, int value, long long ms)
     if (type == kEvKey) {
         // 1 pressed, 2 the kernel's own repeat (still pressed), 0 released.
         const bool on = value != 0;
-        switch (code) {
-        case kBtnSouth:
+        const int accept = m_nintendo ? kBtnEast : kBtnSouth;
+        const int back = m_nintendo ? kBtnSouth : kBtnEast;
+        if (code == accept) {
             if (on != m_accept) {
                 m_accept = on;
                 out.push_back({Action::Accept, on});
             }
-            break;
-        case kBtnEast:
+        } else if (code == back) {
             if (on != m_back) {
                 m_back = on;
                 out.push_back({Action::Back, on});
             }
-            break;
+        }
+        switch (code) {
         case kBtnDpadUp:
             setHeld(kUp, &Sources::buttons, on, ms);
             break;

@@ -2,7 +2,7 @@
 # plays to HDMI once its mixer routes it there (usr/lib/mun/board-audio-route).
 [Unit]
 Description=Route the board's sound to HDMI
-After=mun-board-dsp.service sound.target
+After=sound.target
 Wants=sound.target
 
 [Service]

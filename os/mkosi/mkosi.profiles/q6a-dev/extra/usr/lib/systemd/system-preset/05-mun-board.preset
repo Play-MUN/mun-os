@@ -1,10 +1,9 @@
 # Development image for a board (profile q6a-dev): the diagnostic dumps, the
-# board's DSPs and its sound on HDMI, and the laboratory's wired network and
+# board's sound on HDMI, and the laboratory's wired network and
 # SSH. Read before MUN OS's 10-mun.preset (the first match wins), which
 # disables the network for the console.
 enable mun-board-diag.service
 enable mun-board-diag.timer
-enable mun-board-dsp.service
 enable mun-board-audio.service
 enable systemd-networkd.service
 enable systemd-networkd.socket

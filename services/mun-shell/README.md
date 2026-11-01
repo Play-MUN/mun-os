@@ -36,6 +36,7 @@ draws the parts that depend on it accordingly (*How it is drawn*).
 | `src/launchclient.*` | Client of `mun-launchd`: `launch(slot, serial, version)`, `release(serial)`, `acknowledge()`, launcher state and the last session result (read from `/run/mun/launch/last-result.json` at start, then over the socket) |
 | `src/backdrop.*`, `src/heroicon.*` | Home's painted layers: the network of light behind everything, and the large object of the entry in focus |
 | `src/networknode.*`, `shaders/network.*` | The network on a graphics API: one geometry, built once, that the GPU places on every frame |
+| `src/orbitalbackdrop.*`, `shaders/eclipse.*`, `shaders/wave.*` | Home's background in the orbital design: the night and its haze, the eclipse, the orbit and its dots, the waves; on a graphics API meshes and shaders moving at 10 frames a second, on the software renderer one still picture |
 | `src/cssbox.*`, `src/blur.*` | Surfaces with CSS semantics (radii, gradients at any angle, outer and inset box shadows) and the blur they and the glows use |
 | `src/surfacenode.*`, `shaders/box.*`, `shaders/shadow.*` | The same surfaces on a graphics API, drawn by the GPU from their parameters |
 | `src/projectedview.*`, `qml/ProjectedLayer.qml` | Shows an item through a perspective transform: projected once per change into a copy (software renderer), or rendered into a layer that the GPU projects (graphics API) |

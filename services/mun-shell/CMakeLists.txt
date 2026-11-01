@@ -48,6 +48,8 @@ qt_add_executable(mun-shell
     src/gamepadmap.h
     src/gamepads.cpp
     src/gamepads.h
+    src/orbitalbackdrop.cpp
+    src/orbitalbackdrop.h
     src/blur.cpp
     src/blur.h
     src/bootintro.cpp
@@ -159,6 +161,10 @@ qt_add_shaders(mun-shell "mun-shell-shaders"
         shaders/box.frag
         shaders/shadow.vert
         shaders/shadow.frag
+        shaders/eclipse.vert
+        shaders/eclipse.frag
+        shaders/wave.vert
+        shaders/wave.frag
 )
 
 target_link_libraries(mun-shell PRIVATE Qt6::Core Qt6::Gui Qt6::Network Qt6::Qml Qt6::Quick PkgConfig::ALSA PkgConfig::DRM Threads::Threads)

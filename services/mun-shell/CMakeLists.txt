@@ -133,6 +133,16 @@ qt_add_qml_module(mun-shell
         sounds/move.wav
         sounds/enter.wav
         sounds/back.wav
+        sounds/launch.wav
+        sounds/game_return.wav
+        sounds/shape_exit.wav
+        sounds/eject.wav
+        sounds/shutdown.wav
+        sounds/success.wav
+        sounds/warning.wav
+        sounds/error.wav
+        sounds/controller_connect.wav
+        sounds/controller_disconnect.wav
         sounds/startup.wav
         images/boot-silhouette.png
         images/boot-engraving.png

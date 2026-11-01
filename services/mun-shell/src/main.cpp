@@ -14,6 +14,7 @@
 #include "framewatch.h"
 #include "gamepads.h"
 #include "shellsettings.h"
+#include "systemsounds.h"
 
 namespace {
 
@@ -92,7 +93,18 @@ int main(int argc, char *argv[])
     }
     if (engine.rootObjects().isEmpty())
         return kInterfaceFailedStatus;
-    // Gamepads drive the menus as the keyboard does (src/gamepads.h).
+    // Gamepads drive the menus as the keyboard does (src/gamepads.h); one
+    // that comes or goes sounds, with the interface sounds on.
     Gamepads gamepads(engine.singletonInstance<FrameWatch *>("MUN.Shell", "FrameWatch"));
+    auto *settings = engine.singletonInstance<ShellSettings *>("MUN.Shell", "ShellSettings");
+    auto *sounds = engine.singletonInstance<SystemSounds *>("MUN.Shell", "SystemSounds");
+    QObject::connect(&gamepads, &Gamepads::connected, [settings, sounds] {
+        if (settings && sounds && settings->systemSounds())
+            sounds->play(QStringLiteral("controller_connect"));
+    });
+    QObject::connect(&gamepads, &Gamepads::disconnected, [settings, sounds] {
+        if (settings && sounds && settings->systemSounds())
+            sounds->play(QStringLiteral("controller_disconnect"));
+    });
     return app.exec();
 }

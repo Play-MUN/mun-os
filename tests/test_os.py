@@ -253,7 +253,10 @@ class ShellTests(unittest.TestCase):
         # samples: authoring tools add chunks (metadata, provenance) that have
         # no place in the console.
         sounds = sorted((self.SHELL / "sounds").glob("*.wav"))
-        self.assertEqual([p.stem for p in sounds], ["back", "enter", "move", "startup"])
+        menus = {"move", "enter", "back"}
+        events = {"launch", "game_return", "shape_exit", "eject", "shutdown", "success", "warning", "error",
+                  "controller_connect", "controller_disconnect"}
+        self.assertEqual({p.stem for p in sounds}, menus | events | {"startup"})
         cmake = (self.SHELL / "CMakeLists.txt").read_text()
         player = (self.SHELL / "src" / "systemsounds.cpp").read_text()
         for path in sounds:
@@ -270,12 +273,20 @@ class ShellTests(unittest.TestCase):
             self.assertEqual((tag, channels, rate, int.from_bytes(fmt[14:16], "little")), (1, 2, 48000, 16), path.name)
             if path.stem == "startup":
                 self.assertLessEqual(len(samples) / (48000 * 4), 13.1, "the start-up lasts as long as its picture")
-            else:
+            elif path.stem in menus:
                 self.assertLessEqual(len(samples) / (48000 * 4), 1.0, f"{path.name}: a menu sound lasts under a second")
+            else:
+                self.assertLessEqual(len(samples) / (48000 * 4), 3.5, f"{path.name}: an event's sound is short")
             self.assertIn(f"sounds/{path.name}", cmake, "compiled in")
             self.assertIn(f'"{path.stem}"', player, "loaded by the player")
-        played = set(re.findall(r'sound\("([a-z]+)"\)', (self.SHELL / "qml" / "Main.qml").read_text()))
-        self.assertEqual(played, {p.stem for p in sounds} - {"startup"}, "every sound the menus ask for exists, and every one is used")
+        # Asked for by the menus and events (Main.qml), named by an option or
+        # a dialog's answer (Panels.qml), or played by the shell's own code.
+        panels = (self.SHELL / "qml" / "Panels.qml").read_text()
+        played = set(re.findall(r'sound\("([a-z_]+)"\)', (self.SHELL / "qml" / "Main.qml").read_text()))
+        played |= set(re.findall(r'sound: "([a-z_]+)"', panels)) | set(re.findall(r'"", "([a-z_]+)"\)', panels))
+        for source in (self.SHELL / "src").glob("*.cpp"):
+            played |= set(re.findall(r'play\(QStringLiteral\("([a-z_]+)"\)\)', source.read_text()))
+        self.assertEqual(played, {p.stem for p in sounds} - {"startup"}, "every sound asked for exists, and every one is used")
         boot = (self.SHELL / "qml" / "BootLayer.qml").read_text()
         self.assertIn('SystemSounds.play("startup")', boot, "the start-up plays its sound")
         self.assertIn("ShellSettings.systemSounds", boot, "and only with the interface sounds on")

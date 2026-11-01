@@ -48,7 +48,7 @@ draws the parts that depend on it accordingly (*How it is drawn*).
 | `tests/behaviour.py`, `tests/scenes/` | Behaviour regressions run on the compiled binary, offscreen (*A Game Card's identity*), and the software and OpenGL drawing paths side by side on Xvfb (*On a graphics API*) |
 | `tests/displaydevice_test.cpp`, `tests/Makefile` | The display rules on fake sysfs trees and mode lists, compiled and run on the host by `make check` |
 | `fonts/` | Archivo and Michroma, compiled in, with their licences |
-| `sounds/` | The interface's sounds, compiled in: the menus' `move.wav`, `enter.wav`, `back.wav` and the start-up's `startup.wav` |
+| `sounds/` | The interface's sounds, compiled in: the menus' `move.wav`, `enter.wav`, `back.wav`, the console's events' (`launch.wav`, `game_return.wav`, `shape_exit.wav`, `eject.wav`, `shutdown.wav`, `success.wav`, `warning.wav`, `error.wav`, `controller_connect.wav`, `controller_disconnect.wav`) and the start-up's `startup.wav` |
 | `deploy/mun-shell.service` | systemd unit on tty1 as user `mun-shell` with the display (DRM) and evdev environment and the state directory |
 | `deploy/mun-shell.sudoers` | Allows exactly `mun-power poweroff|reboot` for that user |
 | `deploy/mun-power` | Root-side helper with a fixed vocabulary in front of `systemctl` |
@@ -597,14 +597,24 @@ console: games and saves live on their Game Cards.
 ## Sounds
 
 Moving the focus or changing a choice plays `move`, going in or running an
-action `enter`, going back or closing a dialog `back`: only when a key or
-the pointer changed something, never for the console's own changes (a card
-arriving, a result shown). The start-up sound, `startup` (13.05 s), plays
-once per boot with the start-up (*Motion*), at the level it was mastered at
-rather than the menus' 3/4; skipping the start-up fades it out in 0.1 s. They are MUN's own, compiled in from `sounds/`, all in one chosen
-format: PCM, 16-bit, 48 kHz, stereo, only the format and the samples (no
-metadata chunks), the menus' under a second each and the start-up's under
-13.1 (`tests/test_os.py` checks all of that); the start-up's was made from
+action `enter` (Play plays `launch` instead, and Reset settings `success`),
+going back or closing a dialog `back`: only when a key or the pointer
+changed something. The console's own events have theirs: `game_return`
+when a game's result is first shown, `shape_exit` as Shape leaves, `eject`
+when a safe release is done and `warning` when it is refused, `shutdown`
+as the console turns off (it goes down once the sound has played, 3.2 s,
+the screen dark), `error` when launching, turning off or saving a choice
+fails, and `controller_connect` and `controller_disconnect` when a
+controller comes or goes while the shell runs. A card arriving is greeted
+by the game's own cue (*MUN Shape*), not by these. All of them follow
+Settings › Sound › System sounds. The start-up sound, `startup` (13.05 s),
+plays once per boot with the start-up (*Motion*), at the level it was
+mastered at rather than the others' 3/4; skipping the start-up fades it
+out in 0.1 s. They are MUN's own, compiled in from `sounds/`, all in one
+chosen format: PCM, 16-bit, 48 kHz, stereo, only the format and the
+samples (no metadata chunks), the menus' under a second each, the
+events' under 3.5 and the start-up's under 13.1 (`tests/test_os.py`
+checks all of that, and that every one is used); the start-up's was made from
 its 96 kHz, 24-bit master, resampled with a linear-phase filter (no sample
 moves in time) and dithered to 16 bits. The shell asks ALSA for that format and lets it convert
 when a device plays another; it has been heard only through the virtual

@@ -1169,6 +1169,8 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
                   and present is not None and present["t"] - entering["t"] <= 1200, (entering, present))
     checks.expect("home-return", "no cue", [a["live"] for a in lines(out, "ADOPTED")] == [False]
                   and not [s for s in lines(out, "SOUND") if s["name"] == "insert"], lines(out, "ADOPTED"))
+    sounded = [s["name"] for s in lines(out, "SYSSOUND")]
+    checks.expect("home-return", "the game's result, shown on return, sounds once", sounded.count("game_return") == 1, sounded)
 
     # Removed while the tide comes in: back to MUN at once, the way it came.
     x, rx = card(slow)
@@ -1213,10 +1215,16 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
     checks.expect("home-eject-ok", "confirmed: it leaves (release) with the package's out tide, 2.4 s",
                   leaving is not None and leaving["exit"] == "release" and leaving["kind"] == "tide" and gone is not None
                   and 1800 <= gone["t"] - leaving["t"] <= 3400, (leaving, gone))
+    sounded = [s["name"] for s in lines(out, "SYSSOUND")]
+    checks.expect("home-eject-ok", "the release done sounds, and so does Shape leaving",
+                  sounded.count("eject") == 1 and sounded.count("shape_exit") == 1 and "warning" not in sounded, sounded)
     out, phases, launchd = eject(False)
     later = first(phases, label="later")
     checks.expect("home-eject-busy", "a release that fails keeps the identity",
                   later is not None and later["phase"] == "present" and first(phases, phase="leaving") is None, later)
+    sounded = [s["name"] for s in lines(out, "SYSSOUND")]
+    checks.expect("home-eject-busy", "refused: a warning, not the release's sound",
+                  sounded.count("warning") == 1 and "eject" not in sounded and "shape_exit" not in sounded, sounded)
 
     # Another card: the first leaves, the second comes in with its own transition.
     x, rx = card(SAMPLES / "sea")

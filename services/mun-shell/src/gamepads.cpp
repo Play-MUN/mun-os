@@ -79,6 +79,7 @@ Gamepads::Gamepads(FrameWatch *watch, QObject *parent) : QObject(parent), m_watc
         m_rescan.start();
     });
     scan();
+    m_started = true;
 }
 
 Gamepads::~Gamepads()
@@ -139,6 +140,8 @@ void Gamepads::open(const QString &path)
     Pad *raw = pad.get();
     connect(pad->notifier, &QSocketNotifier::activated, this, [this, raw] { read(raw); });
     m_pads.push_back(std::move(pad));
+    if (m_started)
+        emit connected(raw->name);
 }
 
 void Gamepads::read(Pad *pad)
@@ -170,10 +173,12 @@ void Gamepads::close(Pad *pad, const char *why)
 {
     deliver(pad->mapper.releaseAll());
     qInfo("mun-shell: gamepad %s disconnected (%s)", qPrintable(pad->name), why);
+    const QString name = pad->name;
     delete pad->notifier;
     ::close(pad->fd);
     m_pads.erase(std::find_if(m_pads.begin(), m_pads.end(), [pad](const auto &p) { return p.get() == pad; }));
     schedule();
+    emit disconnected(name);
 }
 
 void Gamepads::repeat()

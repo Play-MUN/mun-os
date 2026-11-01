@@ -14,7 +14,13 @@ QtObject {
     function t(en, es) { return I18n.t(en, es) }
 
     function head(label) { return { kind: "head", label: label } }
-    function action(label, value, run, note) { return { kind: "action", label: label, value: value || "", run: run, note: note || "" } }
+    // `sound`: the one running it plays, "enter" when not given (Main.qml).
+    function action(label, value, run, note, sound) {
+        const option = { kind: "action", label: label, value: value || "", run: run, note: note || "" }
+        if (sound !== undefined)
+            option.sound = sound
+        return option
+    }
     function info(label, value, note) { return { kind: "info", label: label, value: value || "", note: note || "" } }
     function choice(label, values, index, choose, note) {
         return { kind: "choice", label: label, values: values, index: Math.max(0, index), value: values[Math.max(0, index)],
@@ -63,7 +69,7 @@ QtObject {
             const info = CardClient.info
             const options = []
             if (info.kind === "game")
-                options.push(action(t("Play", "Jugar"), shell.launchable ? "" : shell.launchBlocker, shell.play))
+                options.push(action(t("Play", "Jugar"), shell.launchable ? "" : shell.launchBlocker, shell.play, "", "launch"))
             options.push(action(t("Eject safely", "Retirar con seguridad"),
                                 LaunchClient.releasePending ? t("Ejecting…", "Retirando…") : "", shell.eject))
             return {
@@ -117,7 +123,7 @@ QtObject {
             text: shell.hasGame ? t("Right now you have " + title + " at hand.", "Ahora mismo tienes a mano " + title + ".")
                                 : t("There are no games on the console. Your games live on their Game Cards.",
                                     "No hay ningún juego en la consola. Tus juegos viven en sus Game Cards."),
-            options: shell.hasGame ? [action(title, shell.launchable ? t("Play", "Jugar") : shell.launchBlocker, shell.play)] : []
+            options: shell.hasGame ? [action(title, shell.launchable ? t("Play", "Jugar") : shell.launchBlocker, shell.play, "", "launch")] : []
         }
     }
 
@@ -314,7 +320,7 @@ QtObject {
         return {
             title: t("Turn off the console?", "¿Apagar la consola?"),
             text: t("If there is a Game Card inside, your save is already on it.", "Si hay una Game Card, tu partida ya está guardada en ella."),
-            actions: [{ label: t("Turn off", "Apagar"), run: shell.powerOff }, { label: t("Cancel", "Cancelar"), run: shell.closeModal }]
+            actions: [{ label: t("Turn off", "Apagar"), run: shell.powerOff, sound: "" }, { label: t("Cancel", "Cancelar"), run: shell.closeModal }]
         }
     }
 
@@ -374,7 +380,7 @@ QtObject {
                      ? t(" The screen goes dark for a moment while the resolution returns to automatic.",
                          " La pantalla se apaga un momento mientras la resolución vuelve a automática.") : ""),
             actions: [
-                { label: t("Reset", "Restablecer"), run: () => { ShellSettings.resetKeepingLanguage(); shell.closeModal() } },
+                { label: t("Reset", "Restablecer"), run: () => { ShellSettings.resetKeepingLanguage(); shell.closeModal() }, sound: "success" },
                 { label: t("Cancel", "Cancelar"), run: shell.closeModal }
             ]
         }

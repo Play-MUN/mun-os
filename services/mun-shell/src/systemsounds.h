@@ -1,15 +1,16 @@
 // SystemSounds plays the interface's sounds: moving, entering and going back
-// on the menus (qml/Main.qml asks for them by name: "move", "enter", "back")
-// and the start-up ("startup", qml/BootLayer.qml, which draws in step with
-// it: started() says when its first samples went to the device, heard() how
-// much of it has been heard, the samples written less what the device still
-// holds). They are compiled in
-// (sounds/*.wav: PCM, 16-bit, 48 kHz, stereo), the menus' sounds mixed at
-// 3/4 of their level and the start-up at its own, and played through
-// ALSA's default device, the one the games use, which
-// converts them if the device runs at another rate or format; the
-// shell has it only while it runs, and the launcher stops the shell before a
-// game starts.
+// on the menus (qml/Main.qml asks for them by name: "move", "enter", "back"),
+// the console's events (a game launched or returned from, Shape leaving, a
+// safe release done, turning off, a success, warning or error, a controller
+// connected or disconnected) and the start-up ("startup", qml/BootLayer.qml,
+// which draws in step with it: started() says when its first samples went to
+// the device, heard() how much of it has been heard, the samples written
+// less what the device still holds). They are compiled in (sounds/*.wav:
+// PCM, 16-bit, 48 kHz, stereo), the menus' and the events' mixed at 3/4 of
+// their level and the start-up at its own, and played through ALSA's default
+// device, the one the games use, which converts them if the device runs at
+// another rate or format; the shell has it only while it runs, and the
+// launcher stops the shell before a game starts.
 //
 // Playing never blocks the GUI thread: play() queues the sound and a worker
 // thread mixes whatever is sounding (up to kVoices at once, so quick moves
@@ -115,6 +116,9 @@ public:
     void setAwake(bool awake);
 
 signals:
+    // play() queued a sound (MUN's or the game's version), whether or not a
+    // device will play it.
+    void queued(const QString &name);
     // The first samples of a sound that play() asked for went to the device.
     void started(const QString &name);
     // A sound that play() asked for will not be heard (any more): no device.

@@ -148,8 +148,10 @@ Window {
         target: Shape
         function onAdopted(live) { window.cueDue = live }
         function onPhaseChanged() {
-            if (Shape.phase === "leaving")
+            if (Shape.phase === "leaving") {
+                window.sound("shape_exit")
                 window.shapeLeave()
+            }
         }
     }
     readonly property bool homeOnScreen: powered && !inSettings && !modal && !starting && !boot.playing && !boot.visible
@@ -258,10 +260,14 @@ Window {
         return 0
     }
 
-    // The menus' sounds, by what the player did: "move" (the focus or a
-    // choice changed), "enter" (in, or an action run), "back". Only a key or
-    // a pointer that changed something sounds; the console's own changes
-    // (a card arriving, a result shown) do not.
+    // The menus' sounds follow what the player did: "move" (the focus or a
+    // choice changed), "enter" (in, or an action run; an option or a
+    // dialog's answer may name its own, as Play does "launch"), "back". The
+    // console's events have theirs: "game_return" when a game's result is
+    // first shown, "shape_exit" as Shape leaves, "eject" when a safe release
+    // is done ("warning" when it is refused), "shutdown" as the console turns
+    // off, "error" when an action fails, and the controllers' (main.cpp).
+    // A card arriving is greeted by the game's own cue, not by these.
     function sound(name) {
         if (ShellSettings.systemSounds)
             SystemSounds.play(name)
@@ -305,9 +311,17 @@ Window {
         sound("move")
     }
 
+    // An option's or a dialog answer's sound: its own if it names one ("" for
+    // none: turning off sounds by itself), else "enter".
+    function enterSound(item) {
+        const name = item && item.sound !== undefined ? item.sound : "enter"
+        if (name !== "")
+            sound(name)
+    }
+
     function enter() {
         if (modal) {
-            sound("enter")
+            enterSound(modal.actions[modalIndex])
             modal.actions[modalIndex].run()
             return
         }
@@ -329,7 +343,7 @@ Window {
             if (option && option.kind === "choice") {
                 change(option, 1)
             } else if (option && option.run) {
-                sound("enter")
+                enterSound(option)
                 option.run()
             }
         }
@@ -414,11 +428,16 @@ Window {
         delete copy.acknowledged
         return JSON.stringify(copy)
     }
+    property string soundedResult: ""   // the result whose return has sounded
     function showResult() {
         if (!LaunchClient.hasUnacknowledgedResult || !powered)
             return
         const result = LaunchClient.lastResult
         const key = resultKey(result)
+        if (key !== soundedResult) {
+            soundedResult = key
+            sound("game_return")
+        }
         if (!modal)
             openModal(panels.sessionResult(result, key))
         else if (modal.resultKey !== undefined && modal.resultKey !== key)
@@ -526,17 +545,39 @@ Window {
         PowerControl.resetConsole()
     }
     function askPowerOff() { openModal(panels.powerOff()) }
+    // Turning off sounds "shutdown" and lets it play out (the screen dark)
+    // before the system goes down.
     function powerOff() {
         modal = null
         powered = false
         boot.powerOff()
-        PowerControl.powerOff()
+        if (ShellSettings.systemSounds) {
+            sound("shutdown")
+            shutdownSound.start()
+        } else {
+            PowerControl.powerOff()
+        }
+    }
+    Timer {
+        id: shutdownSound
+        interval: 3200
+        onTriggered: PowerControl.powerOff()
     }
 
     Connections {
         target: LaunchClient
-        function onLaunchRejected(code, message) { window.feedback = I18n.launchError({ code: code, message: message }) }
-        function onReleaseFinished(ok, code, message) { if (!ok) window.feedback = I18n.launchError({ code: code, message: message }) }
+        function onLaunchRejected(code, message) {
+            window.sound("error")
+            window.feedback = I18n.launchError({ code: code, message: message })
+        }
+        function onReleaseFinished(ok, code, message) {
+            if (ok) {
+                window.sound("eject")
+            } else {
+                window.sound("warning")
+                window.feedback = I18n.launchError({ code: code, message: message })
+            }
+        }
         function onHasUnacknowledgedResultChanged() { window.showResult() }
     }
     Connections {
@@ -547,6 +588,7 @@ Window {
                 return
             boot.shown = false
             window.powered = true
+            window.sound("error")
             window.openModal(PowerControl.lastAction === "reset"
                              ? panels.resetConsoleRefused(PowerControl.lastStatus, PowerControl.lastError)
                              : panels.powerOffFailed(PowerControl.lastError))
@@ -555,9 +597,11 @@ Window {
     Connections {
         target: ShellSettings
         function onLastErrorChanged() {
-            if (ShellSettings.lastError !== "")
-                window.feedback = I18n.t("This choice could not be saved; it lasts until the console restarts.",
-                                         "No se pudo guardar esta elección; dura hasta que la consola se reinicie.")
+            if (ShellSettings.lastError === "")
+                return
+            window.sound("error")
+            window.feedback = I18n.t("This choice could not be saved; it lasts until the console restarts.",
+                                     "No se pudo guardar esta elección; dura hasta que la consola se reinicie.")
         }
     }
 

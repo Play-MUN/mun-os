@@ -198,6 +198,7 @@ Item {
     Connections {
         target: SystemSounds
         function onGameSoundQueued(name) { console.log("SOUND " + JSON.stringify({ t: scene.now(), name: name, phase: Shape.phase })) }
+        function onQueued(name) { console.log("SYSSOUND " + JSON.stringify({ t: scene.now(), name: name })) }
     }
     Connections {
         target: Shape

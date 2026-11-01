@@ -37,9 +37,12 @@ quint32 u32(const QByteArray &bytes, qsizetype at)
 
 SystemSounds::SystemSounds(QObject *parent) : QObject(parent)
 {
-    // Filled now and never again.
-    m_sounds.reserve(4);
-    for (const char *name : {"move", "enter", "back"})
+    // Filled now and never again: the menus' three, the console's events
+    // (at the menus' level: one set, mastered to sit together) and the
+    // start-up's.
+    m_sounds.reserve(14);
+    for (const char *name : {"move", "enter", "back", "launch", "game_return", "shape_exit", "eject", "shutdown",
+                             "success", "warning", "error", "controller_connect", "controller_disconnect"})
         load(QString::fromLatin1(name), kMenuGain);
     load(QStringLiteral("startup"), kStartupGain);
     m_worker = std::thread(&SystemSounds::run, this);
@@ -190,6 +193,7 @@ void SystemSounds::play(const QString &name)
     const auto game = m_game.find(name);
     if (m_gameSounds && game != m_game.end() && name != QLatin1String("insert")) {
         queue(game->second);
+        emit queued(name);
         return;
     }
     for (const SoundPtr &sound : m_sounds) {
@@ -199,6 +203,7 @@ void SystemSounds::play(const QString &name)
                 m_progress.erase(name);   // a new play starts from nothing heard
             }
             queue(sound);
+            emit queued(name);
             return;
         }
     }

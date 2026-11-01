@@ -42,6 +42,12 @@ public:
     explicit Gamepads(FrameWatch *watch, QObject *parent = nullptr);
     ~Gamepads() override;
 
+signals:
+    // A pad came or went while the shell ran (not the pads already there
+    // when it started).
+    void connected(const QString &name);
+    void disconnected(const QString &name);
+
 private:
     struct Pad {
         int fd = -1;
@@ -65,4 +71,5 @@ private:
     QTimer m_repeat;
     std::vector<std::unique_ptr<Pad>> m_pads;
     QSet<QString> m_notPads;
+    bool m_started = false;   // the first scan is done: pads found later have come
 };

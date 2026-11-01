@@ -109,6 +109,10 @@ set(MUN_QML_FILES
     qml/ProjectedLayer.qml
     qml/ArcNode.qml
     qml/ArcMenu.qml
+    qml/OrbitalNode.qml
+    qml/OrbitalMenu.qml
+    qml/OrbitalIcon.qml
+    qml/OrbitalFocus.qml
     qml/OptionRow.qml
     qml/Material.qml
     qml/DetailPanel.qml

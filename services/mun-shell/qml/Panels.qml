@@ -63,7 +63,7 @@ QtObject {
     }
 
     function card() {
-        const kicker = "GAME CARD"
+        const kicker = shell.orbital ? "MUN DISK" : "GAME CARD"
         switch (shell.cardMode) {
         case "valid": {
             const info = CardClient.info
@@ -106,6 +106,14 @@ QtObject {
                 options: []
             }
         }
+        if (shell.orbital)
+            return {
+                kicker: kicker,
+                title: t("Insert a MUN Disk", "Inserta un MUN Disk"),
+                text: t("Insert a disk to load its experience. The console will be shaped by the game while it is in.",
+                        "Inserta un disco para cargar su experiencia. La consola tomará la forma del juego mientras esté dentro.") + waitingText(),
+                options: []
+            }
         return {
             kicker: kicker,
             title: t("Slot empty", "Ranura vacía"),
@@ -117,6 +125,16 @@ QtObject {
 
     function games() {
         const title = CardClient.info.title || "Game Card"
+        // Universe (the orbital design): what is at hand, and nothing promised.
+        if (shell.orbital)
+            return {
+                kicker: t("UNIVERSE", "UNIVERSO"),
+                title: t("Universe", "Universo"),
+                text: shell.hasGame ? t("Right now you have " + title + " at hand.", "Ahora mismo tienes a mano " + title + ".")
+                                    : t("Nothing here yet. Your games travel on their MUN Disks.",
+                                        "Todavía no hay nada aquí. Tus juegos viajan en sus MUN Disk."),
+                options: shell.hasGame ? [action(title, shell.launchable ? t("Play", "Jugar") : shell.launchBlocker, shell.play, "", "launch")] : []
+            }
         return {
             kicker: t("MY GAMES", "MIS JUEGOS"),
             title: t("My games", "Mis juegos"),

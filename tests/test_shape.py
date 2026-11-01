@@ -1146,7 +1146,8 @@ class ShellAgreementTests(unittest.TestCase):
 
     def test_mun_keeps_its_own_surfaces(self):
         # Settings, their panels and every dialog never read the card's
-        # identity; only the main arc, the game's panel and the bands do.
+        # identity; only the main menu (the arc, or in the orbital design
+        # the orbit), the game's panel and the bands do.
         for name in ("ModalLayer.qml", "BootLayer.qml"):
             self.assertNotIn("Shape.", self.source(f"qml/{name}"), name)
         theme = self.source("qml/Theme.qml")
@@ -1154,12 +1155,21 @@ class ShellAgreementTests(unittest.TestCase):
         self.assertRegex(theme, r"readonly property color accentDeep: copper\b")
         self.assertNotIn("CardClient", theme, "MUN's focus never comes from a card")
         main = self.source("qml/Main.qml")
-        self.assertEqual(main.count("dressed: true"), 1, "one arc is dressed, the main one")
+        menus = re.findall(r"(?:ArcMenu|OrbitalMenu) \{(.*?)onActivated", main, re.S)
+        self.assertEqual(len(menus), 4, "a main menu and Settings' in each design")
+        dressed = [menu for menu in menus if "dressed: true" in menu]
+        self.assertEqual(len(dressed), 2, "one menu per design is dressed")
+        for menu in dressed:
+            self.assertIn("entries: window.mainEntries", menu, "the dressed one is the main menu")
+        self.assertEqual(main.count("dressed: true"), 2)
         self.assertIn('dressed: window.focusedEntry.key === "card" && !window.inSettings', main)
         self.assertIn("property color focusColour: Theme.accent", self.source("qml/OptionRow.qml"))
         arc = self.source("qml/ArcNode.qml")
         self.assertIn("readonly property bool gameFocus: shaped ? look.game : dressed && !Shape.plated", arc)
         self.assertIn("readonly property color accent: gameFocus ? Shape.focus : Theme.accent", arc)
+        node = self.source("qml/OrbitalNode.qml")
+        self.assertIn('readonly property bool gameFocus: shaped ? look.game : dressed && !Shape.plated && Shape.source !== "none"', node)
+        self.assertIn("readonly property color accent: gameFocus ? Shape.focus : Theme.orbitalCream", node)
         self.assertIn("qml/Material.qml", self.source("CMakeLists.txt"))
         for name in ("shape.cpp", "readpalette.cpp"):
             self.assertIn(f"src/{name}", self.source("CMakeLists.txt"))

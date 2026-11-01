@@ -45,6 +45,7 @@ draws the parts that depend on it accordingly (*How it is drawn*).
 | `qml/Main.qml` | The scene, the navigation, the actions and the key handling |
 | `qml/Panels.qml` | What each entry's panel and each dialog says, from the real state |
 | `qml/Theme.qml`, `qml/I18n.qml` | Design tokens and motion; the two languages |
+| `qml/OrbitalMenu.qml`, `OrbitalNode`, `OrbitalIcon`, `OrbitalFocus` | The orbital design's menus: the entries as nodes on the orbit's ring with their pills, their icons (each part painted once and moved by a transform), and the entry in focus large at the orbit's centre |
 | `qml/ArcMenu.qml`, `ArcNode`, `DetailPanel`, `OptionRow`, `StatusBar`, `MoonPhase`, `ModalLayer`, `BootLayer`, `UiText`, `MarkText`, `Shadow`, `Material`, `Logo.js` | Components: the arcs and their entries, the panel and its options, the status line, dialogs, the start-up and power-off screen, text and shadows; the MUN logo |
 | `tests/behaviour.py`, `tests/scenes/` | Behaviour regressions run on the compiled binary, offscreen (*A Game Card's identity*), and the software and OpenGL drawing paths side by side on Xvfb (*On a graphics API*) |
 | `tests/displaydevice_test.cpp`, `tests/Makefile` | The display rules on fake sysfs trees and mode lists, compiled and run on the host by `make check` |
@@ -93,6 +94,26 @@ the path, starting at the console's mark (MUN™ › SETTINGS › SYSTEM), and
 the keys (A Select, B Back). The card's crescent on the Game Card object
 (the logo's moon) fills while a card is in the slot. The ambient light at the orb follows the local hour:
 cold at night, pale at dawn, grey-white by day, copper at dusk.
+
+On a graphics API Home has the orbital design instead (`OrbitalBackdrop`,
+`OrbitalMenu`): the night, darker downwards, with an eclipse's warm haze,
+lit edge and halo at the top left; an orbit of rings whose gaps widen
+outwards, its centre clear, a faint polar grid and a ring of dots; two
+waves along the bottom. The entries (MUN Disk, Universe, Settings, Turn off)
+are nodes on the orbit's node ring, each joined by a line to a pill of glass
+with its icon and label; the chosen one fills with cream, grows to the
+right and shows its detail after a thin rule in place of its icon, its node
+lit. The entry in focus also stands large at the orbit's centre, where its
+axes cross, changing with a short fade when the focus moves. Every icon
+moves a little (the disk's label turns, the satellite goes round, the gear
+turns, the power ring breathes; each of Settings' sections its own) with
+the background, at 10 frames a second; the large one slower, about a pixel
+a frame. The panel is flat, in
+the same glass. The software renderer keeps the design above;
+`MUN_SHELL_DESIGN` (`orbital` or `previous`) chooses one for the checks.
+Only the shown design's pieces are made, so neither costs the other memory
+or time; the navigation, the card's states, the sounds and MUN Shape are
+the same in both.
 
 Motion: the start-up plays once per boot, over the start-up sound (13.05
 s): the console waking in the dark, under the vignette of a tube, still

@@ -37,6 +37,25 @@ QtObject {
     // (src/shape.h, docs/shape.md).
     readonly property color accent: copperLight
     readonly property color accentDeep: copper
+
+    // The orbital design (Home on a graphics API, OrbitalBackdrop): its night,
+    // the glass of its pills and panel, the cream of the focus and its ink,
+    // its text in three strengths, and the eclipse's light.
+    readonly property color orbitalGlass: "#11171C"
+    readonly property color orbitalCream: "#FDF1D3"
+    readonly property color orbitalCreamDeep: "#EED3BC"
+    readonly property color orbitalInk: "#17120E"       // text on the cream
+    readonly property color orbitalInkSoft: "#2A2119"   // a detail on the cream
+    readonly property color orbitalText: "#F4F0E8"
+    readonly property color orbitalTextSoft: "#D2C4B4"
+    readonly property color orbitalTextDim: "#A8A29A"
+    readonly property color orbitalLight: "#FEE8C7"
+    // Where the orbit's centre is, its node ring, and where the menu and the
+    // panel start (src/orbitalbackdrop.h).
+    readonly property point orbitalCentre: Qt.point(470, 540)
+    readonly property real orbitalNodeRing: 268
+    readonly property real orbitalMenuX: 772
+    readonly property real orbitalPanelX: 1232
     function accentAlpha(a) { return Qt.rgba(accent.r, accent.g, accent.b, a) }
     function accentDeepAlpha(a) { return Qt.rgba(accentDeep.r, accentDeep.g, accentDeep.b, a) }
     // A colour at an alpha.

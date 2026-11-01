@@ -83,7 +83,7 @@ QColor white(qreal alpha) { return QColor::fromRgbF(1, 1, 1, float(alpha)); }
 
 // The orbit, in the item's coordinates: the outer part (grid, axes, the two
 // outer rings and their nodes) faded out before the menu, then the inner
-// rings, their nodes and the insertion target.
+// rings and their nodes.
 void paintOrbit(QPainter &p)
 {
     p.setRenderHint(QPainter::Antialiasing);
@@ -142,19 +142,6 @@ void paintOrbit(QPainter &p)
     circle(OrbitalBackdrop::kRadii[0], white(0.10), 1);
     for (const qreal deg : {0.0, 90.0, 180.0, 270.0})
         node(OrbitalBackdrop::kRadii[2], deg);
-    p.setPen(QPen(QColor::fromRgbF(0.957f, 0.941f, 0.910f, 0.85f), 2, Qt::SolidLine, Qt::FlatCap, Qt::MiterJoin));
-    p.setBrush(Qt::NoBrush);
-    const qreal h = 66, l = 20;
-    for (const auto &[sx, sy] : {std::pair{-1, -1}, {1, -1}, {-1, 1}, {1, 1}}) {
-        QPainterPath bracket;
-        bracket.moveTo(c + QPointF(sx * h, sy * (h - l)));
-        bracket.lineTo(c + QPointF(sx * h, sy * h));
-        bracket.lineTo(c + QPointF(sx * (h - l), sy * h));
-        p.drawPath(bracket);
-    }
-    p.setPen(QPen(QColor::fromRgbF(0.957f, 0.941f, 0.910f, 0.85f), 1.6));
-    p.drawLine(c + QPointF(-24, 0), c + QPointF(24, 0));
-    p.drawLine(c + QPointF(0, -24), c + QPointF(0, 24));
 }
 
 // The ring of dots, one every 3 degrees.
@@ -519,6 +506,7 @@ void OrbitalBackdrop::onTick(quint64 frame)
         m_time += now - m_last;
     m_last = now;
     update();
+    emit timeChanged();
 }
 
 QSGNode *OrbitalBackdrop::updatePaintNode(QSGNode *old, UpdatePaintNodeData *)

@@ -13,6 +13,7 @@
 #include "displaymode.h"
 #include "framewatch.h"
 #include "gamepads.h"
+#include "renderinfo.h"
 #include "shellsettings.h"
 #include "systemsounds.h"
 
@@ -81,6 +82,17 @@ int main(int argc, char *argv[])
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app,
                      [] { QCoreApplication::exit(kInterfaceFailedStatus); }, Qt::QueuedConnection);
     engine.rootContext()->setContextProperty(QStringLiteral("shellFirstStart"), firstStartThisBoot());
+    // The orbital design is drawn on a graphics API; Qt Quick's software
+    // renderer keeps the previous design. MUN_SHELL_DESIGN ("orbital" or
+    // "previous") chooses one, for the checks. Decided before the window
+    // exists, from what is asked for (RenderInfo): a graphics API that then
+    // fails to start falls back to the software renderer with the orbital
+    // design's still background.
+    const QString design = qEnvironmentVariable("MUN_SHELL_DESIGN");
+    const bool orbital = design == QLatin1String("orbital")
+        || (design != QLatin1String("previous") && RenderInfo::instance()->rhi());
+    engine.rootContext()->setContextProperty(QStringLiteral("shellOrbital"), orbital);
+    qInfo("mun-shell: design: %s", orbital ? "orbital" : "previous");
 
     // Optional UI iteration path: load QML from a directory instead of the
     // compiled resources. Production deployments leave this unset.

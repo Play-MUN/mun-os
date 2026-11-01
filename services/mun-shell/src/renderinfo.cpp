@@ -27,9 +27,17 @@ QString apiName(QSGRendererInterface::GraphicsApi api)
 
 // What Qt Quick would use if the scene graph started now: QT_QUICK_BACKEND
 // (or setSceneGraphBackend) chooses an adaptation apart from the RHI's API.
+// Until the scene graph has started, sceneGraphBackend() gives only a request
+// made in code; Qt reads the environment then, so it is read here as well
+// (measured: with QT_QUICK_BACKEND=software and no window yet, it was empty).
 QSGRendererInterface::GraphicsApi requestedApi()
 {
-    if (QQuickWindow::sceneGraphBackend() == QLatin1String("software"))
+    QString backend = QQuickWindow::sceneGraphBackend();
+    if (backend.isEmpty())
+        backend = qEnvironmentVariable("QMLSCENE_DEVICE");
+    if (backend.isEmpty())
+        backend = qEnvironmentVariable("QT_QUICK_BACKEND");
+    if (backend == QLatin1String("software"))
         return QSGRendererInterface::Software;
     return QQuickWindow::graphicsApi();
 }

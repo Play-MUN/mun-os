@@ -21,6 +21,11 @@ import MUN.Shell
 // MUN's; over a game's world (`overWorld`: Home with a world drawn) it sits
 // on MUN's own plate at its proven opacity, from the moment the front
 // reaches it, every text in MUN's text colour.
+//
+// `orbital` is the orbital design's panel (Home on a graphics API): flat, no
+// lean, at the orbital design's place and size, centred on the orbit's
+// height, in its glass, with its type. Its options, focus, scrolling and
+// identity are the same.
 ProjectedLayer {
     id: root
     // Never faded as a whole: on a graphics API it is drawn through its
@@ -32,6 +37,7 @@ ProjectedLayer {
     property string note: ""
     property bool dressed: false
     property bool overWorld: false
+    property bool orbital: false
     readonly property bool plating: dressed ? Shape.plated : overWorld
     readonly property rect box: Qt.rect(x, y, width, height)
     readonly property real reached: plating ? Shape.reach(Shape.phase, Shape.kind, Shape.progress, box) : 0
@@ -39,8 +45,10 @@ ProjectedLayer {
     readonly property var look: shaped ? Shape.blend(dressed ? "panel" : "neutral", reached)
                                        : ({ plate: Shape.plate, opacity: 1, material: "solid", amount: 0, game: false })
     readonly property bool gameText: dressed && shaped && look.game
-    readonly property color focusColour: !dressed ? Theme.accent : shaped ? (look.game ? Shape.focus : Theme.accent)
-                                         : !Shape.plated ? Shape.focus : Theme.accent
+    // MUN's focus: copper, or the orbital design's cream.
+    readonly property color munFocus: orbital ? Theme.orbitalCream : Theme.accent
+    readonly property color focusColour: !dressed ? munFocus : shaped ? (look.game ? Shape.focus : munFocus)
+                                         : !Shape.plated && !(orbital && Shape.source === "none") ? Shape.focus : munFocus
     // What MUN draws in ash, patina and moon on its panel; on a plate, the
     // set's text colour (the game's once its plan says so, MUN's moon
     // before): every text on a plate is the proven one.
@@ -56,12 +64,13 @@ ProjectedLayer {
 
     // Room for the shadow, flat and projected.
     margin: 170
-    projection: Theme.perspectiveY(-16, 1600, margin + width, margin + height / 2)
-    x: 1150
-    width: 640
-    height: column.height + 88
+    projection: orbital ? Qt.matrix4x4() : Theme.perspectiveY(-16, 1600, margin + width, margin + height / 2)
+    x: orbital ? Theme.orbitalPanelX : 1150
+    width: orbital ? 606 : 640
+    height: column.height + (orbital ? 104 : 88)
     // On whole pixels, so its copy is drawn as it is.
-    y: Math.round(Math.max(150, Math.min(Theme.orb.y - height / 2, Theme.canvasHeight - 130 - height)))
+    readonly property real centreY: orbital ? Theme.orbitalCentre.y : Theme.orb.y
+    y: Math.round(Math.max(150, Math.min(centreY - height / 2, Theme.canvasHeight - 130 - height)))
     Behavior on y {
         enabled: root.settled
         NumberAnimation { duration: 450; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.settle }
@@ -114,14 +123,19 @@ ProjectedLayer {
             anchors.fill: parent
             visible: !root.shaped
             radii: [26]
-            gradient: ({ type: "linear", angle: 160, stops: [[0, Theme.rgba(62, 92, 130, 0.16)], [0.6, Theme.rgba(20, 24, 32, 0.35)], [1, Theme.rgba(7, 8, 10, 0.4)]] })
-            insets: [{ y: 1, color: Theme.rgba(255, 255, 255, 0.08) }, { spread: 1, color: Theme.rgba(143, 176, 214, 0.10) }]
+            gradient: root.orbital
+                ? ({ type: "linear", angle: 180, stops: [[0, Theme.rgba(40, 45, 52, 0.74)], [0.55, Theme.rgba(24, 29, 35, 0.70)], [1, Theme.rgba(20, 25, 31, 0.42)]] })
+                : ({ type: "linear", angle: 160, stops: [[0, Theme.rgba(62, 92, 130, 0.16)], [0.6, Theme.rgba(20, 24, 32, 0.35)], [1, Theme.rgba(7, 8, 10, 0.4)]] })
+            insets: root.orbital
+                ? [{ spread: 1, color: Theme.rgba(255, 255, 255, 0.16) }, { y: 1, color: Theme.rgba(255, 255, 255, 0.10) }]
+                : [{ y: 1, color: Theme.rgba(255, 255, 255, 0.08) }, { spread: 1, color: Theme.rgba(143, 176, 214, 0.10) }]
         }
         // Cast by the panel, whichever surface it shows (placed around its parent).
         Shadow {
             z: -1
             radii: [26]
-            shadows: [{ y: 40, blur: 80, spread: -30, color: Theme.rgba(0, 0, 0, 0.8) }]
+            shadows: root.orbital ? [{ y: 30, blur: 70, spread: -24, color: Theme.rgba(0, 0, 0, 0.75) }]
+                                  : [{ y: 40, blur: 80, spread: -30, color: Theme.rgba(0, 0, 0, 0.8) }]
         }
         Material {
             anchors.fill: parent
@@ -135,36 +149,47 @@ ProjectedLayer {
 
         Column {
             id: column
-            x: 48
-            y: 44
-            width: root.width - 96
+            x: root.orbital ? 52 : 48
+            y: root.orbital ? 52 : 44
+            width: root.width - (root.orbital ? 104 : 96)
 
-            MarkText {
-                text: root.content.kicker
-                size: 15
-                tracking: 0.24
-                color: root.labelColour
+            Row {
+                spacing: 18
+                MarkText {
+                    text: root.content.kicker
+                    size: 15
+                    tracking: root.orbital ? 0.42 : 0.24
+                    color: root.orbital && !root.shaped ? Theme.rgba(237, 230, 222, 0.62) : root.labelColour
+                }
+                // The orbital design's rule after the kicker.
+                Rectangle {
+                    visible: root.orbital
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 52
+                    height: 1
+                    color: Theme.alpha(root.labelColour, 0.45)
+                }
             }
-            Item { width: 1; height: 14 }
+            Item { width: 1; height: root.orbital ? 26 : 14 }
             UiText {
                 width: parent.width
                 text: root.content.title
-                size: 56
+                size: root.orbital ? 50 : 56
                 weight: 700
-                stretch: 118
-                tracking: -0.02
+                stretch: root.orbital ? 108 : 118
+                tracking: root.orbital ? -0.01 : -0.02
                 cssLineHeight: 1.04
                 wrapMode: Text.WordWrap
-                color: root.textColour
+                color: root.orbital && !root.shaped ? "#F7F5F0" : root.textColour
             }
-            Item { width: 1; height: 18 }
+            Item { width: 1; height: root.orbital ? 22 : 18 }
             UiText {
-                // 32ch of Archivo at 25 px.
-                width: Math.min(parent.width, 458)
+                // 32ch of Archivo at 25 px; the orbital design's, the panel's width.
+                width: root.orbital ? parent.width : Math.min(parent.width, 458)
                 text: root.content.text
-                size: 25
-                cssLineHeight: 1.45
-                color: root.secondColour
+                size: root.orbital ? 23 : 25
+                cssLineHeight: root.orbital ? 1.55 : 1.45
+                color: root.orbital && !root.shaped ? Theme.orbitalTextSoft : root.secondColour
                 wrapMode: Text.WordWrap
             }
             Item { width: 1; height: 30 }

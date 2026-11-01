@@ -24,6 +24,10 @@ Window {
     // the launcher restarts the shell around every game, and coming back
     // from one lands on Home with the session's result.
     readonly property bool firstStart: typeof shellFirstStart === "undefined" ? true : shellFirstStart
+    // The orbital design (src/main.cpp): on a graphics API; the software
+    // renderer keeps the previous one. The navigation, the states, the
+    // sounds and Shape are the same in both.
+    readonly property bool orbital: typeof shellOrbital === "undefined" ? false : shellOrbital
     // Input is taken once the start-up has shown, and not while the console
     // turns off or the shell restarts for a new resolution.
     property bool powered: !firstStart
@@ -49,7 +53,7 @@ Window {
         case "released": return I18n.t("Remove it", "Retírala")
         case "offline": return I18n.t("No reader", "Sin lector")
         }
-        return I18n.t("Empty", "Vacía")
+        return orbital ? I18n.t("Insert a disk", "Inserta un disco") : I18n.t("Empty", "Vacía")
     }
     readonly property string slotText: {
         switch (cardMode) {
@@ -155,7 +159,7 @@ Window {
         }
     }
     readonly property bool homeOnScreen: powered && !inSettings && !modal && !starting && !boot.playing && !boot.visible
-                                         && mainArc.opacity === 1 && !modalLayer.visible && !startCover.visible
+                                         && menus.mainOpacity === 1 && !modalLayer.visible && !startCover.visible
     readonly property bool shapeMayBegin: Shape.phase === "ready" && world.ready
                                           && (Shape.entry === "arrival" ? homeOnScreen : powered)
     onShapeMayBeginChanged: if (shapeMayBegin) Qt.callLater(shapeBegin)
@@ -228,18 +232,19 @@ Window {
     property string feedback: ""
 
     readonly property var mainEntries: [
-        { key: "card", label: "Game Card", detail: cardDetail },
-        { key: "games", label: I18n.t("My games", "Mis juegos") },
-        { key: "settings", label: I18n.t("Settings", "Configuración") },
-        { key: "power", label: I18n.t("Turn off", "Apagar") }
+        // The orbital design's names (the owner's): MUN Disk and Universe.
+        { key: "card", label: orbital ? "MUN Disk" : "Game Card", detail: cardDetail, icon: "disk" },
+        { key: "games", label: orbital ? I18n.t("Universe", "Universo") : I18n.t("My games", "Mis juegos"), icon: "universe" },
+        { key: "settings", label: I18n.t("Settings", "Configuración"), icon: "settings" },
+        { key: "power", label: I18n.t("Turn off", "Apagar"), icon: "power" }
     ]
     readonly property var settingsEntries: [
-        { key: "display", label: I18n.t("Display", "Pantalla") },
-        { key: "sound", label: I18n.t("Sound", "Sonido") },
-        { key: "appearance", label: I18n.t("Appearance and accessibility", "Apariencia y accesibilidad") },
-        { key: "language", label: I18n.t("Language and time", "Idioma y hora") },
-        { key: "network", label: I18n.t("Network", "Red") },
-        { key: "system", label: I18n.t("System", "Sistema") }
+        { key: "display", label: I18n.t("Display", "Pantalla"), icon: "display" },
+        { key: "sound", label: I18n.t("Sound", "Sonido"), icon: "sound" },
+        { key: "appearance", label: I18n.t("Appearance and accessibility", "Apariencia y accesibilidad"), icon: "appearance" },
+        { key: "language", label: I18n.t("Language and time", "Idioma y hora"), icon: "language" },
+        { key: "network", label: I18n.t("Network", "Red"), icon: "network" },
+        { key: "system", label: I18n.t("System", "Sistema"), icon: "system" }
     ]
     readonly property bool inSettings: level === 1 || (level === 2 && previousLevel === 1)
     readonly property var focusedEntry: inSettings ? settingsEntries[settingsIndex] : mainEntries[mainIndex]
@@ -726,19 +731,39 @@ Window {
                 window.keyReleased(event.key)
         }
 
-        Backdrop {
-            id: backdrop
+        // Each design's own pieces exist only in it (src/main.cpp): the
+        // previous design's network, object and arcs; the orbital one's
+        // background and menus. Neither costs the other memory or time.
+        Loader {
+            id: backdropLoader
             anchors.fill: parent
-            // Covered by a game's world, MUN's rests and is not drawn.
-            visible: !world.covering
-            orb: Theme.orb
-            hour: status.now.getHours() + status.now.getMinutes() / 60
-            // A package's light and tint come with its transition; a lent or
-            // read one at once.
-            glowColor: Shape.phase === "ready" ? "transparent" : Shape.ambient
-            tint: Shape.phase === "ready" ? "transparent" : Shape.tint
-            running: window.powered && !ShellSettings.reduceMotion && !world.covering
+            active: !window.orbital
+            sourceComponent: Backdrop {
+                anchors.fill: parent
+                // Covered by a game's world, MUN's rests and is not drawn.
+                visible: !world.covering
+                orb: Theme.orb
+                hour: status.now.getHours() + status.now.getMinutes() / 60
+                // A package's light and tint come with its transition; a lent or
+                // read one at once.
+                glowColor: Shape.phase === "ready" ? "transparent" : Shape.ambient
+                tint: Shape.phase === "ready" ? "transparent" : Shape.tint
+                running: window.powered && !ShellSettings.reduceMotion && !world.covering
+            }
         }
+        // The orbital design's background, its slow motion on 10 frames a
+        // second; the menu's icons move by its time.
+        Loader {
+            id: orbitalLoader
+            anchors.fill: parent
+            active: window.orbital
+            sourceComponent: OrbitalBackdrop {
+                anchors.fill: parent
+                visible: !world.covering
+                running: window.powered && !ShellSettings.reduceMotion && !world.covering
+            }
+        }
+        readonly property real orbitalTime: orbitalLoader.item ? orbitalLoader.item.time : 0
         // The game's world (src/shapeworld.h), inside the transition's front,
         // under MUN's scrim while Settings or a dialog is shown.
         ShapeWorld {
@@ -761,21 +786,24 @@ Window {
             frontLight: Shape.glow.valid ? Shape.glow : Shape.ambient.valid ? Shape.ambient : Theme.led
             frontAccent: Shape.focus
         }
-        HeroIcon {
-            id: hero
-            width: 640
-            height: 640
-            x: Theme.orb.x - width / 2
-            y: Theme.orb.y - height / 2 + bob
-            icon: window.focusedEntry.key
-            lit: window.cardReady ? 1 : 0.16
-            running: window.powered && !ShellSettings.reduceMotion
-            cardWindow: Shape.window
-            cardShape: Shape.cardShape
-            morph: Shape.morph
-            cardGlow: Shape.glow
-            cardReveal: Shape.objectProgress
-            onIconChanged: backdrop.ripple()
+        Loader {
+            id: heroLoader
+            active: !window.orbital
+            sourceComponent: HeroIcon {
+                width: 640
+                height: 640
+                x: Theme.orb.x - width / 2
+                y: Theme.orb.y - height / 2 + bob
+                icon: window.focusedEntry.key
+                lit: window.cardReady ? 1 : 0.16
+                running: window.powered && !ShellSettings.reduceMotion
+                cardWindow: Shape.window
+                cardShape: Shape.cardShape
+                morph: Shape.morph
+                cardGlow: Shape.glow
+                cardReveal: Shape.objectProgress
+                onIconChanged: if (backdropLoader.item) backdropLoader.item.ripple()
+            }
         }
 
         Item {
@@ -804,34 +832,77 @@ Window {
                 socketed: window.statusLook.shaped
             }
 
-            Item {
+            Loader {
+                id: menus
                 anchors.fill: parent
-                ArcMenu {
-                    id: mainArc
-                    anchors.fill: parent
-                    entries: window.mainEntries
-                    current: window.mainIndex
-                    radius: 340
-                    spread: 24
-                    dressed: true
-                    hidden: window.inSettings
-                    dimmed: window.level === 2 && window.previousLevel === 0
-                    onActivated: (index) => { if (!window.wake()) window.clickEntry(0, index) }
+                sourceComponent: window.orbital ? orbitalMenus : arcMenus
+                // The main menu's opacity: Home is whole once it has faded in.
+                readonly property real mainOpacity: item ? item.mainOpacity : 0
+            }
+            Component {
+                id: arcMenus
+                Item {
+                    readonly property real mainOpacity: mainArc.opacity
+                    ArcMenu {
+                        id: mainArc
+                        anchors.fill: parent
+                        entries: window.mainEntries
+                        current: window.mainIndex
+                        radius: 340
+                        spread: 24
+                        dressed: true
+                        hidden: window.inSettings
+                        dimmed: window.level === 2 && window.previousLevel === 0
+                        onActivated: (index) => { if (!window.wake()) window.clickEntry(0, index) }
+                    }
+                    ArcMenu {
+                        anchors.fill: parent
+                        entries: window.settingsEntries
+                        current: window.settingsIndex
+                        radius: 350
+                        spread: 17
+                        compact: true
+                        hidden: !window.inSettings
+                        dimmed: window.level === 2 && window.previousLevel === 1
+                        onActivated: (index) => { if (!window.wake()) window.clickEntry(1, index) }
+                    }
                 }
-                ArcMenu {
-                    anchors.fill: parent
-                    entries: window.settingsEntries
-                    current: window.settingsIndex
-                    radius: 350
-                    spread: 17
-                    compact: true
-                    hidden: !window.inSettings
-                    dimmed: window.level === 2 && window.previousLevel === 1
-                    onActivated: (index) => { if (!window.wake()) window.clickEntry(1, index) }
+            }
+            Component {
+                id: orbitalMenus
+                Item {
+                    readonly property real mainOpacity: mainOrbit.opacity
+                    OrbitalFocus {
+                        icon: window.focusedEntry.icon || ""
+                        time: canvas.orbitalTime
+                        shown: !world.covering
+                    }
+                    OrbitalMenu {
+                        id: mainOrbit
+                        anchors.fill: parent
+                        entries: window.mainEntries
+                        current: window.mainIndex
+                        dressed: true
+                        hidden: window.inSettings
+                        dimmed: window.level === 2 && window.previousLevel === 0
+                        time: canvas.orbitalTime
+                        onActivated: (index) => { if (!window.wake()) window.clickEntry(0, index) }
+                    }
+                    OrbitalMenu {
+                        anchors.fill: parent
+                        entries: window.settingsEntries
+                        current: window.settingsIndex
+                        compact: true
+                        hidden: !window.inSettings
+                        dimmed: window.level === 2 && window.previousLevel === 1
+                        time: canvas.orbitalTime
+                        onActivated: (index) => { if (!window.wake()) window.clickEntry(1, index) }
+                    }
                 }
             }
 
             DetailPanel {
+                orbital: window.orbital
                 content: window.panel
                 // The game's panel: the Game Card entry's, on the main arc.
                 dressed: window.focusedEntry.key === "card" && !window.inSettings

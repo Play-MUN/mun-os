@@ -2,8 +2,8 @@
 // darker downwards, with the eclipse's warm haze in its upper left; the
 // eclipse itself, the lit edge of the outer ring and its halo; the orbit,
 // rings whose gaps widen outwards (18, 26, 34, 42, 50 and 58 px), a faint
-// polar grid and axes, the nodes and the insertion target, its outer part
-// fading before the menu; the ring of dots; and two waves along the bottom,
+// polar grid and axes and the nodes, its outer part fading before the menu,
+// its centre left clear; the ring of dots; and two waves along the bottom,
 // the front one's edge lit by the eclipse on the left and again on the
 // right, where it passes behind the panel.
 //
@@ -38,12 +38,16 @@ class OrbitalBackdrop : public QQuickItem {
     QML_ELEMENT
     // Whether the waves, the eclipse and the dots move (Reduce motion: no).
     Q_PROPERTY(bool running READ running WRITE setRunning NOTIFY runningChanged)
+    // Seconds of motion so far, on the layer's ticks (10 frames a second):
+    // what else moves with the background (the menu's icons) moves by it, so
+    // the window still draws only those frames. Still while not running.
+    Q_PROPERTY(qreal time READ time NOTIFY timeChanged)
 
 public:
     // The orbit's centre, the rings' radii and where the menu begins: the
     // menu places its nodes on nodeRing and its entries from menuX.
     static constexpr qreal kCentreX = 470;
-    static constexpr qreal kCentreY = 516;
+    static constexpr qreal kCentreY = 540;   // the canvas's middle: the menu and the panel share it
     static constexpr qreal kRadii[] = {148, 166, 192, 226, 268, 318, 376};
     static constexpr qreal kNodeRing = 268;
     static constexpr qreal kOuterRing = 376;
@@ -54,9 +58,11 @@ public:
 
     bool running() const { return m_running; }
     void setRunning(bool running);
+    qreal time() const { return m_time; }
 
 signals:
     void runningChanged();
+    void timeChanged();
 
 protected:
     QSGNode *updatePaintNode(QSGNode *old, UpdatePaintNodeData *) override;

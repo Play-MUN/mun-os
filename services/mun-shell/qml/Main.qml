@@ -287,22 +287,16 @@ Window {
             sound("move")
     }
 
+    // Left and Right choose: a dialog's answer, or a choice's value. Going in
+    // and back out are Accept and Back alone (A and B on a controller).
     function side(step) {
         if (modal) {
             move(step)
             return
         }
-        if (level !== 2) {
-            step > 0 ? enter() : back()
-            return
-        }
-        const option = options[optionIndex]
-        if (!option || option.kind !== "choice") {
-            if (step < 0)
-                back()
-            return
-        }
-        change(option, step)
+        const option = level === 2 ? options[optionIndex] : null
+        if (option && option.kind === "choice")
+            change(option, step)
     }
 
     function change(option, step) {

@@ -686,8 +686,7 @@ Home says "You can remove the Game Card". The shell never touches the device.
 | Input | Action |
 | --- | --- |
 | Up / Down | Move within the arc or the options, wrapping |
-| Right | Enter an entry, or change a choice forwards |
-| Left | Back, or change a choice backwards |
+| Left / Right | Change a choice backwards or forwards; nothing elsewhere |
 | A, Enter, Return, Space | Enter, run the option, or answer a dialog |
 | B, Esc, Backspace | Back one level, or close the dialog; inside a game, the game decides (MUN Collect exits) |
 | Pointer | A click on an entry focuses it, or enters it when it has the focus; on an option runs it; on a dialog's answer chooses it; the wheel moves (a convenience of the laboratory's window) |

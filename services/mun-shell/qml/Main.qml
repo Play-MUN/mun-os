@@ -115,6 +115,16 @@ Window {
         value: ShellSettings.gameSounds && ShellSettings.shapeMode === "full" && !window.inSettings && !window.modal
                && (Shape.phase === "present" || (Shape.phase === "entering" && Shape.objectProgress >= 1))
     }
+    // The sound device stays open while the interface is shown and its
+    // sounds are on, dimmed too, so the first sound after a pause, and the
+    // first move after the input that undims, is heard (src/systemsounds.h);
+    // with System sounds off (every sound the shell plays follows it) it is
+    // let go.
+    Binding {
+        target: SystemSounds
+        property: "awake"
+        value: window.powered && ShellSettings.systemSounds
+    }
     readonly property string shapeSounds: JSON.stringify(Shape.sounds)
     onShapeSoundsChanged: SystemSounds.useGameSounds(Shape.sounds)
 

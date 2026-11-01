@@ -104,11 +104,13 @@ are nodes on the orbit's node ring, each joined by a line to a pill of glass
 with its icon and label; the chosen one fills with cream, grows to the
 right and shows its detail after a thin rule in place of its icon, its node
 lit. The entry in focus also stands large at the orbit's centre, where its
-axes cross, changing with a short fade when the focus moves. Every icon
-moves a little (the disk's label turns, the satellite goes round, the gear
-turns, the power ring breathes; each of Settings' sections its own) with
-the background, at 10 frames a second; the large one slower, about a pixel
-a frame. The panel is flat, in
+axes cross: when the focus comes to it, it grows in and plays a gesture of
+its own, then rests (the disk turns a quarter, the satellite goes once
+round the planet and settles, the gear turns a quarter, the power sign is
+pressed; each of Settings' sections its own), drawn on every frame while
+it runs. The small icons rest. At each move the ring of dots turns a step,
+as a dial. The waves and the eclipse move slowly, at 10 frames a second.
+The panel is flat, in
 the same glass. The software renderer keeps the design above;
 `MUN_SHELL_DESIGN` (`orbital` or `previous`) chooses one for the checks.
 Only the shown design's pieces are made, so neither costs the other memory

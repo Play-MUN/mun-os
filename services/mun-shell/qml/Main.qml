@@ -230,6 +230,9 @@ Window {
     // A line of feedback under the options (a refused launch, a failed save);
     // cleared when the focus moves.
     property string feedback: ""
+    // How far the orbital design's ring of dots is turned (degrees): a step,
+    // four dots, at each move on the menus.
+    property real dial: 0
 
     readonly property var mainEntries: [
         // The orbital design's names (the owner's): MUN Disk and Universe.
@@ -294,8 +297,11 @@ Window {
             settingsIndex = (settingsIndex + step + settingsEntries.length) % settingsEntries.length
         else
             optionIndex = firstSelectable(optionIndex + step, step)
-        if ([level, mainIndex, settingsIndex, optionIndex].join() !== before)
+        if ([level, mainIndex, settingsIndex, optionIndex].join() !== before) {
             sound("move")
+            if (level < 2)
+                dial += step * 12
+        }
     }
 
     // Left and Right choose: a dialog's answer, or a choice's value. Going in
@@ -752,7 +758,7 @@ Window {
             }
         }
         // The orbital design's background, its slow motion on 10 frames a
-        // second; the menu's icons move by its time.
+        // second; its ring of dots turns a step at each move, as a dial.
         Loader {
             id: orbitalLoader
             anchors.fill: parent
@@ -761,9 +767,13 @@ Window {
                 anchors.fill: parent
                 visible: !world.covering
                 running: window.powered && !ShellSettings.reduceMotion && !world.covering
+                dial: ShellSettings.reduceMotion ? 0 : window.dial
+                Behavior on dial {
+                    enabled: !ShellSettings.reduceMotion
+                    NumberAnimation { duration: 900; easing.type: Easing.OutBack; easing.overshoot: 1.1 }
+                }
             }
         }
-        readonly property real orbitalTime: orbitalLoader.item ? orbitalLoader.item.time : 0
         // The game's world (src/shapeworld.h), inside the transition's front,
         // under MUN's scrim while Settings or a dialog is shown.
         ShapeWorld {
@@ -874,7 +884,6 @@ Window {
                     readonly property real mainOpacity: mainOrbit.opacity
                     OrbitalFocus {
                         icon: window.focusedEntry.icon || ""
-                        time: canvas.orbitalTime
                         shown: !world.covering
                     }
                     OrbitalMenu {
@@ -885,7 +894,6 @@ Window {
                         dressed: true
                         hidden: window.inSettings
                         dimmed: window.level === 2 && window.previousLevel === 0
-                        time: canvas.orbitalTime
                         onActivated: (index) => { if (!window.wake()) window.clickEntry(0, index) }
                     }
                     OrbitalMenu {
@@ -895,7 +903,6 @@ Window {
                         compact: true
                         hidden: !window.inSettings
                         dimmed: window.level === 2 && window.previousLevel === 1
-                        time: canvas.orbitalTime
                         onActivated: (index) => { if (!window.wake()) window.clickEntry(1, index) }
                     }
                 }

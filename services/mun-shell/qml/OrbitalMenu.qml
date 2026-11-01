@@ -6,9 +6,9 @@ import MUN.Shell
 // centre, 104 px apart (76 compact: Settings' sections), each with its node
 // where the orbit's node ring crosses its height and every pill from the
 // same edge. Hidden, it fades and moves 60 px left; dimmed (the panel's
-// options have the focus), its entries step back (OrbitalNode). `time` moves
-// the icons (OrbitalBackdrop's); once faded out, the menu is no longer drawn
-// and its icons rest.
+// options have the focus), its entries step back (OrbitalNode); once faded
+// out, it is no longer drawn. Its icons rest: the one in focus moves, large,
+// at the orbit's centre (OrbitalFocus).
 Item {
     id: root
     property var entries: []
@@ -17,7 +17,6 @@ Item {
     property bool hidden: false
     property bool dimmed: false
     property bool dressed: false
-    property real time: 0
     // A pointer chose entry `index`.
     signal activated(int index)
 
@@ -46,7 +45,6 @@ Item {
             compact: root.compact
             dressed: root.dressed
             dimmed: root.dimmed
-            time: root.visible ? root.time : 0
             onClicked: root.activated(index)
         }
     }

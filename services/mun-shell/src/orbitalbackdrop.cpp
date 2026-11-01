@@ -506,7 +506,15 @@ void OrbitalBackdrop::onTick(quint64 frame)
         m_time += now - m_last;
     m_last = now;
     update();
-    emit timeChanged();
+}
+
+void OrbitalBackdrop::setDial(qreal dial)
+{
+    if (qFuzzyCompare(dial, m_dial))
+        return;
+    m_dial = dial;
+    update();
+    emit dialChanged();
 }
 
 QSGNode *OrbitalBackdrop::updatePaintNode(QSGNode *old, UpdatePaintNodeData *)
@@ -565,8 +573,8 @@ QSGNode *OrbitalBackdrop::updatePaintNode(QSGNode *old, UpdatePaintNodeData *)
         layers->setFlag(QSGNode::OwnedByParent);
         m_reset = false;
     }
-    // The moment's numbers: the eclipse breathes over 14 s, the dots turn
-    // once in four minutes, the waves take the time.
+    // The moment's numbers: the eclipse breathes over 14 s, the dots are
+    // turned as the dial says, the waves take the time.
     const qreal breath = 0.91 + 0.09 * std::cos(2 * kPi * m_time / 14);
     auto *eclipse = static_cast<EclipseMaterial *>(layers->eclipse->material());
     eclipse->uniforms.view[1] = float(m_time);
@@ -575,7 +583,7 @@ QSGNode *OrbitalBackdrop::updatePaintNode(QSGNode *old, UpdatePaintNodeData *)
     layers->eclipse->markDirty(QSGNode::DirtyMaterial);
     QMatrix4x4 turn;
     turn.translate(float(kCentre.x()), float(kCentre.y()));
-    turn.rotate(float(std::fmod(m_time * 360 / 240, 360)), 0, 0, 1);
+    turn.rotate(float(std::fmod(m_dial, 360)), 0, 0, 1);
     turn.translate(float(-kCentre.x()), float(-kCentre.y()));
     layers->turn->setMatrix(turn);
     auto *waves = static_cast<WaveMaterial *>(layers->waves->material());

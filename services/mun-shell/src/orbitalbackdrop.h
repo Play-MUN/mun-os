@@ -19,9 +19,10 @@
 // - Qt Quick's software renderer: everything is painted once into one image,
 //   the waves at rest, and shown still.
 // The motion is slow (the waves sway a few pixels over tens of seconds, the
-// eclipse breathes over 14 s, the dots turn once in four minutes), so it
-// runs at SceneClock's 10 frames per second, and with `running` false it
-// stops where it is. The light adds to what is beneath it, as light does.
+// eclipse breathes over 14 s), so it runs at SceneClock's 10 frames per
+// second, and with `running` false it stops where it is. The ring of dots
+// rests, turned as far as `dial` says: the menu turns it a step at each move,
+// animated in QML on every frame while it turns. The light adds to what is beneath it, as light does.
 //
 // Geometry is in logical pixels of the 1920x1080 design; the item is opaque
 // and meant to fill the window. Properties and motion on the GUI thread;
@@ -38,10 +39,8 @@ class OrbitalBackdrop : public QQuickItem {
     QML_ELEMENT
     // Whether the waves, the eclipse and the dots move (Reduce motion: no).
     Q_PROPERTY(bool running READ running WRITE setRunning NOTIFY runningChanged)
-    // Seconds of motion so far, on the layer's ticks (10 frames a second):
-    // what else moves with the background (the menu's icons) moves by it, so
-    // the window still draws only those frames. Still while not running.
-    Q_PROPERTY(qreal time READ time NOTIFY timeChanged)
+    // How far the ring of dots is turned, in degrees, clockwise.
+    Q_PROPERTY(qreal dial READ dial WRITE setDial NOTIFY dialChanged)
 
 public:
     // The orbit's centre, the rings' radii and where the menu begins: the
@@ -58,11 +57,12 @@ public:
 
     bool running() const { return m_running; }
     void setRunning(bool running);
-    qreal time() const { return m_time; }
+    qreal dial() const { return m_dial; }
+    void setDial(qreal dial);
 
 signals:
     void runningChanged();
-    void timeChanged();
+    void dialChanged();
 
 protected:
     QSGNode *updatePaintNode(QSGNode *old, UpdatePaintNodeData *) override;
@@ -74,6 +74,7 @@ private:
 
     bool m_running = true;
     qreal m_time = 0;      // seconds of motion so far
+    qreal m_dial = 0;
     qreal m_last = -1;     // the clock's time at the last tick, while moving
     bool m_reset = true;   // the nodes are made again (size, scale or path changed)
 };

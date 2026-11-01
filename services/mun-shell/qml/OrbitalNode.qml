@@ -26,8 +26,6 @@ Item {
     property bool dressed: false
     property bool dimmed: false
     property bool moving: !ShellSettings.reduceMotion
-    // Moves the icon (OrbitalIcon).
-    property real time: 0
     // The node's centre (on the ring) and where the pills begin, in the canvas.
     property real nodeX
     property real centreY
@@ -176,7 +174,6 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             size: root.compact ? 28 : 34
             name: root.icon
-            time: root.time
             colour: root.labelColour
             opacity: root.on || root.icon === "" ? 0 : 1
             Behavior on opacity { enabled: root.moving; NumberAnimation { duration: 160 } }

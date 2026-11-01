@@ -46,7 +46,7 @@ ProjectedLayer {
                                        : ({ plate: Shape.plate, opacity: 1, material: "solid", amount: 0, game: false })
     readonly property bool gameText: dressed && shaped && look.game
     // MUN's focus: copper, or in the orbital design the light of the section
-    // in focus (Theme.orbitalAccents).
+    // in focus (Theme.orbitalSections).
     property color orbitalFocus: Theme.orbitalCream
     readonly property color munFocus: orbital ? orbitalFocus : Theme.accent
     readonly property color focusColour: !dressed ? munFocus : shaped ? (look.game ? Shape.focus : munFocus)

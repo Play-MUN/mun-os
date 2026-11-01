@@ -101,8 +101,10 @@ haze, lit edge and halo at the top left; an orbit of rings whose gaps widen
 outwards, its centre clear, a faint polar grid and a ring of dots; two
 waves along the bottom. The entries (MUN Disk, Universe, Settings, Turn off)
 are nodes on the orbit's node ring, each joined by a line to a pill of glass
-with its icon and label. Each section has its own light: MUN Disk amber,
-Universe violet, Settings (and its sections) sage, Turn off coral. The
+with its icon and label. Each section has its own light, from MUN OS's
+palette (`Theme.palette`: night, moon grey, moonlight, cyan and rose):
+MUN Disk moonlight, Universe cyan, Settings (and its sections) moon grey,
+Turn off rose. The
 chosen pill fills with its light, grows to the right and shows its detail
 after a thin rule in place of its icon, its node lit in the same colour,
 which the large icon and the panel's focus take too; with a game's MUN

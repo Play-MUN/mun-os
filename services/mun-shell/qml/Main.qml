@@ -250,7 +250,7 @@ Window {
         { key: "system", label: I18n.t("System", "Sistema"), icon: "system" }
     ]
     readonly property bool inSettings: level === 1 || (level === 2 && previousLevel === 1)
-    // The orbital design's light of the section in focus (Theme.orbitalAccents).
+    // The orbital design's light of the section in focus (Theme.orbitalSections).
     readonly property color sectionLight: Theme.orbitalAccent(inSettings ? "settings" : mainEntries[mainIndex].key)
     readonly property var focusedEntry: inSettings ? settingsEntries[settingsIndex] : mainEntries[mainIndex]
     readonly property var panel: panels.build(focusedEntry.key)

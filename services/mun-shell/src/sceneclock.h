@@ -11,10 +11,13 @@
 //   ticks at the fastest rate demanded. Its interval is whole milliseconds,
 //   not the display's frame.
 // - Qt Quick's animation driver, once setSynced(true) (an accelerated
-//   renderer, src/renderinfo.h): one tick per frame the window renders,
-//   which on the threaded render loop is the display's frame. A layer at 60
-//   then moves on every frame, whatever the display's rate (seconds() keeps
-//   the speed), and a lower rate on every third, sixth... frame as at 60.
+//   renderer, src/renderinfo.h) and while a layer demands 60: one tick per
+//   frame the window renders, which on the threaded render loop is the
+//   display's frame. A layer at 60 then moves on every frame, whatever the
+//   display's rate (seconds() keeps the speed), and a lower rate on every
+//   third, sixth... frame as at 60. With only lower rates demanded the timer
+//   ticks instead, synced or not: a running animation would have the window
+//   draw every frame of the display for a layer that changes on few of them.
 // seconds() is the time of the current tick; layers move by it. Pace, below,
 // eases a layer's motion to a stop and back.
 //

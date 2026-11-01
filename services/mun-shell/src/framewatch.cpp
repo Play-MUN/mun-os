@@ -1,5 +1,7 @@
 #include "framewatch.h"
 
+#include "sceneclock.h"
+
 #include <QThread>
 
 #include <algorithm>
@@ -23,6 +25,9 @@ FrameWatch::FrameWatch(QObject *parent) : QObject(parent)
     m_windowTimer.setInterval(kWindowMs);
     connect(&m_windowTimer, &QTimer::timeout, this, &FrameWatch::judge);
     m_windowTimer.start();
+    m_hold.setSingleShot(true);
+    m_hold.setInterval(int(kActiveMs));
+    connect(&m_hold, &QTimer::timeout, this, [this] { SceneClock::instance()->demand(this, 0); });
     const QString path = qEnvironmentVariable("MUN_SHELL_TIMING");
     if (!path.isEmpty()) {
         m_log.setFileName(path);
@@ -36,6 +41,7 @@ FrameWatch::~FrameWatch()
     // First of all: no swap reaches onSwapped() once this is going away.
     if (m_window)
         disconnect(m_window, nullptr, this, nullptr);
+    SceneClock::instance()->demand(this, 0);
 }
 
 void FrameWatch::setWindow(QQuickWindow *window)
@@ -81,6 +87,8 @@ void FrameWatch::setAnimating(bool animating)
 
 void FrameWatch::keyPressed()
 {
+    SceneClock::instance()->demand(this, SceneClock::kBaseRate);
+    m_hold.start();
     const qint64 now = m_clock.elapsed();
     if (m_keyAt < 0)
         m_keyAt = now;

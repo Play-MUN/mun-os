@@ -122,13 +122,18 @@ void SceneClock::retime()
         m_ticker->stop();
         return;
     }
-    if (m_synced) {
+    if (m_synced && fastest == kBaseRate) {
         // Every frame is a tick of the base rate.
+        m_timer.stop();
         m_step = 1;
         if (m_ticker->state() != QAbstractAnimation::Running)
             m_ticker->start();
         return;
     }
+    // A lower rate alone ticks on the timer, synced or not: a running
+    // animation would have the window draw every frame of the display, and a
+    // layer at 10 frames per second would cost 60 of them.
+    m_ticker->stop();
     const int step = kBaseRate / fastest;
     if (step == m_step && m_timer.isActive())
         return;

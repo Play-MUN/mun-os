@@ -237,10 +237,14 @@ and the render loop. On a graphics API:
   frames the window renders (Qt Quick's animation driver, which the threaded
   render loop paces by the display) instead of its timer, and the network
   drifts, its waves run, the gear turns and the object floats (by fractions
-  of a pixel) on every frame: what moves costs the GPU, not a repaint. The journal says which ("mun-shell: motion: …"). With the
-  software renderer, or OpenGL in software, the rates above stay. Rest and
-  *Reduce motion* stop the motion as before, and a still screen draws
-  nothing.
+  of a pixel) on every frame: what moves costs the GPU, not a repaint. The journal says which ("mun-shell: motion: …"). While
+  only lower rates are asked for (a slow layer at 10 or 20 frames a second)
+  the clock ticks on its timer even there, so the window draws only the
+  frames that change; for 600 ms after each key (`FrameWatch`) it ticks on
+  every frame, so the motion a key starts is drawn at the display's rate
+  from its first frame. With the software renderer, or OpenGL in software,
+  the rates above stay. Rest and *Reduce motion* stop the motion as before,
+  and a still screen draws nothing.
 
 Measured on an ARM64 development board (OpenGL ES 3.2 on Mesa's freedreno,
 1920×1080 at 60 Hz, the threaded render loop; percent of one core used by

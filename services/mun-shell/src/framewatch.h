@@ -65,6 +65,10 @@ public:
     ~FrameWatch() override;
 
     // A key was pressed now: its latency ends at the next frame on screen.
+    // Navigation comes first: for kActiveMs after it, SceneClock ticks on
+    // every frame the window renders, so the motion a key starts is drawn at
+    // the display's rate from its first frame even when the layers at rest
+    // ask only for a few frames a second (src/sceneclock.h).
     Q_INVOKABLE void keyPressed();
     // A gamepad's input at its kernel time (CLOCK_MONOTONIC, ms, src/gamepads.h):
     // the time from it to the next frame on screen goes to the laboratory's
@@ -111,5 +115,6 @@ private:
     std::vector<qreal> m_transition;    // during a transition: logged
     std::vector<qreal> m_keys;
     QTimer m_windowTimer;
+    QTimer m_hold;   // keeps SceneClock at every frame after a key
     QFile m_log;
 };

@@ -59,7 +59,8 @@ come from CardClient. The cases:
   which renderer and which clock it took, and the same still screen (Home's
   network, objects loaded after a change, the panel's surface and shadow, a
   chosen entry's bar, glow and knob) matches between them within measured
-  bounds. Skipped, and said so, where Xvfb is not installed.
+  bounds. With --platform eglfs, OpenGL is the board's own GPU; elsewhere
+  it is skipped, and said so, where Xvfb is not installed.
 - settings: the player's settings file (settings.qml): a damaged file reads
   as the defaults and the next choice writes a valid one; a value outside
   the allowed set reads as its default; a change replaces the file whole (a
@@ -73,6 +74,7 @@ the measurements (report.json) there.
 """
 import argparse
 import base64
+import contextlib
 import json
 import os
 import re
@@ -186,11 +188,12 @@ class Shell:
 
     def run(self, name: str, scene: str, config: dict, runtime: Path = None, socket_path: Path = None,
             exports: Path = None, timeout: float = 90, launcher: Path = None, settings: str = "",
-            scale: float = 1, display: str = None) -> str:
+            scale: float = 1, display: str = None, software: bool = False) -> str:
         """Runs the shell with `scene` and returns its output. `scale` is the
         display's device pixels per canvas pixel (4/3: 2560x1440). With an X
         `display` it draws there through OpenGL (xcb) instead of offscreen
-        with the software renderer."""
+        with the software renderer; `software` keeps that renderer on a
+        board's display too."""
         case = self.work / name
         qml = case / "qml"
         qml.mkdir(parents=True, exist_ok=True)
@@ -216,7 +219,7 @@ class Shell:
         if display:
             env.pop("QT_QUICK_BACKEND")
             env.update(QT_QPA_PLATFORM="xcb", DISPLAY=display)
-        elif self.platform == "eglfs":
+        elif self.platform == "eglfs" and not software:
             # A board's own display and GPU (the console's service stopped).
             env.pop("QT_QUICK_BACKEND")
             env.update(QT_QPA_PLATFORM="eglfs", QT_QPA_EGLFS_INTEGRATION="eglfs_kms")
@@ -1563,26 +1566,34 @@ def difference(a, b, box=None):
 
 
 def paths_cases(shell: Shell, checks: Checks, report: dict):
-    """The software renderer and OpenGL draw the same still screen."""
+    """The software renderer and OpenGL draw the same still screen. OpenGL
+    is llvmpipe on an X server from Xvfb, or, with --platform eglfs, a
+    board's own GPU."""
     steps = lambda icon: {"icon": "card", "steps": [{"at": 1500, "icon": icon}, {"at": 6000, "grab": icon},
                                                     {"at": 9000, "quit": True}]}
-    with Xvfb() as server:
+    native = shell.platform == "eglfs"
+    with contextlib.nullcontext(False) if native else Xvfb() as server:
         if server is None:
             checks.skip("paths", "no Xvfb to give the OpenGL path a display; only the software path ran elsewhere")
             return
+        route_args = {"software": {"software": True}, "opengl": {"display": server.display} if server else {}}
         frames = {}
         for route in ("software", "opengl"):
             for icon in ("none", "settings", "card"):
                 name = f"paths-{route}-{icon}"
                 config = dict(steps(icon), out=str(shell.work / name))
                 (shell.work / name).mkdir(parents=True, exist_ok=True)
-                output = shell.run(name, "paths.qml", config, display=server.display if route == "opengl" else None)
+                output = shell.run(name, "paths.qml", config, **route_args[route])
                 said = [p for p in lines(output, "PATHS") if p["label"] == "renderer"]
                 if icon == "none":
                     if route == "software":
                         checks.expect(name, "the software renderer says so, its clock a timer",
                                       bool(said) and said[0]["api"] == "software" and not said[0]["rhi"]
                                       and "motion: on a timer" in output, said)
+                    elif native:
+                        checks.expect(name, "OpenGL says so, accelerated, its clock Qt's animation driver",
+                                      bool(said) and said[0]["api"] == "opengl" and said[0]["rhi"]
+                                      and said[0]["accelerated"] and "motion: on the frames" in output, said)
                     else:
                         checks.expect(name, "OpenGL says so and that llvmpipe is not accelerated, its clock a timer",
                                       bool(said) and said[0]["api"] == "opengl" and said[0]["rhi"]
@@ -1610,6 +1621,7 @@ def paths_cases(shell: Shell, checks: Checks, report: dict):
                 report.setdefault("paths", {})[f"{icon}: {what}"] = {"mean": round(got_mean, 3), "over16": round(got_share, 5)}
                 checks.expect(f"paths-{icon}", f"{what} matches (mean {got_mean:.3f} <= {mean}, over 16 levels "
                               f"{got_share:.4%} <= {share:.2%})", got_mean <= mean and got_share <= share)
+
 
 
 def settings_cases(shell: Shell, checks: Checks):

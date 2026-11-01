@@ -124,7 +124,7 @@ ProjectedLayer {
             visible: !root.shaped
             radii: [26]
             gradient: root.orbital
-                ? ({ type: "linear", angle: 180, stops: [[0, Theme.rgba(40, 45, 52, 0.74)], [0.55, Theme.rgba(24, 29, 35, 0.70)], [1, Theme.rgba(20, 25, 31, 0.42)]] })
+                ? ({ type: "linear", angle: 180, stops: [[0, Theme.rgba(43, 44, 46, 0.74)], [0.55, Theme.rgba(27, 28, 30, 0.70)], [1, Theme.rgba(23, 24, 26, 0.42)]] })
                 : ({ type: "linear", angle: 160, stops: [[0, Theme.rgba(62, 92, 130, 0.16)], [0.6, Theme.rgba(20, 24, 32, 0.35)], [1, Theme.rgba(7, 8, 10, 0.4)]] })
             insets: root.orbital
                 ? [{ spread: 1, color: Theme.rgba(255, 255, 255, 0.16) }, { y: 1, color: Theme.rgba(255, 255, 255, 0.10) }]

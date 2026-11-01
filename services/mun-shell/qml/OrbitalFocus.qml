@@ -30,11 +30,11 @@ Item {
         width: root.disc
         height: root.disc
         radii: [root.disc / 2]
-        color: Theme.rgba(19, 22, 27, 0.9)
+        color: Theme.rgba(17, 18, 20, 0.9)
         Shadow {
             z: -1
             radii: [root.disc / 2]
-            shadows: [{ blur: 48, color: Theme.rgba(19, 22, 27, 0.9) }]
+            shadows: [{ blur: 48, color: Theme.rgba(17, 18, 20, 0.9) }]
         }
     }
 

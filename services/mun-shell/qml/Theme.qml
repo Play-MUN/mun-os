@@ -41,7 +41,7 @@ QtObject {
     // The orbital design (Home on a graphics API, OrbitalBackdrop): its night,
     // the glass of its pills and panel, the cream of the focus and its ink,
     // its text in three strengths, and the eclipse's light.
-    readonly property color orbitalGlass: "#11171C"
+    readonly property color orbitalGlass: "#151618"
     readonly property color orbitalCream: "#FDF1D3"
     readonly property color orbitalCreamDeep: "#EED3BC"
     readonly property color orbitalInk: "#17120E"       // text on the cream

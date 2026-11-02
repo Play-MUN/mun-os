@@ -209,6 +209,21 @@ void dropped()
         check("pressed again: it acts", m.feed(kEvKey, kBtnDpadLeft, 1, 2300) == Events{press(Action::Left)});
     }
     {
+        // The direction acting let go while lost, another held since before
+        // it still held: that one takes over, as when events flow.
+        Mapper m = pad();
+        m.feed(kEvAbs, kAbsHat0Y, -1, 0);
+        check("Down pressed after Up acts", m.feed(kEvKey, kBtnDpadDown, 1, 100)
+              == Events{release(Action::Up), press(Action::Down)});
+        m.feed(kEvSyn, kSynDropped, 0, 1000);
+        m.feed(kEvSyn, kSynReport, 0, 1001);
+        State state;
+        state.hatY = -1;
+        check("Down let go while lost, Up still held: Up takes over",
+              m.resync(state, 2000) == Events{release(Action::Down), press(Action::Up)});
+        check("and repeats after the delay", m.nextDue() == 2000 + kRepeatDelayMs);
+    }
+    {
         // The stick from its position; Nintendo's layout kept.
         Mapper m = pad();
         m.setNintendo(true);

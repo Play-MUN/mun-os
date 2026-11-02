@@ -45,6 +45,31 @@ void Mapper::setHeld(int direction, bool Sources::*source, bool on, long long ms
     if (on && !held.any())
         m_since[direction] = ms;
     held.*source = on;
+    // A spent direction acts again once nothing holds it.
+    if (!held.any())
+        m_spent[direction] = false;
+}
+
+void Mapper::key(bool &held, bool &spent, int value, Action action, std::vector<Event> &out)
+{
+    // 1 pressed, 2 the kernel's own repeat (still pressed), 0 released.
+    const bool on = value != 0;
+    if (spent) {
+        if (!on) {
+            held = false;
+            spent = false;
+        }
+        return;
+    }
+    if (on == held)
+        return;
+    held = on;
+    // A repeat of a press never seen (lost with a dropped report) is not one.
+    if (on && value == 2) {
+        spent = true;
+        return;
+    }
+    out.push_back({action, on});
 }
 
 void Mapper::stickMoved(long long ms)
@@ -79,7 +104,7 @@ void Mapper::settle(long long ms, std::vector<Event> &out)
     // on a tie (one report that moves the hat diagonally).
     int best = -1;
     for (int d = 0; d < 4; ++d) {
-        if (m_held[d].any() && (best < 0 || m_since[d] > m_since[best]))
+        if (m_held[d].any() && !m_spent[d] && (best < 0 || m_since[d] > m_since[best]))
             best = d;
     }
     if (best >= 0 && m_direction >= 0 && m_held[m_direction].any() && m_since[m_direction] >= m_since[best])
@@ -97,40 +122,51 @@ void Mapper::settle(long long ms, std::vector<Event> &out)
 
 std::vector<Event> Mapper::feed(int type, int code, int value, long long ms)
 {
-    if (type == kEvSyn && code == kSynDropped)
-        return releaseAll();
+    // A dropped report: its events are invalid through the next SYN_REPORT,
+    // and after it the device's state is due before anything counts.
+    if (m_sync == Sync::Dropped) {
+        if (type == kEvSyn && code == kSynReport)
+            m_sync = Sync::Stale;
+        return {};
+    }
+    if (m_sync == Sync::Stale)
+        return {};
+    if (type == kEvSyn && code == kSynDropped) {
+        m_sync = Sync::Dropped;
+        return {};
+    }
     std::vector<Event> out;
     if (type == kEvKey) {
-        // 1 pressed, 2 the kernel's own repeat (still pressed), 0 released.
         const bool on = value != 0;
         const int accept = m_nintendo ? kBtnEast : kBtnSouth;
         const int back = m_nintendo ? kBtnSouth : kBtnEast;
-        if (code == accept) {
-            if (on != m_accept) {
-                m_accept = on;
-                out.push_back({Action::Accept, on});
-            }
-        } else if (code == back) {
-            if (on != m_back) {
-                m_back = on;
-                out.push_back({Action::Back, on});
-            }
-        }
+        if (code == accept)
+            key(m_accept, m_acceptSpent, value, Action::Accept, out);
+        else if (code == back)
+            key(m_back, m_backSpent, value, Action::Back, out);
+        int direction = -1;
         switch (code) {
         case kBtnDpadUp:
-            setHeld(kUp, &Sources::buttons, on, ms);
+            direction = kUp;
             break;
         case kBtnDpadDown:
-            setHeld(kDown, &Sources::buttons, on, ms);
+            direction = kDown;
             break;
         case kBtnDpadLeft:
-            setHeld(kLeft, &Sources::buttons, on, ms);
+            direction = kLeft;
             break;
         case kBtnDpadRight:
-            setHeld(kRight, &Sources::buttons, on, ms);
+            direction = kRight;
             break;
         default:
             break;
+        }
+        if (direction >= 0) {
+            // A repeat of a press never seen does not press the direction.
+            const bool unseen = value == 2 && !m_held[direction].any();
+            setHeld(direction, &Sources::buttons, on, ms);
+            if (unseen)
+                m_spent[direction] = true;
         }
     } else if (type == kEvAbs) {
         switch (code) {
@@ -159,7 +195,7 @@ std::vector<Event> Mapper::feed(int type, int code, int value, long long ms)
 std::vector<Event> Mapper::tick(long long ms)
 {
     std::vector<Event> out;
-    if (m_direction < 0 || ms < m_nextRepeat)
+    if (m_sync != Sync::Synced || m_direction < 0 || ms < m_nextRepeat)
         return out;
     out.push_back({Action(m_direction), true, true});
     // One repeat a tick: a tick that comes late does not make up for it with
@@ -170,19 +206,94 @@ std::vector<Event> Mapper::tick(long long ms)
 
 std::vector<Event> Mapper::releaseAll()
 {
+    // A spent key or direction never had a press delivered: no release.
     std::vector<Event> out;
     if (m_direction >= 0)
         out.push_back({Action(m_direction), false});
-    if (m_accept)
+    if (m_accept && !m_acceptSpent)
         out.push_back({Action::Accept, false});
-    if (m_back)
+    if (m_back && !m_backSpent)
         out.push_back({Action::Back, false});
     m_held = {};
+    m_spent = {};
     m_stickDirection = -1;
     m_stickSeen = {};
     m_direction = -1;
     m_accept = false;
     m_back = false;
+    m_acceptSpent = false;
+    m_backSpent = false;
+    m_sync = Sync::Synced;
+    return out;
+}
+
+std::vector<Event> Mapper::resync(const std::optional<State> &state, long long ms)
+{
+    if (!state)
+        return releaseAll();
+    m_sync = Sync::Synced;
+    std::vector<Event> out;
+    const auto held = [&](int code) {
+        return std::find(state->keys.cbegin(), state->keys.cend(), code) != state->keys.cend();
+    };
+    // The buttons: a release if let go, nothing if still held, spent if held
+    // now but not seen pressed.
+    const auto button = [&](bool &was, bool &spent, bool now, Action action) {
+        if (was && !now) {
+            if (!spent)
+                out.push_back({action, false});
+            was = false;
+            spent = false;
+        } else if (!was && now) {
+            was = true;
+            spent = true;
+        }
+    };
+    button(m_accept, m_acceptSpent, held(m_nintendo ? kBtnEast : kBtnSouth), Action::Accept);
+    button(m_back, m_backSpent, held(m_nintendo ? kBtnSouth : kBtnEast), Action::Back);
+
+    // The directions, from each source as it is now; the stick from its
+    // position alone (kStickOn), as if it had just moved there.
+    std::array<Sources, 4> now{};
+    now[kLeft].hat = state->hatX < 0;
+    now[kRight].hat = state->hatX > 0;
+    now[kUp].hat = state->hatY < 0;
+    now[kDown].hat = state->hatY > 0;
+    now[kUp].buttons = held(kBtnDpadUp);
+    now[kDown].buttons = held(kBtnDpadDown);
+    now[kLeft].buttons = held(kBtnDpadLeft);
+    now[kRight].buttons = held(kBtnDpadRight);
+    const std::optional<int> stick[2] = {state->stickX, state->stickY};
+    for (int axis = 0; axis < 2; ++axis) {
+        m_stickSeen[axis] = stick[axis].has_value();
+        m_stick[axis] = stick[axis].value_or(0);
+    }
+    const double n[2] = {normalised(0), normalised(1)};
+    m_stickDirection = -1;
+    if (std::max(std::fabs(n[0]), std::fabs(n[1])) >= kStickOn)
+        m_stickDirection = std::fabs(n[0]) >= std::fabs(n[1]) ? directionOf(0, n[0]) : directionOf(1, n[1]);
+    if (m_stickDirection >= 0)
+        now[m_stickDirection].stick = true;
+    for (int d = 0; d < 4; ++d) {
+        const bool was = m_held[d].any();
+        m_held[d] = now[d];
+        if (!m_held[d].any())
+            m_spent[d] = false;
+        else if (!was)
+            m_spent[d] = true;   // pressed while events were lost: not acted on
+    }
+    // The direction acting: released if let go; kept if still held, its
+    // repeats starting afresh after the delay, not from a clock that ran on
+    // while the state was unknown.
+    if (m_direction >= 0 && !m_held[m_direction].any()) {
+        out.push_back({Action(m_direction), false});
+        m_direction = -1;
+    } else if (m_direction >= 0) {
+        m_nextRepeat = ms + kRepeatDelayMs;
+    }
+    // Another direction held before the loss and still held may act, as when
+    // the acting one is let go; a spent one may not.
+    settle(ms, out);
     return out;
 }
 

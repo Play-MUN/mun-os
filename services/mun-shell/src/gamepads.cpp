@@ -14,6 +14,7 @@
 #include <cerrno>
 #include <cstring>
 #include <ctime>
+#include <optional>
 #include <fcntl.h>
 #include <linux/input.h>
 #include <sys/ioctl.h>
@@ -39,6 +40,31 @@ bool hasBit(const unsigned long *bits, int bit)
 {
     constexpr int perLong = int(sizeof(unsigned long)) * 8;
     return (bits[bit / perLong] >> (bit % perLong)) & 1UL;
+}
+
+// The pad's state now, as its node reports it, for the mapper to resume
+// from after a dropped report; nothing if the node cannot say.
+std::optional<gamepad::State> stateOf(int fd)
+{
+    unsigned long keys[KEY_CNT / (8 * sizeof(unsigned long)) + 1] = {};
+    if (ioctl(fd, EVIOCGKEY(sizeof(keys)), keys) < 0)
+        return std::nullopt;
+    gamepad::State state;
+    for (const int code : {BTN_SOUTH, BTN_EAST, BTN_DPAD_UP, BTN_DPAD_DOWN, BTN_DPAD_LEFT, BTN_DPAD_RIGHT}) {
+        if (hasBit(keys, code))
+            state.keys.push_back(code);
+    }
+    // An axis the pad does not have is left at rest.
+    input_absinfo info{};
+    if (ioctl(fd, EVIOCGABS(ABS_HAT0X), &info) == 0)
+        state.hatX = info.value;
+    if (ioctl(fd, EVIOCGABS(ABS_HAT0Y), &info) == 0)
+        state.hatY = info.value;
+    if (ioctl(fd, EVIOCGABS(ABS_X), &info) == 0)
+        state.stickX = info.value;
+    if (ioctl(fd, EVIOCGABS(ABS_Y), &info) == 0)
+        state.stickY = info.value;
+    return state;
 }
 
 int keyOf(gamepad::Action action)
@@ -168,6 +194,13 @@ void Gamepads::read(Pad *pad)
             if (m_watch && std::any_of(out.cbegin(), out.cend(), [](const gamepad::Event &o) { return o.pressed; }))
                 m_watch->inputAt(ms);
             deliver(out);
+            // A dropped report has just ended: resume from the pad's state.
+            if (pad->mapper.waitingForState()) {
+                const std::optional<gamepad::State> state = stateOf(pad->fd);
+                qInfo("mun-shell: gamepad %s lost events; resumed from its %s", qPrintable(pad->name),
+                      state ? "state" : "release (its state could not be read)");
+                deliver(pad->mapper.resync(state, ms));
+            }
         }
     }
     schedule();

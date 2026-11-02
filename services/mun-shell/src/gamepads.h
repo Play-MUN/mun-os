@@ -14,7 +14,9 @@
 // is tried again shortly after it appears (udev gives the shell's input group
 // access a moment later), and a pad whose node fails (disconnected) is
 // closed, what it held let go. Nodes that are not pads are not opened again
-// while they exist.
+// while they exist. When the kernel drops a pad's events (SYN_DROPPED), the
+// pad's current keys, hat and stick are read from its node once the dropped
+// report has ended, and the mapper resumes from them (gamepadmap.h).
 //
 // Threads: the GUI thread's.
 #pragma once

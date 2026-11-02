@@ -18,9 +18,19 @@
 // back within kStickOff (the gap keeps a stick resting near the threshold
 // from flickering); pushed diagonally, the axis pushed further counts. When
 // several directions are held, the last one pressed is the one that acts.
+//
+// When the kernel drops events (its buffer for the reader overran, and it
+// says so with SYN_DROPPED), what is held is no longer known. As the input
+// layer asks, every event is then ignored through the next SYN_REPORT, and
+// the mapper waits (waitingForState()) for the reader to query the device
+// and pass its state to resync(). Nothing is pressed by that: what was held
+// and still is stays held, what was let go is released, and what is held
+// now but was not seen pressed is spent, acting again only once let go. No
+// direction repeats while the state is unknown.
 #pragma once
 
 #include <array>
+#include <optional>
 #include <vector>
 
 namespace gamepad {
@@ -29,6 +39,7 @@ namespace gamepad {
 inline constexpr int kEvSyn = 0x00;
 inline constexpr int kEvKey = 0x01;
 inline constexpr int kEvAbs = 0x03;
+inline constexpr int kSynReport = 0;
 inline constexpr int kSynDropped = 3;
 inline constexpr int kAbsX = 0x00;
 inline constexpr int kAbsY = 0x01;
@@ -63,6 +74,17 @@ struct Range {
     int max = 0;
 };
 
+// A pad's state as its device reports it (EVIOCGKEY, EVIOCGABS), for
+// resync(): the codes of the keys held, the hat, and the stick's axes when
+// the device has them.
+struct State {
+    std::vector<int> keys;
+    int hatX = 0;
+    int hatY = 0;
+    std::optional<int> stickX;
+    std::optional<int> stickY;
+};
+
 class Mapper {
 public:
     // The range of one of the pad's axes, from its capabilities; an axis with
@@ -72,15 +94,23 @@ public:
     void setNintendo(bool nintendo) { m_nintendo = nintendo; }
 
     // One input event (type, code, value) at `ms` on a steady clock: what it
-    // presses and releases. A report the kernel dropped (SYN_DROPPED) leaves
-    // nothing held.
+    // presses and releases. After SYN_DROPPED, nothing through the next
+    // SYN_REPORT, and nothing until resync().
     std::vector<Event> feed(int type, int code, int value, long long ms);
+
+    // A dropped report has ended: the device's state is due (resync()).
+    bool waitingForState() const { return m_sync == Sync::Stale; }
+    // The device's state at `ms`, or nothing if it could not be read (then
+    // what was held is released, and a key still held counts once let go):
+    // what it releases, never a press.
+    std::vector<Event> resync(const std::optional<State> &state, long long ms);
 
     // The repeats of the direction held that are due by `ms`.
     std::vector<Event> tick(long long ms);
 
-    // When the next repeat is due, or -1 when no direction is held.
-    long long nextDue() const { return m_direction >= 0 ? m_nextRepeat : -1; }
+    // When the next repeat is due, or -1 when no direction is held (or the
+    // state is unknown).
+    long long nextDue() const { return m_sync == Sync::Synced && m_direction >= 0 ? m_nextRepeat : -1; }
 
     // The pad is gone: the releases of what it held, and nothing held after.
     std::vector<Event> releaseAll();
@@ -93,7 +123,12 @@ private:
         bool stick = false;
         bool any() const { return hat || buttons || stick; }
     };
+    // Synced; Dropped: ignoring events through the next SYN_REPORT; Stale:
+    // waiting for the device's state.
+    enum class Sync { Synced, Dropped, Stale };
+
     void setHeld(int direction, bool Sources::*source, bool on, long long ms);
+    void key(bool &held, bool &spent, int value, Action action, std::vector<Event> &out);
     void settle(long long ms, std::vector<Event> &out);
     void stickMoved(long long ms);
     double normalised(int code) const;
@@ -108,7 +143,13 @@ private:
     long long m_nextRepeat = 0;
     bool m_accept = false;
     bool m_back = false;
+    // Held but spent: pressed while events were lost (or a kernel repeat of
+    // a press not seen); they act again once let go.
+    std::array<bool, 4> m_spent{};
+    bool m_acceptSpent = false;
+    bool m_backSpent = false;
     bool m_nintendo = false;
+    Sync m_sync = Sync::Synced;
 };
 
 } // namespace gamepad

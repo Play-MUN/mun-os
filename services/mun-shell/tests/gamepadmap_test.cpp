@@ -4,7 +4,9 @@
 #include "gamepadmap.h"
 
 #include <cstdio>
+#include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace gamepad;
@@ -29,6 +31,13 @@ using Events = std::vector<Event>;
 Event press(Action a) { return {a, true}; }
 Event repeat(Action a) { return {a, true, true}; }
 Event release(Action a) { return {a, false}; }
+// A pad's state with these keys held, at rest otherwise.
+State holding(std::vector<int> keys)
+{
+    State state;
+    state.keys = std::move(keys);
+    return state;
+}
 
 // A pad whose left stick spans 0..255, as the GameSir Nova Lite reports it.
 Mapper pad()
@@ -128,11 +137,112 @@ void gone()
     check("the pad gone: what it held is let go",
           m.releaseAll() == Events{release(Action::Right), release(Action::Accept)});
     check("and nothing is held after", m.releaseAll().empty() && m.nextDue() == -1);
+}
 
-    m.feed(kEvAbs, kAbsY, 255, 10);
-    m.feed(kEvKey, kBtnEast, 1, 10);
-    check("a dropped report lets everything go",
-          m.feed(kEvSyn, kSynDropped, 0, 20) == Events{release(Action::Down), release(Action::Back)});
+// The kernel dropped events (SYN_DROPPED): everything through the next
+// SYN_REPORT is ignored, then the pad's state is due, and nothing is pressed
+// by resuming from it.
+void dropped()
+{
+    {
+        // The case as it came: Accept held, events lost, a stale Accept and
+        // Down before the report, then the repeat timer.
+        Mapper m = pad();
+        m.feed(kEvKey, kBtnSouth, 1, 0);
+        check("a drop: nothing at once", m.feed(kEvSyn, kSynDropped, 0, 100).empty());
+        check("a stale Accept: nothing", m.feed(kEvKey, kBtnSouth, 1, 101).empty());
+        check("a stale Down: nothing", m.feed(kEvAbs, kAbsHat0Y, 1, 102).empty());
+        check("the report ends the drop: the state is due",
+              m.feed(kEvSyn, kSynReport, 0, 103).empty() && m.waitingForState());
+        check("no repeat while it is due", m.nextDue() == -1 && m.tick(503).empty());
+        check("events before the state: nothing", m.feed(kEvKey, kBtnSouth, 0, 104).empty());
+        check("the state, nothing held: Accept let go, no Down",
+              m.resync(State{}, 105) == Events{release(Action::Accept)} && !m.waitingForState());
+        check("then no repeat", m.nextDue() == -1 && m.tick(1000).empty());
+        check("and a press acts again", m.feed(kEvKey, kBtnSouth, 1, 1100) == Events{press(Action::Accept)});
+    }
+    {
+        // The dropped report spread over several reads.
+        Mapper m = pad();
+        m.feed(kEvSyn, kSynDropped, 0, 0);
+        bool quiet = m.feed(kEvKey, kBtnSouth, 1, 1).empty() && m.feed(kEvSyn, kSynReport + 2, 0, 2).empty();
+        quiet = quiet && m.feed(kEvAbs, kAbsHat0X, 1, 3).empty() && m.feed(kEvKey, kBtnEast, 1, 4).empty();
+        check("over several reads: nothing until the report", quiet && !m.waitingForState());
+        m.feed(kEvSyn, kSynReport, 0, 5);
+        check("the report, in a later read: the state is due", m.waitingForState());
+    }
+    {
+        // Held through the loss: no new press, its release when let go.
+        Mapper m = pad();
+        m.feed(kEvKey, kBtnSouth, 1, 0);
+        m.feed(kEvSyn, kSynDropped, 0, 10);
+        m.feed(kEvSyn, kSynReport, 0, 11);
+        check("Accept still held: nothing", m.resync(holding({kBtnSouth}), 12).empty());
+        check("its release later", m.feed(kEvKey, kBtnSouth, 0, 20) == Events{release(Action::Accept)});
+    }
+    {
+        // Pressed while events were lost: spent until let go.
+        Mapper m = pad();
+        m.feed(kEvSyn, kSynDropped, 0, 0);
+        m.feed(kEvSyn, kSynReport, 0, 1);
+        check("Back held now, never seen pressed: nothing", m.resync(holding({kBtnEast}), 2).empty());
+        check("its kernel repeat: nothing", m.feed(kEvKey, kBtnEast, 2, 3).empty());
+        check("let go: nothing (no press was given)", m.feed(kEvKey, kBtnEast, 0, 4).empty());
+        check("the next press acts", m.feed(kEvKey, kBtnEast, 1, 5) == Events{press(Action::Back)});
+    }
+    {
+        // A direction held through the loss keeps acting, its repeats afresh;
+        // one pressed during it does not act.
+        Mapper m = pad();
+        m.feed(kEvAbs, kAbsHat0Y, 1, 0);
+        m.feed(kEvSyn, kSynDropped, 0, 1000);
+        m.feed(kEvSyn, kSynReport, 0, 1001);
+        State state;
+        state.hatY = 1;
+        state.keys = {kBtnDpadLeft};
+        check("Down still held: nothing new", m.resync(state, 2000).empty());
+        check("its repeats start afresh after the delay",
+              m.nextDue() == 2000 + kRepeatDelayMs && m.tick(2000 + kRepeatDelayMs - 1).empty());
+        check("Left, pressed while lost, does not take over", m.feed(kEvAbs, kAbsHat0Y, 0, 2100) == Events{release(Action::Down)});
+        check("nor act while held", m.nextDue() == -1);
+        check("let go: nothing", m.feed(kEvKey, kBtnDpadLeft, 0, 2200).empty());
+        check("pressed again: it acts", m.feed(kEvKey, kBtnDpadLeft, 1, 2300) == Events{press(Action::Left)});
+    }
+    {
+        // The stick from its position; Nintendo's layout kept.
+        Mapper m = pad();
+        m.setNintendo(true);
+        m.feed(kEvKey, kBtnEast, 1, 0);
+        m.feed(kEvSyn, kSynDropped, 0, 1);
+        m.feed(kEvSyn, kSynReport, 0, 2);
+        State state;
+        state.stickX = 128;
+        state.stickY = 255;
+        check("Nintendo: A (east) let go; the stick pushed down while lost does not move",
+              m.resync(state, 3) == Events{release(Action::Accept)} && m.nextDue() == -1);
+        check("the stick back to centre: nothing", m.feed(kEvAbs, kAbsY, 128, 4).empty());
+        check("pushed again: it moves", m.feed(kEvAbs, kAbsY, 255, 5) == Events{press(Action::Down)});
+    }
+    {
+        // A pad's node that cannot report its state: everything let go.
+        Mapper m = pad();
+        m.feed(kEvKey, kBtnSouth, 1, 0);
+        m.feed(kEvAbs, kAbsHat0X, 1, 0);
+        m.feed(kEvSyn, kSynDropped, 0, 1);
+        m.feed(kEvSyn, kSynReport, 0, 2);
+        check("no state: what was held is let go",
+              m.resync(std::nullopt, 3) == Events{release(Action::Right), release(Action::Accept)});
+        check("a kernel repeat of a key still held is not a press", m.feed(kEvKey, kBtnSouth, 2, 4).empty());
+    }
+    {
+        // Unplugged while recovering: its releases, and a clean state.
+        Mapper m = pad();
+        m.feed(kEvKey, kBtnSouth, 1, 0);
+        m.feed(kEvSyn, kSynDropped, 0, 1);
+        check("gone during the drop: Accept let go", m.releaseAll() == Events{release(Action::Accept)});
+        check("and no state is due after", !m.waitingForState() && m.nextDue() == -1);
+        check("a press acts", m.feed(kEvKey, kBtnSouth, 1, 2) == Events{press(Action::Accept)});
+    }
 }
 
 } // namespace
@@ -146,6 +256,7 @@ int main()
     stick();
     repeats();
     gone();
+    dropped();
     std::printf("gamepad rules: %d passed, %d failed\n", g_passed, g_failed);
     return g_failed ? 1 : 0;
 }

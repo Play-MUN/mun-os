@@ -60,9 +60,33 @@ Item {
                                                 : (on ? Theme.orbitalInk : Theme.orbitalText)
     readonly property color detailColour: shaped ? labelColour : (on ? Theme.orbitalInkSoft : Theme.orbitalTextDim)
 
-    // MUN's fade while the options have the focus; a dressed entry stays whole.
-    opacity: dimmed && !shaped ? 0.4 : 1
-    Behavior on opacity { enabled: root.moving; NumberAnimation { duration: 400; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.ease } }
+    // MUN's fade while the options have the focus (see `dimmed`): eased while
+    // the entry is MUN's, held at 1 while it is dressed, so a dressed entry's
+    // opacity is 1 on every frame, its first included, and only its
+    // ornaments fade; when the game's identity leaves, it eases back.
+    property real fade: 1
+    opacity: shaped ? 1 : fade
+    NumberAnimation {
+        id: fading
+        target: root
+        property: "fade"
+        duration: 400
+        easing.type: Easing.BezierSpline
+        easing.bezierCurve: Theme.ease
+    }
+    function settleFade(eased) {
+        fading.stop()
+        const to = dimmed && !shaped ? 0.4 : 1
+        if (eased && moving && to !== fade) {
+            fading.to = to
+            fading.start()
+        } else {
+            fade = to
+        }
+    }
+    onDimmedChanged: settleFade(true)
+    onShapedChanged: settleFade(!shaped)
+    Component.onCompleted: settleFade(false)
 
     component Fade: NumberAnimation { duration: 200; easing.type: Easing.OutCubic }
 

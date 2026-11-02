@@ -790,8 +790,13 @@ Return and B, at the bottom, Escape. A direction held repeats after
 400 ms, then every 80 ms; the stick counts once pushed past 60 % of its
 travel and until it is back within 40 %, and diagonally the axis pushed
 further counts. Pads are found as they connect and let go of when they
-disconnect, nothing held after. The shell reads `/dev/input` through its
-`input` group; nothing goes back through the kernel.
+disconnect, nothing held after. When the kernel drops a pad's events, the
+rest of that report is ignored and the shell resumes from the pad's state,
+read from its node: no stale event acts, and Accept or Back is never
+pressed by it; a button or direction pressed meanwhile acts once let go and
+pressed again, and a direction held since before keeps acting, taking over
+from one let go. The shell reads `/dev/input` through its `input` group;
+nothing goes back through the kernel.
 
 Tested: GameSir Nova Lite over Bluetooth, on a laboratory board, in its
 Android mode (kernel `hid-generic`) and its Switch mode (a Pro Controller to

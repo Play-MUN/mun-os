@@ -23,10 +23,14 @@
 // says so with SYN_DROPPED), what is held is no longer known. As the input
 // layer asks, every event is then ignored through the next SYN_REPORT, and
 // the mapper waits (waitingForState()) for the reader to query the device
-// and pass its state to resync(). Nothing is pressed by that: what was held
-// and still is stays held, what was let go is released, and what is held
-// now but was not seen pressed is spent, acting again only once let go. No
-// direction repeats while the state is unknown.
+// and pass its state to resync(). No stale event acts: what was held and
+// still is stays held, what was let go is released, and what is held now but
+// was not seen pressed is spent, acting again only once let go. No direction
+// repeats while the state is unknown. Resuming presses nothing new but in
+// one case, the one it has while events flow: if the direction acting was
+// let go during the loss and another, held since before it, still is, that
+// one takes over and its press is given. Accept and Back are never pressed
+// by resuming.
 #pragma once
 
 #include <array>
@@ -102,7 +106,9 @@ public:
     bool waitingForState() const { return m_sync == Sync::Stale; }
     // The device's state at `ms`, or nothing if it could not be read (then
     // what was held is released, and a key still held counts once let go):
-    // what it releases, never a press.
+    // what it releases and, if the direction acting was let go, the press of
+    // another held since before the loss that takes over (see above); never a
+    // press of Accept or Back.
     std::vector<Event> resync(const std::optional<State> &state, long long ms);
 
     // The repeats of the direction held that are due by `ms`.

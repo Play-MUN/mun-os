@@ -28,6 +28,9 @@ Window {
     // renderer keeps the previous one. The navigation, the states, the
     // sounds and Shape are the same in both.
     readonly property bool orbital: typeof shellOrbital === "undefined" ? false : shellOrbital
+    // Where the card object stands, which the transitions grow from and Play's
+    // colour fills from: the orbit's centre, or the previous design's orb.
+    readonly property point objectCentre: orbital ? Theme.orbitalCentre : Theme.orb
     // Input is taken once the start-up has shown, and not while the console
     // turns off or the shell restarts for a new resolution.
     property bool powered: !firstStart
@@ -108,7 +111,7 @@ Window {
     Binding { target: Shape; property: "card"; value: CardClient.card }
     Binding { target: Shape; property: "mode"; value: ShellSettings.shapeMode }
     Binding { target: Shape; property: "arrival"; value: CardClient.arrival }
-    Binding { target: Shape; property: "orb"; value: Theme.orb }
+    Binding { target: Shape; property: "orb"; value: window.objectCentre }
     // The game's menu sounds, when it has them, the player wants them, MUN
     // Shape is shown in full, its identity has come in (they stop at once as
     // it leaves) and the player is on the game's surfaces: in Settings and in
@@ -795,7 +798,7 @@ Window {
             root: Shape.root
             transition: Shape.kind
             progress: Shape.progress
-            orb: Theme.orb
+            orb: window.objectCentre
             dim: (window.inSettings || !!window.modal) ? 0.78 : 0
             Behavior on dim { NumberAnimation { duration: 400; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.ease } }
             scrimColour: Theme.screen
@@ -897,7 +900,15 @@ Window {
                     OrbitalFocus {
                         icon: window.focusedEntry.icon || ""
                         tint: window.sectionLight
-                        shown: !world.covering
+                        overNight: !world.covering
+                        // The card object (docs/shape.md): the window, outline
+                        // and light the card's package gives, as the
+                        // transition reaches it.
+                        cardWindow: Shape.window
+                        cardShape: Shape.cardShape
+                        morph: Shape.morph
+                        cardGlow: Shape.glow
+                        cardReveal: Shape.objectProgress
                     }
                     OrbitalMenu {
                         id: mainOrbit
@@ -996,14 +1007,14 @@ Window {
         readonly property bool diving: Shape.phase === "present" && Shape.veil.valid
         Rectangle {
             id: dive
-            readonly property real reach: 2 * Math.hypot(Math.max(Theme.orb.x, Theme.canvasWidth - Theme.orb.x),
-                                                         Math.max(Theme.orb.y, Theme.canvasHeight - Theme.orb.y))
+            readonly property real reach: 2 * Math.hypot(Math.max(window.objectCentre.x, Theme.canvasWidth - window.objectCentre.x),
+                                                         Math.max(window.objectCentre.y, Theme.canvasHeight - window.objectCentre.y))
             visible: canvas.diving && scale > 0.021
             width: reach
             height: reach
             radius: reach / 2
-            x: Theme.orb.x - reach / 2
-            y: Theme.orb.y - reach / 2
+            x: window.objectCentre.x - reach / 2
+            y: window.objectCentre.y - reach / 2
             color: Shape.veil
             scale: window.starting ? 1 : 0.02
             Behavior on scale { NumberAnimation { duration: 520; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.ease } }

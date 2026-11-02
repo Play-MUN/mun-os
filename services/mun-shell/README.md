@@ -45,7 +45,7 @@ draws the parts that depend on it accordingly (*How it is drawn*).
 | `qml/Main.qml` | The scene, the navigation, the actions and the key handling |
 | `qml/Panels.qml` | What each entry's panel and each dialog says, from the real state |
 | `qml/Theme.qml`, `qml/I18n.qml` | Design tokens and motion; the two languages |
-| `qml/OrbitalMenu.qml`, `OrbitalNode`, `OrbitalIcon`, `OrbitalFocus` | The orbital design's menus: the entries as nodes on the orbit's ring with their pills, their icons (each part painted once and moved by a transform), and the entry in focus large at the orbit's centre |
+| `qml/OrbitalMenu.qml`, `OrbitalNode`, `OrbitalIcon`, `OrbitalFocus`, `src/orbitalcard.*` | The orbital design's menus: the entries as nodes on the orbit's ring with their pills, their icons (each part painted once and moved by a transform), and the entry in focus large at the orbit's centre, the card object among them |
 | `qml/ArcMenu.qml`, `ArcNode`, `DetailPanel`, `OptionRow`, `StatusBar`, `MoonPhase`, `ModalLayer`, `BootLayer`, `UiText`, `MarkText`, `Shadow`, `Material`, `Logo.js` | Components: the arcs and their entries, the panel and its options, the status line, dialogs, the start-up and power-off screen, text and shadows; the MUN logo |
 | `tests/behaviour.py`, `tests/scenes/` | Behaviour regressions run on the compiled binary, offscreen (*A Game Card's identity*), and the software and OpenGL drawing paths side by side on Xvfb (*On a graphics API*) |
 | `tests/displaydevice_test.cpp`, `tests/Makefile` | The display rules on fake sysfs trees and mode lists, compiled and run on the host by `make check` |
@@ -114,8 +114,11 @@ axes cross: when the focus comes to it, it grows in and plays a gesture of
 its own, then rests (the disk turns a quarter, the satellite goes once
 round the planet and settles, the gear turns a quarter, the power sign is
 pressed; each of Settings' sections its own), drawn on every frame while
-it runs. The small icons rest. At each move the ring of dots turns a step,
-as a dial. The waves and the eclipse move slowly, at 10 frames a second.
+it runs, and hidden while a game's world covers the background. With a
+card's MUN Shape, MUN Disk's large icon gives way to the card object
+(`OrbitalCard`): the card's window on the disc, in its outline and light,
+as below, over MUN's night or the game's world. The small icons rest. At each move the ring of dots
+turns a step, as a dial. The waves and the eclipse move slowly, at 10 frames a second.
 The panel leans back a little from its right edge (7 degrees), in
 the same glass. The software renderer keeps the design above;
 `MUN_SHELL_DESIGN` (`orbital` or `previous`) chooses one for the checks.
@@ -379,7 +382,12 @@ code (`src/shape.*`, `src/shapeworld.*`, `src/shapefront.h`):
     package asks (reached during the transition, then still) and its light
     in the game's colour. It is all of that or none: without that image
     (missing, or not decoded) the object is MUN's crescent, with neither the
-    game's outline nor its light.
+    game's outline nor its light. In the orbital design the object is MUN
+    Disk's disc at the orbit's centre while MUN Disk is in focus: the image
+    covers the disc around its hole, the organic outline swells and
+    recedes its edge, the light is a halo; without the image, MUN's disk
+    icon stays whole. The transitions grow from the object where it
+    stands, the orbit's centre there.
   - Outside the world (while it comes in, or when a package has none): the
     ambient light at the orb (the object's light while the object is the
     game's, else the palette's light) and a tint of MUN's world, both in the

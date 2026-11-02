@@ -50,6 +50,8 @@ qt_add_executable(mun-shell
     src/gamepads.h
     src/orbitalbackdrop.cpp
     src/orbitalbackdrop.h
+    src/orbitalcard.cpp
+    src/orbitalcard.h
     src/blur.cpp
     src/blur.h
     src/bootintro.cpp

@@ -1,5 +1,9 @@
 #include "framewatch.h"
 
+#include "sceneclock.h"
+
+#include <QThread>
+
 #include <algorithm>
 
 namespace {
@@ -21,12 +25,23 @@ FrameWatch::FrameWatch(QObject *parent) : QObject(parent)
     m_windowTimer.setInterval(kWindowMs);
     connect(&m_windowTimer, &QTimer::timeout, this, &FrameWatch::judge);
     m_windowTimer.start();
+    m_hold.setSingleShot(true);
+    m_hold.setInterval(int(kActiveMs));
+    connect(&m_hold, &QTimer::timeout, this, [this] { SceneClock::instance()->demand(this, 0); });
     const QString path = qEnvironmentVariable("MUN_SHELL_TIMING");
     if (!path.isEmpty()) {
         m_log.setFileName(path);
         if (!m_log.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text))
             qWarning("mun-shell: timing log %s cannot be opened", qPrintable(path));
     }
+}
+
+FrameWatch::~FrameWatch()
+{
+    // First of all: no swap reaches onSwapped() once this is going away.
+    if (m_window)
+        disconnect(m_window, nullptr, this, nullptr);
+    SceneClock::instance()->demand(this, 0);
 }
 
 void FrameWatch::setWindow(QQuickWindow *window)
@@ -36,9 +51,24 @@ void FrameWatch::setWindow(QQuickWindow *window)
     if (m_window)
         disconnect(m_window, nullptr, this, nullptr);
     m_window = window;
-    if (m_window)
-        connect(m_window, &QQuickWindow::frameSwapped, this, &FrameWatch::onFrame, Qt::DirectConnection);
+    if (m_window) {
+        connect(m_window, &QQuickWindow::beforeSynchronizing, this,
+                [this] { m_syncNs.store(m_clock.nsecsElapsed(), std::memory_order_relaxed); }, Qt::DirectConnection);
+        connect(m_window, &QQuickWindow::frameSwapped, this, &FrameWatch::onSwapped, Qt::DirectConnection);
+    }
     emit windowChanged();
+}
+
+void FrameWatch::onSwapped()
+{
+    // Possibly the render thread: the clock is only read, nothing else is
+    // touched here. The swap follows its own frame's synchronisation.
+    const qint64 at = m_clock.elapsed();
+    const qint64 syncNs = m_syncNs.load(std::memory_order_relaxed);
+    if (QThread::currentThread() == thread())
+        onFrame(at, syncNs);
+    else
+        QMetaObject::invokeMethod(this, [this, at, syncNs] { onFrame(at, syncNs); }, Qt::QueuedConnection);
 }
 
 void FrameWatch::setJudging(bool judging)
@@ -61,10 +91,27 @@ void FrameWatch::setAnimating(bool animating)
 
 void FrameWatch::keyPressed()
 {
+    SceneClock::instance()->demand(this, SceneClock::kBaseRate);
+    m_hold.start();
     const qint64 now = m_clock.elapsed();
     if (m_keyAt < 0)
         m_keyAt = now;
+    if (m_shownKeyNs < 0) {
+        m_shownKeyNs = m_clock.nsecsElapsed();
+        // A gamepad's input turns into this key at once (src/gamepads.h).
+        m_shownPad = m_lastPad >= 0 && now - m_lastPad < 100 ? m_lastPad : -1;
+    }
+    if (now >= m_activeUntil)
+        m_activeSince = now;
     m_activeUntil = now + kActiveMs;
+}
+
+void FrameWatch::inputAt(qint64 monotonicMs)
+{
+    // m_clock counts from its start on the same monotonic clock.
+    m_lastPad = monotonicMs - m_clock.msecsSinceReference();
+    if (m_padAt < 0)
+        m_padAt = m_lastPad;
 }
 
 void FrameWatch::mark(const QString &what)
@@ -72,9 +119,8 @@ void FrameWatch::mark(const QString &what)
     log(QStringLiteral("mark %1").arg(what));
 }
 
-void FrameWatch::onFrame()
+void FrameWatch::onFrame(qint64 now, qint64 syncNs)
 {
-    const qint64 now = m_clock.elapsed();
     if (m_lastFrame >= 0 && now - m_lastFrame < kIdleMs) {
         // A transition's frames, keys pressed during it included, are timed
         // apart: never judged.
@@ -82,14 +128,32 @@ void FrameWatch::onFrame()
             m_transition.push_back(qreal(now - m_lastFrame));
         else if (now < m_activeUntil)
             m_intervals.push_back(qreal(now - m_lastFrame));
+    } else if (m_lastFrame >= 0 && m_lastFrame >= m_activeSince && m_activeSince >= 0
+               && (m_animating || now < m_activeUntil)) {
+        // A stutter, not a pause: both frames fall in the motion a key
+        // started. Counted for the log only.
+        ++m_long;
+        m_longest = std::max(m_longest, qreal(now - m_lastFrame));
     }
     m_lastFrame = now;
-    if (m_keyAt >= 0) {
+    // A key pressed after this frame was presented waits for the next one.
+    if (m_keyAt >= 0 && now >= m_keyAt) {
         const qreal latency = qreal(now - m_keyAt);
         if (!m_animating)
             m_keys.push_back(latency);
         log(QStringLiteral("key %1%2").arg(latency, 0, 'f', 1).arg(m_animating ? QStringLiteral(" transition") : QString()));
         m_keyAt = -1;
+    }
+    if (m_padAt >= 0 && now >= m_padAt) {
+        log(QStringLiteral("pad %1").arg(qreal(now - m_padAt), 0, 'f', 1));
+        m_padAt = -1;
+    }
+    if (m_shownKeyNs >= 0 && syncNs >= m_shownKeyNs) {
+        log(QStringLiteral("shown %1").arg(qreal(now) - m_shownKeyNs / 1e6, 0, 'f', 1));
+        if (m_shownPad >= 0)
+            log(QStringLiteral("pad shown %1").arg(qreal(now - m_shownPad), 0, 'f', 1));
+        m_shownKeyNs = -1;
+        m_shownPad = -1;
     }
 }
 
@@ -104,14 +168,18 @@ void FrameWatch::judge()
                 .arg(percentile(m_transition, 0.5), 0, 'f', 1)
                 .arg(percentile(m_transition, 0.95), 0, 'f', 1));
     m_transition.clear();
-    if (!m_intervals.empty() || !m_keys.empty())
-        log(QStringLiteral("window frames %1 p50 %2 p95 %3 max %4 keys %5 median %6")
+    if (!m_intervals.empty() || !m_keys.empty() || m_long > 0)
+        log(QStringLiteral("window frames %1 p50 %2 p95 %3 max %4 keys %5 median %6 long %7 longest %8")
                 .arg(m_intervals.size())
                 .arg(p50, 0, 'f', 1)
                 .arg(p95, 0, 'f', 1)
                 .arg(worst, 0, 'f', 1)
                 .arg(m_keys.size())
-                .arg(keys, 0, 'f', 1));
+                .arg(keys, 0, 'f', 1)
+                .arg(m_long)
+                .arg(m_longest, 0, 'f', 1));
+    m_long = 0;
+    m_longest = 0;
     const qint64 now = m_clock.elapsed();
     if (m_judging && now >= m_calmUntil) {
         QString why;

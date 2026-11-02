@@ -139,4 +139,16 @@ private:
     QByteArray m_painted;    // the stateKey() of what is on screen
     Layer m_still;           // a still layer, kept per display scale
     Layer m_finished;        // Mark: the logo once nothing in it moves
+    // Mark: an element's glowing image while the discharge does not move it,
+    // kept as long as its look stays (`key`: the element, its placing, the
+    // scale); and the picture's warm shadow, made again every kShadowStep
+    // seconds of t at most (soft and slow, a step does not show).
+    struct Glow {
+        QByteArray key;
+        QImage image;
+        QRect pixels;
+    };
+    std::vector<Glow> m_glows;
+    Layer m_shadow;
+    qreal m_shadowAt = -1;
 };

@@ -1,24 +1,38 @@
 // SystemSounds plays the interface's sounds: moving, entering and going back
-// on the menus (qml/Main.qml asks for them by name: "move", "enter", "back")
-// and the start-up ("startup", qml/BootLayer.qml, which draws in step with
-// it: started() says when its first samples went to the device, heard() how
-// much of it has been heard, the samples written less what the device still
-// holds). They are compiled in
-// (sounds/*.wav: PCM, 16-bit, 48 kHz, stereo), the menus' sounds mixed at
-// 3/4 of their level and the start-up at its own, and played through
-// ALSA's default device, the one the games use, which
-// converts them if the device runs at another rate or format; the
-// shell has it only while it runs, and the launcher stops the shell before a
-// game starts.
+// on the menus (qml/Main.qml asks for them by name: "move", "enter", "back"),
+// the console's events (a game launched or returned from, Shape leaving, a
+// safe release done, turning off, a success, warning or error, a controller
+// connected or disconnected) and the start-up ("startup", qml/BootLayer.qml,
+// which draws in step with it: started() says when its first samples went to
+// the device, heard() how much of it has been heard, the samples written
+// less what the device still holds). They are compiled in (sounds/*.wav:
+// PCM, 16-bit, 48 kHz, stereo), the menus' and the events' mixed at 3/4 of
+// their level and the start-up at its own, and played through ALSA's default
+// device, the one the games use, which converts them if the device runs at
+// another rate or format; the shell has it only while it runs, and the
+// launcher stops the shell before a game starts.
 //
 // Playing never blocks the GUI thread: play() queues the sound and a worker
 // thread mixes whatever is sounding (up to kVoices at once, so quick moves
 // overlap instead of cutting each other) into the device. The device is
 // opened on the first sound, fed silence between sounds so that it never
-// runs dry, and closed after kIdle of silence. A device that fails is opened
-// afresh at once; no device, or one that fails again, means silence and one
-// line in the journal, never an error in the interface, and the next sound
-// tries again after kRetry.
+// runs dry, and closed after kIdle of silence, except while `awake`: then it
+// is opened at once and kept open, fed silence, however long the silence.
+// An HDMI display that loses the stream may need a moment to hear it again
+// when it starts, and the first sounds after a pause, short as they are,
+// would be lost in it (measured on a board: opening takes a few
+// milliseconds, and nothing failed). For the same reason the silence fed
+// between sounds is a noise far below hearing (at most 2 of 32768, about
+// -84 dBFS) rather than exact zeros: a display may also stop listening
+// to a stream of zeros after a while. Kept open it costs about one percent
+// of a core on a board. The shell says awake while its interface is shown
+// and its sounds are on, dimmed too (a stream opened again by the input
+// that undims was not heard in time for the move pressed right after it),
+// and the device is let go when the shell stops for a game. A device that
+// fails is opened afresh at once; no device, or one that fails again, means
+// silence and one line in the journal, never an error in the interface, and
+// the next sound tries again after kRetry. With MUN_SHELL_TIMING set, the
+// journal says when the device is opened and let go.
 //
 // stop() fades a sound out over kFadeFrames instead of cutting it.
 //
@@ -68,6 +82,9 @@ class SystemSounds : public QObject {
     Q_PROPERTY(bool gameSounds READ gameSounds WRITE setGameSounds NOTIFY gameSoundsChanged)
     // The game's set is loaded: the names it has.
     Q_PROPERTY(QStringList gameSet READ gameSet NOTIFY gameSetChanged)
+    // The interface is in use: the device is opened now and kept open
+    // between sounds (see above). False (the default): let go after kIdle.
+    Q_PROPERTY(bool awake READ awake WRITE setAwake NOTIFY awakeChanged)
 
 public:
     explicit SystemSounds(QObject *parent = nullptr);
@@ -95,14 +112,20 @@ public:
     bool gameSounds() const { return m_gameSounds; }
     void setGameSounds(bool on);
     QStringList gameSet() const;
+    bool awake() const { return m_awake; }
+    void setAwake(bool awake);
 
 signals:
+    // play() queued a sound (MUN's or the game's version), whether or not a
+    // device will play it.
+    void queued(const QString &name);
     // The first samples of a sound that play() asked for went to the device.
     void started(const QString &name);
     // A sound that play() asked for will not be heard (any more): no device.
     void dropped(const QString &name);
     void gameSoundsChanged();
     void gameSetChanged();
+    void awakeChanged();
     // One of the game's sounds was queued by playGame().
     void gameSoundQueued(const QString &name);
 
@@ -150,6 +173,8 @@ private:
     std::deque<SoundPtr> m_requests;  // guarded by m_mutex
     std::deque<SoundPtr> m_stops;     // guarded by m_mutex
     bool m_stop = false;              // guarded by m_mutex
+    bool m_awake = false;             // the GUI thread's copy
+    bool m_keepOpen = false;          // guarded by m_mutex: the worker's
     mutable std::mutex m_progressMutex;
     std::map<QString, Progress> m_progress;  // guarded by m_progressMutex: the worker writes, heard() reads
     std::thread m_worker;

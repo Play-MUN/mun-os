@@ -37,6 +37,53 @@ QtObject {
     // (src/shape.h, docs/shape.md).
     readonly property color accent: copperLight
     readonly property color accentDeep: copper
+
+    // MUN OS's palette, made in OKLCH so that its families share lightness
+    // steps and read as one set: the night (background and glass), moon grey
+    // (text and quiet parts), moonlight (the warm yellow of the focus and the
+    // eclipse), and two accents tuned to it, cyan and rose (a reddish pink).
+    // Steps from 100, the lightest, to 900. Every 500 keeps 7:1 on the night
+    // and with the ink written on it.
+    readonly property var palette: ({
+        night: { 900: "#100B07", 800: "#17110D", 700: "#211A15", 600: "#2C2520", 500: "#3A342F" },
+        moon: { 100: "#F5F3EF", 300: "#DAD7D2", 500: "#AEAAA5", 700: "#7D7A75", 900: "#55524F" },
+        moonlight: { 100: "#FBEDD4", 300: "#F3D398", 500: "#E4B65C", 700: "#AB863C", 900: "#543E13" },
+        cyan: { 100: "#D7F5F9", 300: "#9DE6EF", 500: "#5ED1DE", 700: "#3C9CA6", 900: "#114B51" },
+        rose: { 100: "#FFE8E8", 300: "#FEC8C8", 500: "#ED7F84", 700: "#C86D72", 900: "#643133" }
+    })
+
+    // The orbital design (Home on a graphics API, OrbitalBackdrop), in the
+    // palette: the glass of its pills and panel, the moonlight's tint, the
+    // ink on a lit pill, its text in three strengths, the eclipse's light.
+    readonly property color orbitalGlass: palette.night[700]
+    readonly property color orbitalCream: palette.moonlight[100]
+    readonly property color orbitalInk: palette.night[800]       // text on a lit pill
+    readonly property color orbitalInkSoft: "#2A2119"            // a detail on a lit pill
+    readonly property color orbitalText: palette.moon[100]
+    readonly property color orbitalTextSoft: palette.moon[300]
+    readonly property color orbitalTextDim: palette.moon[500]
+    readonly property color orbitalLight: "#FEE8C7"
+    // Cyan is kept, for now, for the network's light while Ethernet or Wi-Fi
+    // is connected (StatusBar).
+    readonly property color orbitalNetwork: palette.cyan[500]
+    // Each section its own light: the chosen pill (from the family's light to
+    // its colour), its node, the large icon and the panel's focus take the
+    // colour of the entry in focus, Settings' sections all Settings' own.
+    readonly property var orbitalSections: ({ card: "moonlight", games: "moonlight", settings: "moon", power: "rose" })
+    function orbitalAccent(key) {
+        const family = orbitalSections[key]
+        return family ? palette[family][family === "moon" ? 300 : 500] : orbitalCream
+    }
+    function orbitalAccentLight(key) {
+        const family = orbitalSections[key]
+        return family ? palette[family][family === "moon" ? 100 : 300] : orbitalCream
+    }
+    // Where the orbit's centre is, its node ring, and where the menu and the
+    // panel start (src/orbitalbackdrop.h).
+    readonly property point orbitalCentre: Qt.point(470, 540)
+    readonly property real orbitalNodeRing: 268
+    readonly property real orbitalMenuX: 772
+    readonly property real orbitalPanelX: 1232
     function accentAlpha(a) { return Qt.rgba(accent.r, accent.g, accent.b, a) }
     function accentDeepAlpha(a) { return Qt.rgba(accentDeep.r, accentDeep.g, accentDeep.b, a) }
     // A colour at an alpha.
@@ -55,6 +102,11 @@ QtObject {
     readonly property var ease: [0.25, 0.1, 0.25, 1, 1, 1]          // CSS ease, the default
     readonly property var settle: [0.2, 0.8, 0.2, 1, 1, 1]          // cubic-bezier(.2,.8,.2,1)
     readonly property var draw: [0.65, 0, 0.3, 1, 1, 1]             // the start-up arc
+    // Idle (Main.qml): how far the interface dims after ten minutes without
+    // input, and how fast it goes there and comes back.
+    readonly property real idleDim: 0.5
+    readonly property int idleDimIn: 2000
+    readonly property int idleDimOut: 250
 
     function rgba(r, g, b, a) { return Qt.rgba(r / 255, g / 255, b / 255, a) }
 

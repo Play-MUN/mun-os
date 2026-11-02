@@ -55,7 +55,11 @@ Environment=QT_QUICK_BACKEND=software
 # and chooses that mode itself, through QT_QPA_KMS_CONFIG. Setting
 # QT_SCALE_FACTOR here would override the scale, and a KMS configuration the
 # player's choice of resolution.
+# No pointer is drawn, on either path: the console is driven by keys and
+# gamepads. linuxfb hides its cursor with the first; eglfs (a board's GPU
+# path, set by its profile) would otherwise put one on a hardware plane.
 Environment=QT_QPA_FB_HIDECURSOR=1
+Environment=QT_QPA_EGLFS_HIDECURSOR=1
 Environment=QT_QPA_EVDEV_KEYBOARD_PARAMETERS=grab=1
 Environment=XDG_RUNTIME_DIR=/run/mun-shell
 Environment=QT_LOGGING_RULES=qt.qpa.*=false

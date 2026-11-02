@@ -14,6 +14,12 @@ import MUN.Shell
 // with every item above it). With CONFIG.trace it prints a TRACE line on each
 // frame anything of the entries' changed: whether each is dressed, dimmed,
 // its opacities, and whether a dialog's layer is shown.
+//
+// The menu entries are found in either design: the previous design's arcs
+// (ArcNode, `knobSize`) or the orbital design's (OrbitalNode, `nodeX`); the
+// card object likewise (HeroIcon or OrbitalCard, `cardShape` and
+// `cardReveal`). The start line says which design came up and how many of
+// each it found, for the test to require them.
 Item {
     id: scene
     readonly property var config: CONFIG
@@ -76,23 +82,49 @@ Item {
         }
         return o
     }
+    function isEntry(it) { return (it.knobSize !== undefined || it.nodeX !== undefined) && it.reached !== undefined }
+    // The item that draws the card object (HeroIcon, OrbitalCard): the
+    // innermost with its properties, which the items around it may pass on.
+    function isCard(it) {
+        const has = c => c.cardShape !== undefined && c.cardReveal !== undefined
+        return has(it) && findAll(it, c => c !== it && has(c), []).length === 0
+    }
     function mainEntries() {
-        return findAll(canvas, it => it.knobSize !== undefined && it.reached !== undefined && it.dressed, [])
+        return findAll(canvas, it => isEntry(it) && it.dressed, [])
+    }
+
+    // Where an entry's text lies on its plate, in the canvas: an arc's bar
+    // through its projection, an orbital pill flat.
+    function textBox(node) {
+        if (node.nodeX !== undefined) {
+            const b = node.box
+            const left = node.on || node.icon === "" ? 30 : (node.compact ? 72 : 86)
+            const a = node.mapToItem(canvas, b.x + left - 12, b.y + 9)
+            const c = node.mapToItem(canvas, b.x + b.width - 30, b.y + b.height - 9)
+            return [Math.ceil(a.x), Math.ceil(a.y), Math.floor(c.x), Math.floor(c.y)]
+        }
+        const left = node.knobSize + node.wireWidth + (node.on ? 4 : 0)
+        const width = node.width - node.knobSize - node.wireWidth - 4
+        return projected(node, left + 14, 9, left + width - 34, node.barHeight - 9, true)
     }
 
     function regions() {
         const entries = []
-        for (const node of findAll(canvas, it => it.knobSize !== undefined && it.reached !== undefined, [])) {
+        for (const node of findAll(canvas, isEntry, [])) {
             if (!node.visible || node.opacity <= 0.01 || !node.label || node.parent.opacity <= 0.01)
                 continue
-            const left = node.knobSize + node.wireWidth + (node.on ? 4 : 0)
-            const width = node.width - node.knobSize - node.wireWidth - 4
             entries.push({ label: node.label, chosen: node.on, reached: node.reached, shaped: node.shaped,
-                           opacity: node.opacity, effective: effective(node),
-                           box: projected(node, left + 14, 9, left + width - 34, node.barHeight - 9, true) })
+                           opacity: node.opacity, effective: effective(node), box: textBox(node) })
         }
+        // The card object: where it is, whether it shows a window, how far.
+        const cards = findAll(canvas, isCard, []).map(it => {
+            const a = it.mapToItem(canvas, 0, 0), c = it.mapToItem(canvas, it.width, it.height)
+            return { box: [Math.floor(a.x), Math.floor(a.y), Math.ceil(c.x), Math.ceil(c.y)],
+                     window: it.cardWindow !== undefined && it.cardWindow !== null, reveal: it.cardReveal,
+                     shape: it.cardShape, shown: it.visible && effective(it) > 0.5 }
+        })
         const panel = find(canvas, it => it.plating !== undefined)
-        return { entries: entries,
+        return { entries: entries, cards: cards,
                  panel: panel ? { reached: panel.reached, shaped: panel.shaped, dressed: panel.dressed,
                                   text: projected(panel, 52, 40, panel.width - 52, 200, true),
                                   outline: projected(panel, 0, 0, panel.width, panel.height, false) } : null }
@@ -117,7 +149,11 @@ Item {
             worldDrawn: world ? world.drawn : false, worldFailed: world ? world.failed : false,
             frames: world ? world.frames : 0, still: world ? world.still : false, dim: world ? world.dim : 0,
             modal: main ? !!main.modal : false, level: main ? main.level : -1,
+            dimmed: main ? main.dimmed : false, mainIndex: main ? main.mainIndex : -1,
             sections: main ? main.settingsEntries.map(e => e.key) : [],
+            design: main ? (main.orbital ? "orbital" : "previous") : "",
+            entriesFound: canvas ? findAll(canvas, isEntry, []).length : 0,
+            cardsFound: canvas ? findAll(canvas, isCard, []).length : 0,
             // Texts on screen cut short (an elided label).
             cut: canvas ? findAll(canvas, it => it.truncated === true && it.visible && effective(it) > 0.5, [])
                               .map(it => it.text) : []
@@ -197,6 +233,7 @@ Item {
     Connections {
         target: SystemSounds
         function onGameSoundQueued(name) { console.log("SOUND " + JSON.stringify({ t: scene.now(), name: name, phase: Shape.phase })) }
+        function onQueued(name) { console.log("SYSSOUND " + JSON.stringify({ t: scene.now(), name: name })) }
     }
     Connections {
         target: Shape

@@ -186,6 +186,32 @@ QPainterPath discharged(const Shape &shape, qreal s, qreal front, qreal amp, Qt:
     }, rule);
 }
 
+// Whether the discharge moves any point of `shape` that shows: its band is
+// 130 units wide about the front, and beyond three widths (exp(-9) of the
+// amplitude, a few thousandths of a unit) it moves nothing. A shape it does
+// not move is drawn still, and its glow kept (BootIntro::m_glows).
+bool shaken(const Shape &shape, qreal front, qreal amp)
+{
+    if (amp <= 0)
+        return false;
+    // The nearest and farthest point from the LED, where the front starts.
+    static std::map<const Shape *, std::pair<double, double>> reach;
+    auto it = reach.find(&shape);
+    if (it == reach.end()) {
+        double nearest = 1e12, farthest = 0;
+        for (size_t i = 0; i + 1 < shape.nums.size(); i += 2) {
+            const double d = std::hypot(shape.nums[i] - kLedX, shape.nums[i + 1] - kLedY);
+            nearest = std::min(nearest, d);
+            farthest = std::max(farthest, d);
+        }
+        it = reach.emplace(&shape, std::make_pair(nearest, farthest)).first;
+    }
+    return front > it->second.first - 3 * 130 && front < it->second.second + 3 * 130;
+}
+
+// How often, in seconds of t at most, the Mark's warm shadow is made again.
+constexpr qreal kShadowStep = 0.1;
+
 // The LED: each point of its oval paired with one on a circle of radius r0;
 // at g = 0 it is that circle, at 1 the oval.
 QPainterPath ledOutline(qreal g, qreal r0)
@@ -257,10 +283,12 @@ void colourFilter(QImage &image, qreal brightness, qreal hueDegrees = 0, qreal s
         {0.213 + 0.787 * t, 0.715 - 0.715 * t, 0.072 - 0.072 * t},
         {0.213 - 0.213 * t, 0.715 + 0.285 * t, 0.072 - 0.072 * t},
         {0.213 - 0.213 * t, 0.715 - 0.715 * t, 0.072 + 0.928 * t}};
-    double m[3][3];
+    // In fixed point, 1/4096 steps: the start-up runs this on large layers
+    // every frame, and in double precision it took most of a frame.
+    int m[3][3];
     for (int i = 0; i < 3; ++i)
         for (int j = 0; j < 3; ++j)
-            m[i][j] = (a[i][0] * h[0][j] + a[i][1] * h[1][j] + a[i][2] * h[2][j]) * brightness;
+            m[i][j] = int(std::lround((a[i][0] * h[0][j] + a[i][1] * h[1][j] + a[i][2] * h[2][j]) * brightness * 4096));
     for (int y = 0; y < image.height(); ++y) {
         QRgb *line = reinterpret_cast<QRgb *>(image.scanLine(y));
         for (int x = 0; x < image.width(); ++x) {
@@ -268,12 +296,80 @@ void colourFilter(QImage &image, qreal brightness, qreal hueDegrees = 0, qreal s
             const int alpha = qAlpha(p);
             if (!alpha)
                 continue;
-            const double r = qRed(p), g = qGreen(p), b = qBlue(p);
-            auto channel = [&](int i) {
-                return int(std::clamp(m[i][0] * r + m[i][1] * g + m[i][2] * b, 0.0, double(alpha)) + 0.5);
-            };
-            line[x] = qRgba(channel(0), channel(1), channel(2), alpha);
+            const int r = qRed(p), g = qGreen(p), b = qBlue(p);
+            const int c0 = std::clamp((m[0][0] * r + m[0][1] * g + m[0][2] * b + 2048) >> 12, 0, alpha);
+            const int c1 = std::clamp((m[1][0] * r + m[1][1] * g + m[1][2] * b + 2048) >> 12, 0, alpha);
+            const int c2 = std::clamp((m[2][0] * r + m[2][1] * g + m[2][2] * b + 2048) >> 12, 0, alpha);
+            line[x] = qRgba(c0, c1, c2, alpha);
         }
+    }
+}
+
+// A premultiplied pixel `t`/256 of the way from `a` to `b`, two channels at
+// a time.
+inline QRgb mixPixel(QRgb a, QRgb b, uint t)
+{
+    const uint rb = (((a & 0x00ff00ff) * (256 - t) + (b & 0x00ff00ff) * t) >> 8) & 0x00ff00ff;
+    const uint ag = (((a >> 8) & 0x00ff00ff) * (256 - t) + ((b >> 8) & 0x00ff00ff) * t) & 0xff00ff00;
+    return rb | ag;
+}
+
+// `image` made `factor` times smaller, each pixel the mean of its block.
+QImage shrink(const QImage &image, int factor)
+{
+    QImage small((image.width() + factor - 1) / factor, (image.height() + factor - 1) / factor,
+                 QImage::Format_ARGB32_Premultiplied);
+    for (int y = 0; y < small.height(); ++y) {
+        QRgb *out = reinterpret_cast<QRgb *>(small.scanLine(y));
+        for (int x = 0; x < small.width(); ++x) {
+            uint r = 0, g = 0, b = 0, a = 0, count = 0;
+            for (int yy = y * factor; yy < std::min(image.height(), (y + 1) * factor); ++yy) {
+                const QRgb *in = reinterpret_cast<const QRgb *>(image.constScanLine(yy));
+                for (int xx = x * factor; xx < std::min(image.width(), (x + 1) * factor); ++xx, ++count) {
+                    r += qRed(in[xx]);
+                    g += qGreen(in[xx]);
+                    b += qBlue(in[xx]);
+                    a += qAlpha(in[xx]);
+                }
+            }
+            out[x] = count ? qRgba(int(r / count), int(g / count), int(b / count), int(a / count)) : 0;
+        }
+    }
+    return small;
+}
+
+// `small` enlarged `factor` times over all of `out` (a pixel of `small` per
+// block of factor x factor), bilinear: across on its own rows, then down.
+// Qt's smooth drawing of a whole layer took most of a start-up frame.
+void enlarge(const QImage &small, int factor, QImage &out)
+{
+    const int w = out.width(), h = out.height(), sw = small.width(), sh = small.height();
+    std::vector<int> from(static_cast<size_t>(w), 0);
+    std::vector<uint> weight(static_cast<size_t>(w), 0);
+    for (int x = 0; x < w; ++x) {
+        const double sx = (x + 0.5) / factor - 0.5;
+        const int i = int(std::floor(sx));
+        from[size_t(x)] = i;
+        weight[size_t(x)] = uint(std::lround((sx - i) * 256));
+    }
+    QImage wide(w, sh, QImage::Format_ARGB32_Premultiplied);
+    for (int y = 0; y < sh; ++y) {
+        const QRgb *in = reinterpret_cast<const QRgb *>(small.constScanLine(y));
+        QRgb *row = reinterpret_cast<QRgb *>(wide.scanLine(y));
+        for (int x = 0; x < w; ++x) {
+            const int i = from[size_t(x)];
+            row[x] = mixPixel(in[std::clamp(i, 0, sw - 1)], in[std::clamp(i + 1, 0, sw - 1)], weight[size_t(x)]);
+        }
+    }
+    for (int y = 0; y < h; ++y) {
+        const double sy = (y + 0.5) / factor - 0.5;
+        const int j = int(std::floor(sy));
+        const uint t = uint(std::lround((sy - j) * 256));
+        const QRgb *a = reinterpret_cast<const QRgb *>(wide.constScanLine(std::clamp(j, 0, sh - 1)));
+        const QRgb *b = reinterpret_cast<const QRgb *>(wide.constScanLine(std::clamp(j + 1, 0, sh - 1)));
+        QRgb *row = reinterpret_cast<QRgb *>(out.scanLine(y));
+        for (int x = 0; x < w; ++x)
+            row[x] = mixPixel(a[x], b[x], t);
     }
 }
 
@@ -282,17 +378,14 @@ void colourFilter(QImage &image, qreal brightness, qreal hueDegrees = 0, qreal s
 // no detail to lose.
 void glow(QImage &image, qreal deviceSigma)
 {
-    const qreal factor = deviceSigma > 3 ? 2.0 : 1.0;
-    QImage soft = factor > 1 ? image.scaled(image.size() / factor, Qt::IgnoreAspectRatio, Qt::SmoothTransformation)
-                             : image.copy();
+    const int factor = deviceSigma > 3 ? 2 : 1;
+    QImage soft = factor > 1 ? shrink(image, factor) : image.copy();
     soft.setDevicePixelRatio(1);
     blur::gaussian(soft, deviceSigma / factor);
     QImage out(image.size(), QImage::Format_ARGB32_Premultiplied);
-    out.fill(Qt::transparent);
+    enlarge(soft, factor, out);
     {
         QPainter p(&out);
-        p.setRenderHint(QPainter::SmoothPixmapTransform);
-        p.drawImage(QRectF(QPointF(0, 0), QSizeF(image.size())), soft);
         QImage sharp = image;
         sharp.setDevicePixelRatio(1);
         p.drawImage(0, 0, sharp);
@@ -306,22 +399,30 @@ void glow(QImage &image, qreal deviceSigma)
 QImage dropShadow(const QImage &image, qreal deviceRadius, const QColor &colour)
 {
     const qreal sigma = deviceRadius / 2;
-    const qreal factor = sigma > 6 ? 4.0 : sigma > 3 ? 2.0 : 1.0;
-    QImage soft = image.scaled(image.size() / factor, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-    soft.setDevicePixelRatio(1);
+    const int factor = sigma > 6 ? 4 : sigma > 3 ? 2 : 1;
+    // Only the alpha casts the shadow: each block of factor x factor pixels
+    // is averaged and given the colour at once (a Gaussian is linear, so
+    // tinting before it is tinting after). Qt's smooth scaling of the whole
+    // picture took longer than everything else here.
+    QImage soft((image.width() + factor - 1) / factor, (image.height() + factor - 1) / factor,
+                QImage::Format_ARGB32_Premultiplied);
+    const QRgb tint = colour.rgba();
+    for (int y = 0; y < soft.height(); ++y) {
+        QRgb *out = reinterpret_cast<QRgb *>(soft.scanLine(y));
+        for (int x = 0; x < soft.width(); ++x) {
+            int sum = 0, count = 0;
+            for (int yy = y * factor; yy < std::min(image.height(), (y + 1) * factor); ++yy) {
+                const QRgb *in = reinterpret_cast<const QRgb *>(image.constScanLine(yy));
+                for (int xx = x * factor; xx < std::min(image.width(), (x + 1) * factor); ++xx, ++count)
+                    sum += qAlpha(in[xx]);
+            }
+            const int a = count ? (sum / count) * qAlpha(tint) / 255 : 0;
+            out[x] = qRgba(qRed(tint) * a / 255, qGreen(tint) * a / 255, qBlue(tint) * a / 255, a);
+        }
+    }
     blur::gaussian(soft, sigma / factor);
-    {
-        QPainter p(&soft);
-        p.setCompositionMode(QPainter::CompositionMode_SourceIn);
-        p.fillRect(soft.rect(), colour);
-    }
     QImage out(image.size(), QImage::Format_ARGB32_Premultiplied);
-    out.fill(Qt::transparent);
-    {
-        QPainter p(&out);
-        p.setRenderHint(QPainter::SmoothPixmapTransform);
-        p.drawImage(QRectF(QPointF(0, 0), QSizeF(image.size())), soft);
-    }
+    enlarge(soft, factor, out);
     out.setDevicePixelRatio(image.devicePixelRatio());
     return out;
 }
@@ -806,7 +907,7 @@ void BootIntro::paintMark(QPainter *painter, qreal scale)
     // One shape filled into a layer of its own, only as large as it and its
     // glow, glowing; `mask` (drawing in the logo's units) may then cut it.
     auto element = [&](const QPainterPath &path, const QBrush &brush, const QTransform &extra, qreal opacity,
-                       const std::function<void(QPainter &)> &mask) {
+                       const std::function<void(QPainter &)> &mask, bool still, quint64 salt) {
         const QTransform place = extra * logo;
         const QRectF box = place.mapRect(path.boundingRect());
         const qreal margin = 3 * sigma + 2;
@@ -815,17 +916,39 @@ void BootIntro::paintMark(QPainter *painter, qreal scale)
         if (pixels.isEmpty())
             return;
         const QPointF origin = QPointF(pixels.topLeft()) / scale + area.topLeft();   // in the canvas
-        QImage image = transparent(pixels.size(), scale);
-        {
-            QPainter p(&image);
-            p.setRenderHint(QPainter::Antialiasing);
-            p.translate(-origin);
-            p.setTransform(place, true);
-            p.setPen(Qt::NoPen);
-            p.setBrush(brush);
-            p.drawPath(path);
+        // A still element's glowing image, as made last time it looked the
+        // same; its mask and opacity are applied anew.
+        QByteArray key;
+        QImage image;
+        if (still) {
+            key = QByteArray::number(salt) + ' ' + QByteArray::number(scale, 'g', 9);
+            for (const qreal v : {place.m11(), place.m12(), place.m21(), place.m22(), place.dx(), place.dy()})
+                key += ' ' + QByteArray::number(v, 'g', 9);
+            for (const Glow &kept : m_glows) {
+                if (kept.key == key && kept.pixels == pixels)
+                    image = kept.image;
+            }
         }
-        glow(image, sigma);
+        if (image.isNull()) {
+            image = transparent(pixels.size(), scale);
+            {
+                QPainter p(&image);
+                p.setRenderHint(QPainter::Antialiasing);
+                p.translate(-origin);
+                p.setTransform(place, true);
+                p.setPen(Qt::NoPen);
+                p.setBrush(brush);
+                p.drawPath(path);
+            }
+            glow(image, sigma);
+            if (still) {
+                const QByteArray mine = QByteArray::number(salt) + ' ';
+                m_glows.erase(std::remove_if(m_glows.begin(), m_glows.end(),
+                                             [&](const Glow &kept) { return kept.key.startsWith(mine); }),
+                              m_glows.end());
+                m_glows.push_back({key, image, pixels});
+            }
+        }
         if (mask) {
             QPainter p(&image);
             p.translate(-origin);
@@ -840,8 +963,10 @@ void BootIntro::paintMark(QPainter *painter, qreal scale)
     // The copper moon of the eclipse, then fading.
     const qreal eb = sp(at, 8.2, 8.45);
     const qreal ghost = 0.62 * eb * (1 - sp(at, 9.7, 10.35));
+    const bool arcStill = !shaken(arcShape(), front, amp);
     if (ghost > 0)
-        element(discharged(arcShape(), at, front, amp, Qt::WindingFill, 1u << 20), blood, QTransform(), ghost, nullptr);
+        element(discharged(arcShape(), at, front, arcStill ? 0 : amp, Qt::WindingFill, 1u << 20), blood, QTransform(), ghost,
+                nullptr, arcStill, 1);
     // The silver arc, the eclipse's shadow withdrawing from it.
     if (at >= 8.4) {
         std::function<void(QPainter &)> shadow;
@@ -858,7 +983,8 @@ void BootIntro::paintMark(QPainter *painter, qreal scale)
                 p.fillRect(QRectF(-3000, -3000, 8000, 8000), g);
             };
         }
-        element(discharged(arcShape(), at, front, amp, Qt::WindingFill, 2u << 20), silver, QTransform(), 1, shadow);
+        element(discharged(arcShape(), at, front, arcStill ? 0 : amp, Qt::WindingFill, 2u << 20), silver, QTransform(), 1,
+                shadow, arcStill, 2);
     }
     // The letters fall into place with weight, from 105 %.
     const qreal pu = o3(sp(at, 7.0, 7.7));
@@ -870,25 +996,36 @@ void BootIntro::paintMark(QPainter *painter, qreal scale)
         grow.translate(centre.x(), centre.y());
         grow.scale(k, k);
         grow.translate(-centre.x(), -centre.y());
-        element(discharged(letterShape(), at, front, amp, Qt::OddEvenFill, 3u << 20), silver, grow, pu, nullptr);
+        const bool lettersStill = !shaken(letterShape(), front, amp);
+        element(discharged(letterShape(), at, front, lettersStill ? 0 : amp, Qt::OddEvenFill, 3u << 20), silver, grow, pu,
+                nullptr, lettersStill, 3);
     }
     out.end();
     // The discharge's flicker, for its first 0.6 s.
     if (zapping && dz < 0.6)
         colourFilter(content, chance(at, 7) < 0.5 ? 1.3 : 0.92);
 
-    // The picture's warm shadow, growing to its full light.
+    // The picture's warm shadow, growing to its full light; made again only
+    // every kShadowStep, and for the finished logo.
     const qreal gl = sp(at, 7.0, 9.1);
-    QImage frame = dropShadow(content, (8 + 22 * gl) * scale, QColor::fromRgbF(1, 190 / 255., 120 / 255., 0.12 + 0.2 * gl));
-    {
-        QPainter p(&frame);
-        p.drawImage(QPointF(0, 0), content);
+    if (finished || m_shadow.image.isNull() || m_shadow.scale != scale || std::abs(at - m_shadowAt) >= kShadowStep) {
+        m_shadow.image = dropShadow(content, (8 + 22 * gl) * scale, QColor::fromRgbF(1, 190 / 255., 120 / 255., 0.12 + 0.2 * gl));
+        m_shadow.scale = scale;
+        m_shadowAt = at;
     }
     if (finished) {
+        QImage frame = m_shadow.image;
+        {
+            QPainter p(&frame);
+            p.drawImage(QPointF(0, 0), content);
+        }
         m_finished.image = frame;
         m_finished.scale = scale;
+        painter->drawImage(QPointF(0, 0), frame);
+        return;
     }
-    painter->drawImage(QPointF(0, 0), frame);
+    painter->drawImage(QPointF(0, 0), m_shadow.image);
+    painter->drawImage(QPointF(0, 0), content);
 }
 
 void BootIntro::paintLed(QPainter *painter, qreal scale)

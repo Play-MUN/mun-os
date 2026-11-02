@@ -14,7 +14,13 @@ QtObject {
     function t(en, es) { return I18n.t(en, es) }
 
     function head(label) { return { kind: "head", label: label } }
-    function action(label, value, run, note) { return { kind: "action", label: label, value: value || "", run: run, note: note || "" } }
+    // `sound`: the one running it plays, "enter" when not given (Main.qml).
+    function action(label, value, run, note, sound) {
+        const option = { kind: "action", label: label, value: value || "", run: run, note: note || "" }
+        if (sound !== undefined)
+            option.sound = sound
+        return option
+    }
     function info(label, value, note) { return { kind: "info", label: label, value: value || "", note: note || "" } }
     function choice(label, values, index, choose, note) {
         return { kind: "choice", label: label, values: values, index: Math.max(0, index), value: values[Math.max(0, index)],
@@ -57,13 +63,13 @@ QtObject {
     }
 
     function card() {
-        const kicker = "GAME CARD"
+        const kicker = shell.orbital ? "MUN DISK" : "GAME CARD"
         switch (shell.cardMode) {
         case "valid": {
             const info = CardClient.info
             const options = []
             if (info.kind === "game")
-                options.push(action(t("Play", "Jugar"), shell.launchable ? "" : shell.launchBlocker, shell.play))
+                options.push(action(t("Play", "Jugar"), shell.launchable ? "" : shell.launchBlocker, shell.play, "", "launch"))
             options.push(action(t("Eject safely", "Retirar con seguridad"),
                                 LaunchClient.releasePending ? t("Ejecting…", "Retirando…") : "", shell.eject))
             return {
@@ -100,6 +106,14 @@ QtObject {
                 options: []
             }
         }
+        if (shell.orbital)
+            return {
+                kicker: kicker,
+                title: t("Insert a MUN Disk", "Inserta un MUN Disk"),
+                text: t("Insert a disk to load its experience. The console will be shaped by the game while it is in.",
+                        "Inserta un disco para cargar su experiencia. La consola tomará la forma del juego mientras esté dentro.") + waitingText(),
+                options: []
+            }
         return {
             kicker: kicker,
             title: t("Slot empty", "Ranura vacía"),
@@ -111,13 +125,23 @@ QtObject {
 
     function games() {
         const title = CardClient.info.title || "Game Card"
+        // Universe (the orbital design): what is at hand, and nothing promised.
+        if (shell.orbital)
+            return {
+                kicker: t("UNIVERSE", "UNIVERSO"),
+                title: t("Universe", "Universo"),
+                text: shell.hasGame ? t("Right now you have " + title + " at hand.", "Ahora mismo tienes a mano " + title + ".")
+                                    : t("Nothing here yet. Your games travel on their MUN Disks.",
+                                        "Todavía no hay nada aquí. Tus juegos viajan en sus MUN Disk."),
+                options: shell.hasGame ? [action(title, shell.launchable ? t("Play", "Jugar") : shell.launchBlocker, shell.play, "", "launch")] : []
+            }
         return {
             kicker: t("MY GAMES", "MIS JUEGOS"),
             title: t("My games", "Mis juegos"),
             text: shell.hasGame ? t("Right now you have " + title + " at hand.", "Ahora mismo tienes a mano " + title + ".")
                                 : t("There are no games on the console. Your games live on their Game Cards.",
                                     "No hay ningún juego en la consola. Tus juegos viven en sus Game Cards."),
-            options: shell.hasGame ? [action(title, shell.launchable ? t("Play", "Jugar") : shell.launchBlocker, shell.play)] : []
+            options: shell.hasGame ? [action(title, shell.launchable ? t("Play", "Jugar") : shell.launchBlocker, shell.play, "", "launch")] : []
         }
     }
 
@@ -164,6 +188,11 @@ QtObject {
                        i => ShellSettings.safeArea = areas[i],
                        t("Brings the interface in from the edges of a TV that crops them.",
                          "Aleja la interfaz de los bordes en un televisor que los recorta.")),
+                // Also chosen in a dialog: a change restarts the shell.
+                Object.assign(action(t("Colour range", "Rango de color"), rangeName(ShellSettings.colourRange), shell.askColourRange,
+                                     t("If blacks look grey, choose Full; if the darkest shades merge into black, Limited.",
+                                       "Si los negros se ven grises, elige Completo; si los tonos más oscuros se funden con el negro, Limitado.")),
+                              { key: "range" }),
                 unavailable("HDR"),
                 unavailable(t("Refresh rate", "Frecuencia"))
             ]
@@ -183,9 +212,6 @@ QtObject {
                        ShellSettings.gameSounds ? 0 : 1, i => ShellSettings.gameSounds = i === 0,
                        t("A Game Card's own sounds for the menus while it is in.",
                          "Los sonidos propios de una Game Card en los menús mientras está dentro.")),
-                // The start-up's sound plays with the system sounds.
-                info(t("Startup sound", "Sonido de arranque"), ShellSettings.systemSounds ? t("On", "Activado") : t("Off", "Desactivado"),
-                     t("Follows System sounds.", "Depende de Sonidos del sistema.")),
                 unavailable(t("Output", "Salida")),
                 unavailable(t("Format", "Formato"))
             ]
@@ -209,8 +235,7 @@ QtObject {
                 choice(t("Reduce motion", "Reducir movimiento"), [t("Off", "Desactivado"), t("On", "Activado")],
                        ShellSettings.reduceMotion ? 1 : 0, i => ShellSettings.reduceMotion = i === 1,
                        t("Home and its worlds hold still; the start-up loses its shake and flicker.",
-                         "Home y sus mundos se quedan quietos; el arranque pierde su temblor y sus destellos.")),
-                unavailable(t("Status light", "Luz de estado"))
+                         "Home y sus mundos se quedan quietos; el arranque pierde su temblor y sus destellos."))
             ]
         }
     }
@@ -234,6 +259,16 @@ QtObject {
     // "2560x1440" → "1440p", "2560 × 1440".
     function resolutionName(mode) { return mode.split("x")[1] + "p" }
     function resolutionSize(mode) { return mode.replace("x", " × ") }
+    // The colour range (displaymode.h): how the console sends its colours,
+    // and so how dark a TV shows its blacks.
+    function rangeName(range) {
+        switch (range) {
+        case "full": return t("Full", "Completo")
+        case "limited": return t("Limited", "Limitado")
+        }
+        return t("Automatic", "Automático")
+    }
+
     function resolutionValue() {
         const active = ShellSettings.activeResolution
         if (active !== "auto")
@@ -318,7 +353,7 @@ QtObject {
         return {
             title: t("Turn off the console?", "¿Apagar la consola?"),
             text: t("If there is a Game Card inside, your save is already on it.", "Si hay una Game Card, tu partida ya está guardada en ella."),
-            actions: [{ label: t("Turn off", "Apagar"), run: shell.powerOff }, { label: t("Cancel", "Cancelar"), run: shell.closeModal }]
+            actions: [{ label: t("Turn off", "Apagar"), run: shell.powerOff, sound: "" }, { label: t("Cancel", "Cancelar"), run: shell.closeModal }]
         }
     }
 
@@ -356,6 +391,22 @@ QtObject {
         }
     }
 
+    // The colour range, chosen in a dialog; the shell restarts with it.
+    function colourRange() {
+        const active = ShellSettings.colourRange
+        const ranges = ["auto", "full", "limited"]
+        const actions = ranges.map(range => ({ label: rangeName(range), value: range === active ? t("In use", "En uso") : "",
+                                               run: () => shell.changeColourRange(range) }))
+        actions.push({ label: t("Cancel", "Cancelar"), run: shell.closeModal })
+        return {
+            title: t("Colour range", "Rango de color"),
+            text: t("Automatic suits most TVs. The screen goes dark for a moment while the console changes it.",
+                    "Automático sirve en la mayoría de televisores. La pantalla se apaga un momento mientras la consola lo cambia."),
+            actions: actions,
+            initial: Math.max(0, ranges.indexOf(active))
+        }
+    }
+
     // After a change of resolution: kept only if the player says so.
     function resolutionTrial() {
         return {
@@ -378,7 +429,7 @@ QtObject {
                      ? t(" The screen goes dark for a moment while the resolution returns to automatic.",
                          " La pantalla se apaga un momento mientras la resolución vuelve a automática.") : ""),
             actions: [
-                { label: t("Reset", "Restablecer"), run: () => { ShellSettings.resetKeepingLanguage(); shell.closeModal() } },
+                { label: t("Reset", "Restablecer"), run: () => { ShellSettings.resetKeepingLanguage(); shell.closeModal() }, sound: "success" },
                 { label: t("Cancel", "Cancelar"), run: shell.closeModal }
             ]
         }

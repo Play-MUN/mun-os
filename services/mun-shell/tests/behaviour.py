@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Behaviour regressions of MUN Shell's MUN Shape code, on the real binary.
 
-    python3 tests/behaviour.py BUILD_DIR/mun-shell [--work DIR] [--only NAME]
+    python3 tests/behaviour.py BUILD_DIR/mun-shell [--work DIR] [--only NAME] [--platform eglfs]
 
 Every case runs the compiled shell with one of tests/scenes/ in place of its
 Main.qml (MUN_SHELL_QML_DIR), offscreen with the software renderer: the
@@ -53,7 +53,21 @@ come from CardClient. The cases:
   defective world, Settings; and, with the options focused, a package that
   arrives late, Eject safely, a changed choice and another card, frame by
   frame (a dressed entry whole on every frame); an arrival after Settings
-  or a dialog only once Home is wholly on screen.
+  or a dialog only once Home is wholly on screen; the card object, for
+  packages with only their card block (an organic outline and a card's),
+  with a world, and with a window that does not decode, each window found
+  on screen by its own colour. Every case first
+  requires the design it asked for, its ten menu entries and its card
+  object to be found. The previous design runs with the software renderer;
+  the same cases run again on the orbital design, through OpenGL on Xvfb
+  (marked orbital/), skipped and said so where Xvfb is not installed.
+- paths: the two drawing paths (paths.qml), the software renderer and
+  OpenGL (an X server from Xvfb, Mesa's llvmpipe): each says in the journal
+  which renderer and which clock it took, and the same still screen (Home's
+  network, objects loaded after a change, the panel's surface and shadow, a
+  chosen entry's bar, glow and knob) matches between them within measured
+  bounds. With --platform eglfs, OpenGL is the board's own GPU; elsewhere
+  it is skipped, and said so, where Xvfb is not installed.
 - settings: the player's settings file (settings.qml): a damaged file reads
   as the defaults and the next choice writes a valid one; a value outside
   the allowed set reads as its default; a change replaces the file whole (a
@@ -67,6 +81,7 @@ the measurements (report.json) there.
 """
 import argparse
 import base64
+import contextlib
 import json
 import os
 import re
@@ -174,15 +189,19 @@ def insertion(number: int) -> str:
 # ------------------------------------------------------------------ running
 
 class Shell:
-    def __init__(self, binary: Path, work: Path):
-        self.binary, self.work = binary, work
+    def __init__(self, binary: Path, work: Path, platform: str = "offscreen"):
+        self.binary, self.work, self.platform = binary, work, platform
         self.peak_kib = {}   # each run's peak resident memory (the kernel's ru_maxrss), by name
 
     def run(self, name: str, scene: str, config: dict, runtime: Path = None, socket_path: Path = None,
             exports: Path = None, timeout: float = 90, launcher: Path = None, settings: str = "",
-            scale: float = 1) -> str:
+            scale: float = 1, display: str = None, software: bool = False, design: str = None) -> str:
         """Runs the shell with `scene` and returns its output. `scale` is the
-        display's device pixels per canvas pixel (4/3: 2560x1440)."""
+        display's device pixels per canvas pixel (4/3: 2560x1440). With an X
+        `display` it draws there through OpenGL (xcb) instead of offscreen
+        with the software renderer; `software` keeps that renderer on a
+        board's display too. `design` ("orbital" or "previous") chooses
+        Home's design (MUN_SHELL_DESIGN); none: the renderer's own."""
         case = self.work / name
         qml = case / "qml"
         qml.mkdir(parents=True, exist_ok=True)
@@ -203,8 +222,18 @@ class Shell:
                    MUN_SHELL_QML_DIR=str(qml), MUN_SHAPE_ROOT=str(exports or self.work / "exports"),
                    MUN_CARDD_SOCKET=str(socket_path or case / "no-service.sock"),
                    MUN_LAUNCHD_SOCKET=str(launcher or case / "no-launcher.sock"), STATE_DIRECTORY=str(state))
-        for key in ("QT_QPA_KMS_CONFIG", "QT_QPA_EGLFS_KMS_CONFIG", "WAYLAND_DISPLAY", "DISPLAY", "MUN_SHELL_TIMING"):
+        for key in ("QT_QPA_KMS_CONFIG", "QT_QPA_EGLFS_KMS_CONFIG", "WAYLAND_DISPLAY", "DISPLAY", "MUN_SHELL_TIMING",
+                    "MUN_SHELL_DESIGN"):
             env.pop(key, None)
+        if design:
+            env["MUN_SHELL_DESIGN"] = design
+        if display:
+            env.pop("QT_QUICK_BACKEND")
+            env.update(QT_QPA_PLATFORM="xcb", DISPLAY=display)
+        elif self.platform == "eglfs" and not software:
+            # A board's own display and GPU (the console's service stopped).
+            env.pop("QT_QUICK_BACKEND")
+            env.update(QT_QPA_PLATFORM="eglfs", QT_QPA_EGLFS_INTEGRATION="eglfs_kms")
         # Reaped with wait4, which also gives this process's own peak memory.
         log = case / "output.log"
         with open(log, "wb") as sink:
@@ -414,9 +443,18 @@ class Checks:
     def __init__(self):
         self.failed = 0
         self.passed = 0
+        self.skipped = 0
         self.failing = []   # the cases' folders, for their logs
+        # Put before every case's name: a second run of cases in a folder of
+        # the work directory ("orbital/").
+        self.tag = ""
+
+    def skip(self, case: str, why: str):
+        self.skipped += 1
+        print(f"  skip  {self.tag}{case}: {why}", flush=True)
 
     def expect(self, case: str, what: str, ok: bool, detail=""):
+        case = self.tag + case
         if ok:
             self.passed += 1
             print(f"  ok    {case}: {what}", flush=True)
@@ -1012,10 +1050,12 @@ def memory_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, re
             checks.expect("look-wide-backdrop", "no empty edge", all(p[2] >= 120 for p in edges), edges)
 
 
-def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, report: dict):
+def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, report: dict, design: str = "previous",
+               display: str = None):
     """The shell's own Main.qml, against stand-ins for the card service and
     the launcher: the moments of docs/shape.md, "How the console uses a
-    package"."""
+    package". In Home's `design`, drawn on the X `display` through OpenGL
+    if given, else offscreen with the software renderer."""
     slow = sample_copy(packages, "home-slow", "sea", change=lambda d: d["transition"].update(seconds=4.0))
     broken = sample_copy(packages, "home-broken", "sea", replace={first_layer("sea"): short_png()})
     counter = iter(range(0x500, 0x600))
@@ -1038,11 +1078,19 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
             output = shell.run(name, "home.qml", {"steps": list(steps) + [{"at": end, "quit": True}], "grabs": list(grabs),
                                                   "out": str(out_dir), "trace": trace},
                                runtime=runtime, socket_path=cardd.path, launcher=launchd.path, exports=exports,
-                               settings=settings, timeout=end / 1000 + 60)
+                               settings=settings, timeout=end / 1000 + 60, display=display, design=design)
         finally:
             cardd.close()
             launchd.close()
-        return output, [p for p in lines(output, "PHASE")], {g["name"]: g for g in lines(output, "GRAB")}
+        phases = [p for p in lines(output, "PHASE")]
+        # The scene measures what it finds: it must have found the design
+        # asked for, its ten menu entries (four on Home, six in Settings) and
+        # its card object, or a green result would say nothing.
+        start = next((p for p in phases if p["label"] == "start"), None)
+        checks.expect(name, f"the {design} design came up, its 10 menu entries and its card object found",
+                      start is not None and start.get("design") == design and start.get("entriesFound") == 10
+                      and start.get("cardsFound") == 1, start and {k: start.get(k) for k in ("design", "entriesFound", "cardsFound")})
+        return output, phases, {g["name"]: g for g in lines(output, "GRAB")}
 
     def first(phases, since=None, **match):
         # The first line matching, after `since` (a line) if given.
@@ -1146,6 +1194,8 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
                   and present is not None and present["t"] - entering["t"] <= 1200, (entering, present))
     checks.expect("home-return", "no cue", [a["live"] for a in lines(out, "ADOPTED")] == [False]
                   and not [s for s in lines(out, "SOUND") if s["name"] == "insert"], lines(out, "ADOPTED"))
+    sounded = [s["name"] for s in lines(out, "SYSSOUND")]
+    checks.expect("home-return", "the game's result, shown on return, sounds once", sounded.count("game_return") == 1, sounded)
 
     # Removed while the tide comes in: back to MUN at once, the way it came.
     x, rx = card(slow)
@@ -1190,10 +1240,16 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
     checks.expect("home-eject-ok", "confirmed: it leaves (release) with the package's out tide, 2.4 s",
                   leaving is not None and leaving["exit"] == "release" and leaving["kind"] == "tide" and gone is not None
                   and 1800 <= gone["t"] - leaving["t"] <= 3400, (leaving, gone))
+    sounded = [s["name"] for s in lines(out, "SYSSOUND")]
+    checks.expect("home-eject-ok", "the release done sounds, and so does Shape leaving",
+                  sounded.count("eject") == 1 and sounded.count("shape_exit") == 1 and "warning" not in sounded, sounded)
     out, phases, launchd = eject(False)
     later = first(phases, label="later")
     checks.expect("home-eject-busy", "a release that fails keeps the identity",
                   later is not None and later["phase"] == "present" and first(phases, phase="leaving") is None, later)
+    sounded = [s["name"] for s in lines(out, "SYSSOUND")]
+    checks.expect("home-eject-busy", "refused: a warning, not the release's sound",
+                  sounded.count("warning") == 1 and "eject" not in sounded and "shape_exit" not in sounded, sounded)
 
     # Another card: the first leaves, the second comes in with its own transition.
     x, rx = card(SAMPLES / "sea")
@@ -1378,6 +1434,107 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
                   (entering, dressed))
     whole_when_dressed("home-dialog-closed", out)
 
+    # Idle: once dimmed, the first key only brings the interface back (and
+    # held down, its repeats do nothing); let go, its next press acts.
+    cardd, launchd = serve("home-idle-dim", [[(0, snapshot())]])
+    down = 0x01000015  # Qt::Key_Down
+    out, phases, _ = run("home-idle-dim", cardd, launchd, [
+        {"at": 1500, "probe": "awake"}, {"at": 1600, "set": {"dimmed": True}}, {"at": 1700, "probe": "dimmed"},
+        {"at": 1800, "call": "key", "args": [down, False]}, {"at": 1900, "probe": "woken"},
+        {"at": 2000, "call": "key", "args": [down, True]}, {"at": 2100, "probe": "held"},
+        {"at": 2150, "call": "keyReleased", "args": [down]},
+        {"at": 2200, "call": "key", "args": [down, False]}, {"at": 2300, "probe": "moved"}], end=3000)
+    at = {p["label"]: p for p in phases if p["label"] in ("awake", "dimmed", "woken", "held", "moved")}
+    checks.expect("home-idle-dim", "dimmed, the first key only undims: the focus stays",
+                  len(at) == 5 and at["dimmed"]["dimmed"] and not at["woken"]["dimmed"]
+                  and at["woken"]["mainIndex"] == at["awake"]["mainIndex"], at)
+    checks.expect("home-idle-dim", "that key held down does nothing; let go, its next press moves the focus",
+                  len(at) == 5 and at["held"]["mainIndex"] == at["awake"]["mainIndex"]
+                  and at["moved"]["mainIndex"] != at["awake"]["mainIndex"], at)
+    # The key that woke it stays spent until it is let go, whatever is
+    # pressed meanwhile: held Enter wakes, Down moves to Settings, a repeat
+    # of Enter must not open it; let go, a fresh Enter does.
+    cardd, launchd = serve("home-idle-held", [[(0, snapshot())]])
+    enter = 0x01000004  # Qt::Key_Return
+    out, phases, _ = run("home-idle-held", cardd, launchd, [
+        {"at": 1500, "set": {"mainIndex": 1}}, {"at": 1600, "set": {"dimmed": True}},
+        {"at": 1700, "call": "key", "args": [enter, False]}, {"at": 1800, "call": "key", "args": [down, False]},
+        {"at": 1900, "probe": "moved"}, {"at": 2000, "call": "key", "args": [enter, True]}, {"at": 2600, "probe": "repeat"},
+        {"at": 2700, "call": "keyReleased", "args": [enter]}, {"at": 2800, "call": "key", "args": [enter, False]},
+        {"at": 3400, "probe": "fresh"}], end=4000)
+    at = {p["label"]: p for p in phases if p["label"] in ("moved", "repeat", "fresh")}
+    checks.expect("home-idle-held", "another key between: the waking key's repeat still does nothing",
+                  len(at) == 3 and at["moved"]["mainIndex"] == 2 and at["repeat"]["level"] == at["moved"]["level"]
+                  and at["repeat"]["sections"] == at["moved"]["sections"], at)
+    checks.expect("home-idle-held", "let go, a fresh press of it acts (Settings opens)",
+                  len(at) == 3 and (at["fresh"]["level"] != at["moved"]["level"]
+                                    or at["fresh"]["sections"] != at["moved"]["sections"]), at)
+
+    # The card object (docs/shape.md, "card"), MUN Disk in focus: the card's
+    # window on screen in the object, from a package that gives only the
+    # object and from one with a whole world; a window that does not decode
+    # leaves MUN's object whole. The windows are solid colours MUN never
+    # draws, so the grab shows the window itself, not an item holding it.
+    def solid_window(rgb):
+        return png(128, 128, [bytes(rgb) * 128] * 128)
+
+    def window_seen(grab, rgb):
+        # The pixels of the card object's square in the window's colour.
+        cards = grab["regions"]["cards"] if grab and grab.get("path") else []
+        if len(cards) != 1:
+            return None
+        found = focus_frame(read_ppm(Path(grab["path"])), cards[0]["box"], "#%02X%02X%02X" % rgb, near=40)
+        return found["count"] if found else 0
+
+    sea = json.loads((SAMPLES / "sea" / "shape.json").read_text(encoding="utf-8"))
+    paper = json.loads((SAMPLES / "paper" / "shape.json").read_text(encoding="utf-8"))
+    magenta, green, violet = (232, 0, 232), (0, 208, 64), (120, 40, 255)
+    for name, package, rgb in (
+            ("home-object-organic", write_package(packages / "home-object-organic", {"format": "mun-shape/1", "card": sea["card"]},
+                                                  {"card/window.png": solid_window(magenta)}), magenta),
+            ("home-object-card", write_package(packages / "home-object-card", {"format": "mun-shape/1", "card": paper["card"]},
+                                               {"card/window.png": solid_window(green)}), green),
+            ("home-object-world", sample_copy(packages, "home-object-world", "sea",
+                                              replace={"card/window.png": solid_window(violet)}), violet)):
+        x, rx = card(package)
+        cardd, launchd = serve(name, [[(0, snapshot()), (2.0, {"type": "card", "card": rx})]])
+        out, phases, grabs = run(name, cardd, launchd, [{"at": 1500, "grab": "before"}, {"at": 6000, "probe": "after"},
+                                                        {"at": 6100, "grab": "object"}],
+                                 settings="[display]\nreduce-motion=on\n", end=7600)
+        before, after, shown = grabs.get("before"), first(phases, label="after"), grabs.get("object")
+        objects = shown["regions"]["cards"] if shown else []
+        seen = (window_seen(before, rgb), window_seen(shown, rgb))
+        report.setdefault("home", {})[f"{name} window pixels"] = {"before": seen[0], "object": seen[1]}
+        checks.expect(name, "the identity is present, MUN Disk in focus",
+                      after is not None and after["phase"] == "present" and after["mainIndex"] == 0, after)
+        checks.expect(name, "the card object holds the package's window, wholly revealed, its outline the package's",
+                      len(objects) == 1 and objects[0]["window"] and objects[0]["shown"] and objects[0]["reveal"] >= 0.999
+                      and objects[0]["shape"] == json.loads((package / "shape.json").read_text(encoding="utf-8"))["card"]["shape"],
+                      objects if shown else "no grab taken")
+        checks.expect(name, "the window is on screen in the object (none of its colour before the card)",
+                      seen[0] == 0 and seen[1] is not None and seen[1] >= 2000, seen)
+        if name == "home-object-world":
+            checks.expect(name, "the world covers MUN's night behind the object",
+                          after is not None and after["world"] and after["worldDrawn"], after)
+        applied = [line for line in out.splitlines() if "shape for insertion" in line]
+        checks.expect(name, "the shell applied the window (128x128)", any("window 128x128" in line for line in applied), applied)
+
+    # A window that does not decode: the identity comes, the object stays MUN's.
+    broken_window = sample_copy(packages, "home-object-broken", "sea", replace={"card/window.png": short_png()})
+    x, rx = card(broken_window)
+    cardd, launchd = serve("home-object-broken", [[(0, snapshot()), (2.0, {"type": "card", "card": rx})]])
+    out, phases, grabs = run("home-object-broken", cardd, launchd, [{"at": 6000, "probe": "after"}, {"at": 6100, "grab": "object"}],
+                             settings="[display]\nreduce-motion=on\n", end=7600)
+    after, shown = first(phases, label="after"), grabs.get("object")
+    objects = shown["regions"]["cards"] if shown else []
+    applied = [line for line in out.splitlines() if "shape for insertion" in line]
+    checks.expect("home-object-broken", "the identity comes in, its world drawn",
+                  after is not None and after["phase"] == "present" and after["worldDrawn"], after)
+    checks.expect("home-object-broken", "the object is MUN's: no window, MUN's outline",
+                  len(objects) == 1 and not objects[0]["window"] and objects[0]["shape"] == "card",
+                  objects if shown else "no grab taken")
+    checks.expect("home-object-broken", "the shell says the object is MUN's",
+                  any("card object MUN's (its image did not decode)" in line for line in applied), applied)
 
 def boot_cases(shell: Shell, checks: Checks):
     """The start-up as the first start of a boot plays it (boot.qml)."""
@@ -1458,6 +1615,112 @@ def boot_cases(shell: Shell, checks: Checks):
     early = next((s for s in states if s["at"] >= 1300), None)
     checks.expect("boot-silent", "without the sound, its clock runs from the start (no wait for a device)",
                   early is not None and early["t"] >= 0.8, early)
+
+
+class Xvfb:
+    """An X server of its own for the OpenGL path, 1920x1080, or None where
+    Xvfb is not installed."""
+
+    def __init__(self):
+        self.process, self.display = None, None
+
+    def __enter__(self):
+        if not shutil.which("Xvfb"):
+            return None
+        read, write = os.pipe()
+        self.process = subprocess.Popen(["Xvfb", "-displayfd", str(write), "-screen", "0", "1920x1080x24",
+                                         "-nolisten", "tcp"], pass_fds=(write,), stdout=subprocess.DEVNULL,
+                                        stderr=subprocess.DEVNULL)
+        os.close(write)
+        with os.fdopen(read) as numbers:
+            number = numbers.readline().strip()
+        if not number.isdigit():
+            self.process.kill()
+            return None
+        self.display = f":{number}"
+        return self
+
+    def __exit__(self, *exc):
+        if self.process:
+            self.process.kill()
+            self.process.wait()
+
+
+def difference(a, b, box=None):
+    """Mean absolute channel difference of two same-size frames (within
+    `box`, x0, y0, x1, y1) and the share of channels that differ by more
+    than 16 levels."""
+    width, height, da = a
+    _, _, db = b
+    x0, y0, x1, y1 = box or (0, 0, width, height)
+    total = large = count = 0
+    for y in range(y0, y1):
+        row = (y * width + x0) * 3
+        for i in range(row, row + (x1 - x0) * 3):
+            d = abs(da[i] - db[i])
+            total += d
+            large += d > 16
+            count += 1
+    return total / count, large / count
+
+
+def paths_cases(shell: Shell, checks: Checks, report: dict):
+    """The software renderer and OpenGL draw the same still screen. OpenGL
+    is llvmpipe on an X server from Xvfb, or, with --platform eglfs, a
+    board's own GPU."""
+    steps = lambda icon: {"icon": "card", "steps": [{"at": 1500, "icon": icon}, {"at": 6000, "grab": icon},
+                                                    {"at": 9000, "quit": True}]}
+    native = shell.platform == "eglfs"
+    with contextlib.nullcontext(False) if native else Xvfb() as server:
+        if server is None:
+            checks.skip("paths", "no Xvfb to give the OpenGL path a display; only the software path ran elsewhere")
+            return
+        route_args = {"software": {"software": True}, "opengl": {"display": server.display} if server else {}}
+        frames = {}
+        for route in ("software", "opengl"):
+            for icon in ("none", "settings", "card"):
+                name = f"paths-{route}-{icon}"
+                config = dict(steps(icon), out=str(shell.work / name))
+                (shell.work / name).mkdir(parents=True, exist_ok=True)
+                output = shell.run(name, "paths.qml", config, **route_args[route])
+                said = [p for p in lines(output, "PATHS") if p["label"] == "renderer"]
+                if icon == "none":
+                    if route == "software":
+                        checks.expect(name, "the software renderer says so, its clock a timer",
+                                      bool(said) and said[0]["api"] == "software" and not said[0]["rhi"]
+                                      and "motion: on a timer" in output, said)
+                    elif native:
+                        checks.expect(name, "OpenGL says so, accelerated, its clock Qt's animation driver",
+                                      bool(said) and said[0]["api"] == "opengl" and said[0]["rhi"]
+                                      and said[0]["accelerated"] and "motion: on the frames" in output, said)
+                    else:
+                        checks.expect(name, "OpenGL says so and that llvmpipe is not accelerated, its clock a timer",
+                                      bool(said) and said[0]["api"] == "opengl" and said[0]["rhi"]
+                                      and not said[0]["accelerated"] and "motion: on a timer" in output, said)
+                path = shell.work / name / f"{icon}.ppm"
+                frames[route, icon] = read_ppm(path) if path.exists() else None
+                checks.expect(name, "the still screen is grabbed", frames[route, icon] is not None)
+        # Measured with this scene (levels in 255, on average): the network
+        # 0.05, the objects 0.03 to 0.09, the panel 0.09, the bar and knob
+        # 0.22; the bounds leave a margin, not room for another look.
+        regions = {"the whole screen": (None, 0.15, 0.0005),
+                   "the panel's surface and shadow": ((1100, 120, 1920, 760), 0.3, 0.0005),
+                   "the chosen bar, its glow and the knob": ((940, 700, 1660, 920), 0.6, 0.001),
+                   "the object": ((150, 250, 790, 890), 0.3, 0.0005)}
+        for icon in ("none", "settings", "card"):
+            a, b = frames.get(("software", icon)), frames.get(("opengl", icon))
+            if not a or not b or a[:2] != b[:2]:
+                continue
+            for what, (box, mean, share) in regions.items():
+                if icon != "none" and box is None:
+                    continue
+                if icon == "none" and what == "the object":
+                    continue
+                got_mean, got_share = difference(a, b, box)
+                report.setdefault("paths", {})[f"{icon}: {what}"] = {"mean": round(got_mean, 3), "over16": round(got_share, 5)}
+                checks.expect(f"paths-{icon}", f"{what} matches (mean {got_mean:.3f} <= {mean}, over 16 levels "
+                              f"{got_share:.4%} <= {share:.2%})", got_mean <= mean and got_share <= share)
+
 
 
 def settings_cases(shell: Shell, checks: Checks):
@@ -1543,7 +1806,11 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("binary", type=Path)
     parser.add_argument("--work", type=Path, help="keep the scenes, logs, grabs and report here")
-    parser.add_argument("--only", choices=("card", "cue", "surfaces", "presence", "world", "memory", "boot", "home", "settings"),
+    parser.add_argument("--platform", choices=("offscreen", "eglfs"), default="offscreen",
+                        help="offscreen with the software renderer (default), or eglfs: a board's display and GPU, "
+                             "with the console's shell service stopped first")
+    parser.add_argument("--only", choices=("card", "cue", "surfaces", "presence", "world", "memory", "boot", "home", "settings",
+                                           "paths"),
                         action="append")
     args = parser.parse_args(argv)
     binary = args.binary.resolve()
@@ -1558,8 +1825,8 @@ def main(argv=None) -> int:
     exports, packages = work / "exports", work / "packages"
     exports.mkdir()
     packages.mkdir()
-    shell, checks, report = Shell(binary, work), Checks(), {}
-    only = set(args.only or ("card", "cue", "surfaces", "presence", "world", "memory", "boot", "home", "settings"))
+    shell, checks, report = Shell(binary, work, args.platform), Checks(), {}
+    only = set(args.only or ("card", "cue", "surfaces", "presence", "world", "memory", "boot", "home", "settings", "paths"))
     try:
         if "card" in only:
             print("MUN Shell behaviour: the card object")
@@ -1583,11 +1850,38 @@ def main(argv=None) -> int:
             print("MUN Shell behaviour: the start-up, as a boot plays it")
             boot_cases(shell, checks)
         if "home" in only:
-            print("MUN Shell behaviour: Home, as a player meets it")
+            print("MUN Shell behaviour: Home, as a player meets it (the previous design)")
             home_cases(shell, checks, exports, packages, report)
+            # The same moments in the orbital design, drawn as a console
+            # draws it: through OpenGL, on an X server of its own here, on a
+            # board's own display and GPU there. Its cases and work in
+            # "orbital/".
+            print("MUN Shell behaviour: Home, as a player meets it (the orbital design)")
+            orbital = work / "orbital"
+            (orbital / "exports").mkdir(parents=True)
+            (orbital / "packages").mkdir()
+            checks.tag = "orbital/"
+            try:
+                if args.platform == "eglfs":
+                    home_cases(Shell(binary, orbital, args.platform), checks, orbital / "exports", orbital / "packages",
+                               report.setdefault("orbital", {}), design="orbital")
+                else:
+                    with Xvfb() as server:
+                        if server is None:
+                            checks.skip("home", "Xvfb is not installed: the orbital design, drawn through OpenGL, "
+                                                "was not run")
+                        else:
+                            home_cases(Shell(binary, orbital, args.platform), checks, orbital / "exports",
+                                       orbital / "packages", report.setdefault("orbital", {}), design="orbital",
+                                       display=server.display)
+            finally:
+                checks.tag = ""
         if "settings" in only:
             print("MUN Shell behaviour: the player's settings file")
             settings_cases(shell, checks)
+        if "paths" in only:
+            print("MUN Shell behaviour: the software and OpenGL drawing paths")
+            paths_cases(shell, checks, report)
         (work / "report.json").write_text(json.dumps(report, indent=1, sort_keys=True) + "\n", encoding="utf-8")
         for folder in checks.failing:
             log = work / folder / "output.log"
@@ -1597,7 +1891,8 @@ def main(argv=None) -> int:
     finally:
         if not args.work:
             shutil.rmtree(work, ignore_errors=True)
-    print(f"MUN Shell behaviour: {checks.passed} passed, {checks.failed} failed")
+    print(f"MUN Shell behaviour: {checks.passed} passed, {checks.failed} failed"
+          + (f", {checks.skipped} skipped" if checks.skipped else ""))
     return 1 if checks.failed else 0
 
 

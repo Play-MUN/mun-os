@@ -24,6 +24,13 @@ Window {
     // the launcher restarts the shell around every game, and coming back
     // from one lands on Home with the session's result.
     readonly property bool firstStart: typeof shellFirstStart === "undefined" ? true : shellFirstStart
+    // The orbital design (src/main.cpp): on a graphics API; the software
+    // renderer keeps the previous one. The navigation, the states, the
+    // sounds and Shape are the same in both.
+    readonly property bool orbital: typeof shellOrbital === "undefined" ? false : shellOrbital
+    // Where the card object stands, which the transitions grow from and Play's
+    // colour fills from: the orbit's centre, or the previous design's orb.
+    readonly property point objectCentre: orbital ? Theme.orbitalCentre : Theme.orb
     // Input is taken once the start-up has shown, and not while the console
     // turns off or the shell restarts for a new resolution.
     property bool powered: !firstStart
@@ -49,7 +56,7 @@ Window {
         case "released": return I18n.t("Remove it", "Retírala")
         case "offline": return I18n.t("No reader", "Sin lector")
         }
-        return I18n.t("Empty", "Vacía")
+        return orbital ? I18n.t("Insert a disk", "Inserta un disco") : I18n.t("Empty", "Vacía")
     }
     readonly property string slotText: {
         switch (cardMode) {
@@ -104,7 +111,7 @@ Window {
     Binding { target: Shape; property: "card"; value: CardClient.card }
     Binding { target: Shape; property: "mode"; value: ShellSettings.shapeMode }
     Binding { target: Shape; property: "arrival"; value: CardClient.arrival }
-    Binding { target: Shape; property: "orb"; value: Theme.orb }
+    Binding { target: Shape; property: "orb"; value: window.objectCentre }
     // The game's menu sounds, when it has them, the player wants them, MUN
     // Shape is shown in full, its identity has come in (they stop at once as
     // it leaves) and the player is on the game's surfaces: in Settings and in
@@ -114,6 +121,16 @@ Window {
         property: "gameSounds"
         value: ShellSettings.gameSounds && ShellSettings.shapeMode === "full" && !window.inSettings && !window.modal
                && (Shape.phase === "present" || (Shape.phase === "entering" && Shape.objectProgress >= 1))
+    }
+    // The sound device stays open while the interface is shown and its
+    // sounds are on, dimmed too, so the first sound after a pause, and the
+    // first move after the input that undims, is heard (src/systemsounds.h);
+    // with System sounds off (every sound the shell plays follows it) it is
+    // let go.
+    Binding {
+        target: SystemSounds
+        property: "awake"
+        value: window.powered && ShellSettings.systemSounds
     }
     readonly property string shapeSounds: JSON.stringify(Shape.sounds)
     onShapeSoundsChanged: SystemSounds.useGameSounds(Shape.sounds)
@@ -138,12 +155,14 @@ Window {
         target: Shape
         function onAdopted(live) { window.cueDue = live }
         function onPhaseChanged() {
-            if (Shape.phase === "leaving")
+            if (Shape.phase === "leaving") {
+                window.sound("shape_exit")
                 window.shapeLeave()
+            }
         }
     }
     readonly property bool homeOnScreen: powered && !inSettings && !modal && !starting && !boot.playing && !boot.visible
-                                         && mainArc.opacity === 1 && !modalLayer.visible && !startCover.visible
+                                         && menus.mainOpacity === 1 && !modalLayer.visible && !startCover.visible
     readonly property bool shapeMayBegin: Shape.phase === "ready" && world.ready
                                           && (Shape.entry === "arrival" ? homeOnScreen : powered)
     onShapeMayBeginChanged: if (shapeMayBegin) Qt.callLater(shapeBegin)
@@ -182,6 +201,9 @@ Window {
         property: "progress"
         onFinished: to === 1 ? Shape.arrived() : Shape.left()
     }
+    // How the window is drawn (src/renderinfo.h): the drawing path and how
+    // much motion is worth drawing follow it.
+    Binding { target: RenderInfo; property: "window"; value: window }
     // Navigation first (src/framewatch.h): while a world is drawn, strain in
     // the interface's own frames or keys steps the world down one level.
     Binding { target: FrameWatch; property: "window"; value: window }
@@ -211,22 +233,28 @@ Window {
     // A line of feedback under the options (a refused launch, a failed save);
     // cleared when the focus moves.
     property string feedback: ""
+    // How far the orbital design's ring of dots is turned (degrees): a step,
+    // four dots, at each move on the menus.
+    property real dial: 0
 
     readonly property var mainEntries: [
-        { key: "card", label: "Game Card", detail: cardDetail },
-        { key: "games", label: I18n.t("My games", "Mis juegos") },
-        { key: "settings", label: I18n.t("Settings", "Configuración") },
-        { key: "power", label: I18n.t("Turn off", "Apagar") }
+        // The orbital design's names (the owner's): MUN Disk and Universe.
+        { key: "card", label: orbital ? "MUN Disk" : "Game Card", detail: cardDetail, icon: "disk" },
+        { key: "games", label: orbital ? I18n.t("Universe", "Universo") : I18n.t("My games", "Mis juegos"), icon: "universe" },
+        { key: "settings", label: I18n.t("Settings", "Configuración"), icon: "settings" },
+        { key: "power", label: I18n.t("Turn off", "Apagar"), icon: "power" }
     ]
     readonly property var settingsEntries: [
-        { key: "display", label: I18n.t("Display", "Pantalla") },
-        { key: "sound", label: I18n.t("Sound", "Sonido") },
-        { key: "appearance", label: I18n.t("Appearance and accessibility", "Apariencia y accesibilidad") },
-        { key: "language", label: I18n.t("Language and time", "Idioma y hora") },
-        { key: "network", label: I18n.t("Network", "Red") },
-        { key: "system", label: I18n.t("System", "Sistema") }
+        { key: "display", label: I18n.t("Display", "Pantalla"), icon: "display" },
+        { key: "sound", label: I18n.t("Sound", "Sonido"), icon: "sound" },
+        { key: "appearance", label: I18n.t("Appearance and accessibility", "Apariencia y accesibilidad"), icon: "appearance" },
+        { key: "language", label: I18n.t("Language and time", "Idioma y hora"), icon: "language" },
+        { key: "network", label: I18n.t("Network", "Red"), icon: "network" },
+        { key: "system", label: I18n.t("System", "Sistema"), icon: "system" }
     ]
     readonly property bool inSettings: level === 1 || (level === 2 && previousLevel === 1)
+    // The orbital design's light of the section in focus (Theme.orbitalSections).
+    readonly property color sectionLight: Theme.orbitalAccent(inSettings ? "settings" : mainEntries[mainIndex].key)
     readonly property var focusedEntry: inSettings ? settingsEntries[settingsIndex] : mainEntries[mainIndex]
     readonly property var panel: panels.build(focusedEntry.key)
     readonly property var options: panel.options
@@ -245,10 +273,14 @@ Window {
         return 0
     }
 
-    // The menus' sounds, by what the player did: "move" (the focus or a
-    // choice changed), "enter" (in, or an action run), "back". Only a key or
-    // a pointer that changed something sounds; the console's own changes
-    // (a card arriving, a result shown) do not.
+    // The menus' sounds follow what the player did: "move" (the focus or a
+    // choice changed), "enter" (in, or an action run; an option or a
+    // dialog's answer may name its own, as Play does "launch"), "back". The
+    // console's events have theirs: "game_return" when a game's result is
+    // first shown, "shape_exit" as Shape leaves, "eject" when a safe release
+    // is done ("warning" when it is refused), "shutdown" as the console turns
+    // off, "error" when an action fails, and the controllers' (main.cpp).
+    // A card arriving is greeted by the game's own cue, not by these.
     function sound(name) {
         if (ShellSettings.systemSounds)
             SystemSounds.play(name)
@@ -270,26 +302,23 @@ Window {
             settingsIndex = (settingsIndex + step + settingsEntries.length) % settingsEntries.length
         else
             optionIndex = firstSelectable(optionIndex + step, step)
-        if ([level, mainIndex, settingsIndex, optionIndex].join() !== before)
+        if ([level, mainIndex, settingsIndex, optionIndex].join() !== before) {
             sound("move")
+            if (level < 2)
+                dial += step * 12
+        }
     }
 
+    // Left and Right choose: a dialog's answer, or a choice's value. Going in
+    // and back out are Accept and Back alone (A and B on a controller).
     function side(step) {
         if (modal) {
             move(step)
             return
         }
-        if (level !== 2) {
-            step > 0 ? enter() : back()
-            return
-        }
-        const option = options[optionIndex]
-        if (!option || option.kind !== "choice") {
-            if (step < 0)
-                back()
-            return
-        }
-        change(option, step)
+        const option = level === 2 ? options[optionIndex] : null
+        if (option && option.kind === "choice")
+            change(option, step)
     }
 
     function change(option, step) {
@@ -298,9 +327,17 @@ Window {
         sound("move")
     }
 
+    // An option's or a dialog answer's sound: its own if it names one ("" for
+    // none: turning off sounds by itself), else "enter".
+    function enterSound(item) {
+        const name = item && item.sound !== undefined ? item.sound : "enter"
+        if (name !== "")
+            sound(name)
+    }
+
     function enter() {
         if (modal) {
-            sound("enter")
+            enterSound(modal.actions[modalIndex])
             modal.actions[modalIndex].run()
             return
         }
@@ -322,7 +359,7 @@ Window {
             if (option && option.kind === "choice") {
                 change(option, 1)
             } else if (option && option.run) {
-                sound("enter")
+                enterSound(option)
                 option.run()
             }
         }
@@ -407,11 +444,16 @@ Window {
         delete copy.acknowledged
         return JSON.stringify(copy)
     }
+    property string soundedResult: ""   // the result whose return has sounded
     function showResult() {
         if (!LaunchClient.hasUnacknowledgedResult || !powered)
             return
         const result = LaunchClient.lastResult
         const key = resultKey(result)
+        if (key !== soundedResult) {
+            soundedResult = key
+            sound("game_return")
+        }
         if (!modal)
             openModal(panels.sessionResult(result, key))
         else if (modal.resultKey !== undefined && modal.resultKey !== key)
@@ -448,6 +490,13 @@ Window {
             return
         ShellSettings.changeResolution(mode)
     }
+    // The colour range, likewise in a dialog; no trial, since every range
+    // shows a picture.
+    function askColourRange() { openModal(panels.colourRange()) }
+    function changeColourRange(range) {
+        modal = null
+        ShellSettings.changeColourRange(range)
+    }
     function askKeepResolution() {
         trialSeconds = trialLength
         openModal(panels.resolutionTrial())
@@ -470,8 +519,8 @@ Window {
                 window.revertResolution()
         }
     }
-    // A start that follows a change of resolution or a reset returns to where
-    // the player was.
+    // A start that follows a change of resolution or colour range, or a reset,
+    // returns to where the player was.
     // The way a player gets there, one level at a time, so each panel is
     // built for its entry before its options take the focus.
     function resumeSettings(where) {
@@ -481,7 +530,9 @@ Window {
         level = 1
         previousLevel = 1
         level = 2
-        optionIndex = where === "reset" ? options.length - 1 : firstSelectable(0, 1)
+        optionIndex = where === "reset" ? options.length - 1
+                    : where === "range" ? Math.max(0, options.findIndex(o => o.key === "range"))
+                    : firstSelectable(0, 1)
     }
     // After the start-up, or at once: the memory freed from now on goes back
     // to the system (src/memory.h); the resolution on trial asks first, then
@@ -519,17 +570,39 @@ Window {
         PowerControl.resetConsole()
     }
     function askPowerOff() { openModal(panels.powerOff()) }
+    // Turning off sounds "shutdown" and lets it play out (the screen dark)
+    // before the system goes down.
     function powerOff() {
         modal = null
         powered = false
         boot.powerOff()
-        PowerControl.powerOff()
+        if (ShellSettings.systemSounds) {
+            sound("shutdown")
+            shutdownSound.start()
+        } else {
+            PowerControl.powerOff()
+        }
+    }
+    Timer {
+        id: shutdownSound
+        interval: 3200
+        onTriggered: PowerControl.powerOff()
     }
 
     Connections {
         target: LaunchClient
-        function onLaunchRejected(code, message) { window.feedback = I18n.launchError({ code: code, message: message }) }
-        function onReleaseFinished(ok, code, message) { if (!ok) window.feedback = I18n.launchError({ code: code, message: message }) }
+        function onLaunchRejected(code, message) {
+            window.sound("error")
+            window.feedback = I18n.launchError({ code: code, message: message })
+        }
+        function onReleaseFinished(ok, code, message) {
+            if (ok) {
+                window.sound("eject")
+            } else {
+                window.sound("warning")
+                window.feedback = I18n.launchError({ code: code, message: message })
+            }
+        }
         function onHasUnacknowledgedResultChanged() { window.showResult() }
     }
     Connections {
@@ -540,6 +613,7 @@ Window {
                 return
             boot.shown = false
             window.powered = true
+            window.sound("error")
             window.openModal(PowerControl.lastAction === "reset"
                              ? panels.resetConsoleRefused(PowerControl.lastStatus, PowerControl.lastError)
                              : panels.powerOffFailed(PowerControl.lastError))
@@ -548,19 +622,30 @@ Window {
     Connections {
         target: ShellSettings
         function onLastErrorChanged() {
-            if (ShellSettings.lastError !== "")
-                window.feedback = I18n.t("This choice could not be saved; it lasts until the console restarts.",
-                                         "No se pudo guardar esta elección; dura hasta que la consola se reinicie.")
+            if (ShellSettings.lastError === "")
+                return
+            window.sound("error")
+            window.feedback = I18n.t("This choice could not be saved; it lasts until the console restarts.",
+                                     "No se pudo guardar esta elección; dura hasta que la consola se reinicie.")
         }
     }
 
     // ------------------------------------------------------------ time
 
-    // Rest: three minutes after the last input the scene slows to a stop
-    // (the network's drift, the object's float, the gear), so a console left
-    // alone draws nothing; any key brings the motion back.
-    property bool resting: false
-    Timer { id: restTimer; interval: 3 * 60 * 1000; running: true; onTriggered: window.resting = true }
+    // Idle: the scene keeps moving (Reduce motion holds it still). Ten
+    // minutes after the last input the interface dims a little; the next
+    // input only brings it back and does nothing else, and the key that did
+    // it does nothing until it is let go, whatever other keys are pressed
+    // meanwhile. QML timers count on the monotonic clock: setting the date or
+    // time does not move them.
+    property bool dimmed: false
+    property int wakeKey: -1   // the key that brought the interface back, until it is let go
+    Timer {
+        id: dimTimer
+        interval: 10 * 60 * 1000
+        running: window.powered && !window.starting
+        onTriggered: window.dimmed = true
+    }
     // The automatic power off counts time without input on these menus;
     // while a game runs the shell is stopped, so it never counts.
     Timer {
@@ -573,7 +658,12 @@ Window {
     // false for a key the console does not use.
     function key(code, repeated) {
         FrameWatch.keyPressed()
-        wake()
+        if (code === wakeKey)
+            return true
+        if (wake() && !boot.playing) {
+            wakeKey = code
+            return true
+        }
         // The start-up: A (or Enter, or Space) skips it once the system is
         // ready and its hint shows; until then, and for any other key,
         // nothing.
@@ -595,11 +685,22 @@ Window {
         }
         return true
     }
+    // A key let go (not a repeat's release): the key that woke the
+    // interface acts again from its next press.
+    function keyReleased(code) {
+        if (code === wakeKey)
+            wakeKey = -1
+    }
+    // Input, or the card changing: the interface undims and the idle and
+    // power-off times start again. True when it was dimmed: the input that
+    // woke it is spent.
     function wake() {
-        resting = false
-        restTimer.restart()
+        const was = dimmed
+        dimmed = false
+        dimTimer.restart()
         if (autoOff.running)
             autoOff.restart()
+        return was
     }
     Timer {
         interval: 10000
@@ -632,7 +733,10 @@ Window {
             acceptedButtons: Qt.NoButton
             property real travel: 0
             onWheel: (wheel) => {
-                window.wake()
+                if (window.wake()) {
+                    travel = 0
+                    return
+                }
                 travel += wheel.angleDelta.y
                 if (Math.abs(travel) >= 120 && window.interactive && !window.starting) {
                     window.move(travel > 0 ? -1 : 1)
@@ -642,19 +746,47 @@ Window {
         }
 
         Keys.onPressed: (event) => { event.accepted = window.key(event.key, event.isAutoRepeat) }
+        Keys.onReleased: (event) => {
+            if (!event.isAutoRepeat)
+                window.keyReleased(event.key)
+        }
 
-        Backdrop {
-            id: backdrop
+        // Each design's own pieces exist only in it (src/main.cpp): the
+        // previous design's network, object and arcs; the orbital one's
+        // background and menus. Neither costs the other memory or time.
+        Loader {
+            id: backdropLoader
             anchors.fill: parent
-            // Covered by a game's world, MUN's rests and is not drawn.
-            visible: !world.covering
-            orb: Theme.orb
-            hour: status.now.getHours() + status.now.getMinutes() / 60
-            // A package's light and tint come with its transition; a lent or
-            // read one at once.
-            glowColor: Shape.phase === "ready" ? "transparent" : Shape.ambient
-            tint: Shape.phase === "ready" ? "transparent" : Shape.tint
-            running: !window.resting && window.powered && !ShellSettings.reduceMotion && !world.covering
+            active: !window.orbital
+            sourceComponent: Backdrop {
+                anchors.fill: parent
+                // Covered by a game's world, MUN's rests and is not drawn.
+                visible: !world.covering
+                orb: Theme.orb
+                hour: status.now.getHours() + status.now.getMinutes() / 60
+                // A package's light and tint come with its transition; a lent or
+                // read one at once.
+                glowColor: Shape.phase === "ready" ? "transparent" : Shape.ambient
+                tint: Shape.phase === "ready" ? "transparent" : Shape.tint
+                running: window.powered && !ShellSettings.reduceMotion && !world.covering
+            }
+        }
+        // The orbital design's background, its slow motion on 10 frames a
+        // second; its ring of dots turns a step at each move, as a dial.
+        Loader {
+            id: orbitalLoader
+            anchors.fill: parent
+            active: window.orbital
+            sourceComponent: OrbitalBackdrop {
+                anchors.fill: parent
+                visible: !world.covering
+                running: window.powered && !ShellSettings.reduceMotion && !world.covering
+                dial: ShellSettings.reduceMotion ? 0 : window.dial
+                Behavior on dial {
+                    enabled: !ShellSettings.reduceMotion
+                    NumberAnimation { duration: 900; easing.type: Easing.OutBack; easing.overshoot: 1.1 }
+                }
+            }
         }
         // The game's world (src/shapeworld.h), inside the transition's front,
         // under MUN's scrim while Settings or a dialog is shown.
@@ -666,33 +798,36 @@ Window {
             root: Shape.root
             transition: Shape.kind
             progress: Shape.progress
-            orb: Theme.orb
+            orb: window.objectCentre
             dim: (window.inSettings || !!window.modal) ? 0.78 : 0
             Behavior on dim { NumberAnimation { duration: 400; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.ease } }
             scrimColour: Theme.screen
             // The layers lean with the chosen entry, by their depth.
             parallax: window.inSettings ? 0 : (window.mainIndex - 1.5) * -18
             Behavior on parallax { NumberAnimation { duration: 1200; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.settle } }
-            running: !window.resting && window.powered
+            running: window.powered
             still: ShellSettings.reduceMotion
             frontLight: Shape.glow.valid ? Shape.glow : Shape.ambient.valid ? Shape.ambient : Theme.led
             frontAccent: Shape.focus
         }
-        HeroIcon {
-            id: hero
-            width: 640
-            height: 640
-            x: Theme.orb.x - width / 2
-            y: Theme.orb.y - height / 2 + bob
-            icon: window.focusedEntry.key
-            lit: window.cardReady ? 1 : 0.16
-            running: !window.resting && window.powered && !ShellSettings.reduceMotion
-            cardWindow: Shape.window
-            cardShape: Shape.cardShape
-            morph: Shape.morph
-            cardGlow: Shape.glow
-            cardReveal: Shape.objectProgress
-            onIconChanged: backdrop.ripple()
+        Loader {
+            id: heroLoader
+            active: !window.orbital
+            sourceComponent: HeroIcon {
+                width: 640
+                height: 640
+                x: Theme.orb.x - width / 2
+                y: Theme.orb.y - height / 2 + bob
+                icon: window.focusedEntry.key
+                lit: window.cardReady ? 1 : 0.16
+                running: window.powered && !ShellSettings.reduceMotion
+                cardWindow: Shape.window
+                cardShape: Shape.cardShape
+                morph: Shape.morph
+                cardGlow: Shape.glow
+                cardReveal: Shape.objectProgress
+                onIconChanged: if (backdropLoader.item) backdropLoader.item.ripple()
+            }
         }
 
         Item {
@@ -715,47 +850,98 @@ Window {
                 cardReady: window.cardReady
                 networkText: window.networkText
                 online: window.online
+                onlineColour: window.orbital ? Theme.orbitalNetwork : Theme.patina
                 clockFormat: ShellSettings.clockFormat
                 textColour: window.statusLook.text
                 clockColour: window.statusLook.strong
                 socketed: window.statusLook.shaped
             }
 
-            Item {
+            Loader {
+                id: menus
                 anchors.fill: parent
-                ArcMenu {
-                    id: mainArc
-                    anchors.fill: parent
-                    entries: window.mainEntries
-                    current: window.mainIndex
-                    radius: 340
-                    spread: 24
-                    dressed: true
-                    hidden: window.inSettings
-                    dimmed: window.level === 2 && window.previousLevel === 0
-                    onActivated: (index) => { window.wake(); window.clickEntry(0, index) }
+                sourceComponent: window.orbital ? orbitalMenus : arcMenus
+                // The main menu's opacity: Home is whole once it has faded in.
+                readonly property real mainOpacity: item ? item.mainOpacity : 0
+            }
+            Component {
+                id: arcMenus
+                Item {
+                    readonly property real mainOpacity: mainArc.opacity
+                    ArcMenu {
+                        id: mainArc
+                        anchors.fill: parent
+                        entries: window.mainEntries
+                        current: window.mainIndex
+                        radius: 340
+                        spread: 24
+                        dressed: true
+                        hidden: window.inSettings
+                        dimmed: window.level === 2 && window.previousLevel === 0
+                        onActivated: (index) => { if (!window.wake()) window.clickEntry(0, index) }
+                    }
+                    ArcMenu {
+                        anchors.fill: parent
+                        entries: window.settingsEntries
+                        current: window.settingsIndex
+                        radius: 350
+                        spread: 17
+                        compact: true
+                        hidden: !window.inSettings
+                        dimmed: window.level === 2 && window.previousLevel === 1
+                        onActivated: (index) => { if (!window.wake()) window.clickEntry(1, index) }
+                    }
                 }
-                ArcMenu {
-                    anchors.fill: parent
-                    entries: window.settingsEntries
-                    current: window.settingsIndex
-                    radius: 350
-                    spread: 17
-                    compact: true
-                    hidden: !window.inSettings
-                    dimmed: window.level === 2 && window.previousLevel === 1
-                    onActivated: (index) => { window.wake(); window.clickEntry(1, index) }
+            }
+            Component {
+                id: orbitalMenus
+                Item {
+                    readonly property real mainOpacity: mainOrbit.opacity
+                    OrbitalFocus {
+                        icon: window.focusedEntry.icon || ""
+                        tint: window.sectionLight
+                        overNight: !world.covering
+                        // The card object (docs/shape.md): the window, outline
+                        // and light the card's package gives, as the
+                        // transition reaches it.
+                        cardWindow: Shape.window
+                        cardShape: Shape.cardShape
+                        morph: Shape.morph
+                        cardGlow: Shape.glow
+                        cardReveal: Shape.objectProgress
+                    }
+                    OrbitalMenu {
+                        id: mainOrbit
+                        anchors.fill: parent
+                        entries: window.mainEntries
+                        current: window.mainIndex
+                        dressed: true
+                        hidden: window.inSettings
+                        dimmed: window.level === 2 && window.previousLevel === 0
+                        onActivated: (index) => { if (!window.wake()) window.clickEntry(0, index) }
+                    }
+                    OrbitalMenu {
+                        anchors.fill: parent
+                        entries: window.settingsEntries
+                        current: window.settingsIndex
+                        compact: true
+                        hidden: !window.inSettings
+                        dimmed: window.level === 2 && window.previousLevel === 1
+                        onActivated: (index) => { if (!window.wake()) window.clickEntry(1, index) }
+                    }
                 }
             }
 
             DetailPanel {
+                orbital: window.orbital
+                orbitalFocus: window.sectionLight
                 content: window.panel
                 // The game's panel: the Game Card entry's, on the main arc.
                 dressed: window.focusedEntry.key === "card" && !window.inSettings
                 overWorld: world.drawn && !window.inSettings
                 selected: window.level === 2 ? window.optionIndex : -1
                 note: window.note
-                onOptionClicked: (index) => { window.wake(); window.clickOption(index) }
+                onOptionClicked: (index) => { if (!window.wake()) window.clickOption(index) }
             }
 
             MarkText {
@@ -821,14 +1007,14 @@ Window {
         readonly property bool diving: Shape.phase === "present" && Shape.veil.valid
         Rectangle {
             id: dive
-            readonly property real reach: 2 * Math.hypot(Math.max(Theme.orb.x, Theme.canvasWidth - Theme.orb.x),
-                                                         Math.max(Theme.orb.y, Theme.canvasHeight - Theme.orb.y))
+            readonly property real reach: 2 * Math.hypot(Math.max(window.objectCentre.x, Theme.canvasWidth - window.objectCentre.x),
+                                                         Math.max(window.objectCentre.y, Theme.canvasHeight - window.objectCentre.y))
             visible: canvas.diving && scale > 0.021
             width: reach
             height: reach
             radius: reach / 2
-            x: Theme.orb.x - reach / 2
-            y: Theme.orb.y - reach / 2
+            x: window.objectCentre.x - reach / 2
+            y: window.objectCentre.y - reach / 2
             color: Shape.veil
             scale: window.starting ? 1 : 0.02
             Behavior on scale { NumberAnimation { duration: 520; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.ease } }
@@ -857,7 +1043,8 @@ Window {
             content: window.modal
             selected: window.modalIndex
             onChosen: (index) => {
-                window.wake()
+                if (window.wake())
+                    return
                 if (window.modal && window.modal.actions[index]) {
                     window.modalIndex = index
                     window.modal.actions[index].run()
@@ -872,6 +1059,30 @@ Window {
                 window.powered = true
                 window.afterStart()
             }
+        }
+
+        // Idle (wake()): a veil over everything, in slowly, out quickly.
+        Rectangle {
+            id: idleVeil
+            anchors.fill: parent
+            color: "black"
+            opacity: 0
+            visible: opacity > 0
+            states: State {
+                name: "dimmed"
+                when: window.dimmed
+                PropertyChanges { target: idleVeil; opacity: Theme.idleDim }
+            }
+            transitions: [
+                Transition {
+                    to: "dimmed"
+                    NumberAnimation { property: "opacity"; duration: Theme.idleDimIn; easing.type: Easing.InOutQuad }
+                },
+                Transition {
+                    from: "dimmed"
+                    NumberAnimation { property: "opacity"; duration: Theme.idleDimOut; easing.type: Easing.OutQuad }
+                }
+            ]
         }
 
         // The shell restarts in a new resolution: the scene fades out first.

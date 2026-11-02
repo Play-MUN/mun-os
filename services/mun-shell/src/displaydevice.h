@@ -128,4 +128,39 @@ std::optional<Choice> chooseMode(const std::vector<Timing> &modes, const Cap &ca
 // (no sync polarity, interlaced, double scan).
 std::optional<std::string> modeline(const Timing &mode);
 
+// The signal on the wire, set before Qt opens the display (displaymode.h).
+//
+// A board's video path may carry fewer bits per channel than its connector
+// offers: MUN_DISPLAY_MAX_BPC in the unit's environment caps them. (The
+// Radxa Dragon Q6A's DP-to-HDMI bridge, a RA620, turns 10-bit input into a
+// washed-out, light grey picture on every display tried; at 8 it is right,
+// and the shell draws 8 bits a channel anyway.) 6 to 16; nothing for
+// anything else.
+std::optional<int> parseMaxBpc(std::string_view text);
+
+// The RGB range sent to the display: the player's choice (Settings ›
+// Display › Colour range), stored as "auto", "full" or "limited"; anything
+// else reads as Automatic.
+enum class Range { Automatic, Full, Limited };
+Range parseRange(std::string_view text);
+std::string_view rangeName(Range range);
+
+// How a range is put on the wire. A connector with a "Broadcast RGB"
+// property takes it from there and tells the display (the HDMI infoframe):
+// `broadcast` is the value to set. Without one, a bridge decides what to
+// tell the display (the Q6A's), so the pixels go out as they are, in full
+// range, which the displays tried on that path showed right; Limited then
+// maps 0-255 into 16-235 in the display controller's gamma table
+// (`compress`). Otherwise the table is cleared, so that a Limited chosen at
+// an earlier start does not stay in the display's state.
+struct RangeAction {
+    std::string broadcast; // "Automatic", "Full", "Limited 16:235"; empty without the property
+    bool compress = false;
+};
+RangeAction rangeAction(Range range, bool hasBroadcastRgb);
+
+// The gamma table that compresses to limited range: `size` levels of full
+// scale 65535, from 16/255 to 235/255 in equal steps.
+std::vector<std::uint16_t> limitedRamp(std::size_t size);
+
 } // namespace display

@@ -1,7 +1,8 @@
 cmake_minimum_required(VERSION 3.25)
 
-# MUN Shell: the console's first user-facing session. See README.md for why
-# this is Qt Quick with software rendering on the framebuffer.
+# MUN Shell: the console's first user-facing session. See README.md for how
+# it draws: Qt Quick's software renderer on the framebuffer, or a graphics API
+# where the hardware provides one.
 project(mun-shell VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -12,6 +13,9 @@ set(CMAKE_AUTOMOC ON)
 set(MUN_BUILD_ID "dev" CACHE STRING "Opaque build identifier shown in the system info screen")
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Network Qml Quick)
+# Shaders for the graphics path are compiled at build time (qsb) and built
+# into the binary; nothing of Shader Tools is needed at run time.
+find_package(Qt6 6.5 REQUIRED COMPONENTS ShaderTools)
 # The interface sounds go straight to ALSA (src/systemsounds.h), the library
 # the games' profile already brings into the image.
 find_package(PkgConfig REQUIRED)
@@ -40,6 +44,14 @@ qt_add_executable(mun-shell
     src/shellsettings.h
     src/systemsounds.cpp
     src/systemsounds.h
+    src/gamepadmap.cpp
+    src/gamepadmap.h
+    src/gamepads.cpp
+    src/gamepads.h
+    src/orbitalbackdrop.cpp
+    src/orbitalbackdrop.h
+    src/orbitalcard.cpp
+    src/orbitalcard.h
     src/blur.cpp
     src/blur.h
     src/bootintro.cpp
@@ -49,10 +61,14 @@ qt_add_executable(mun-shell
     src/hairline.h
     src/cssbox.cpp
     src/cssbox.h
+    src/surfacenode.cpp
+    src/surfacenode.h
     src/sceneclock.cpp
     src/sceneclock.h
     src/backdrop.cpp
     src/backdrop.h
+    src/networknode.cpp
+    src/networknode.h
     src/heroicon.cpp
     src/heroicon.h
     src/projectedview.cpp
@@ -67,6 +83,8 @@ qt_add_executable(mun-shell
     src/shapeworld.h
     src/framewatch.cpp
     src/framewatch.h
+    src/renderinfo.cpp
+    src/renderinfo.h
     src/memory.cpp
     src/memory.h
 )
@@ -93,6 +111,10 @@ set(MUN_QML_FILES
     qml/ProjectedLayer.qml
     qml/ArcNode.qml
     qml/ArcMenu.qml
+    qml/OrbitalNode.qml
+    qml/OrbitalMenu.qml
+    qml/OrbitalIcon.qml
+    qml/OrbitalFocus.qml
     qml/OptionRow.qml
     qml/Material.qml
     qml/DetailPanel.qml
@@ -119,9 +141,36 @@ qt_add_qml_module(mun-shell
         sounds/move.wav
         sounds/enter.wav
         sounds/back.wav
+        sounds/launch.wav
+        sounds/game_return.wav
+        sounds/shape_exit.wav
+        sounds/eject.wav
+        sounds/shutdown.wav
+        sounds/success.wav
+        sounds/warning.wav
+        sounds/error.wav
+        sounds/controller_connect.wav
+        sounds/controller_disconnect.wav
         sounds/startup.wav
         images/boot-silhouette.png
         images/boot-engraving.png
+)
+
+# The graphics path's own drawing (src/networknode.h): Vulkan-style GLSL,
+# compiled for every API Qt Quick may use.
+qt_add_shaders(mun-shell "mun-shell-shaders"
+    PREFIX "/"
+    FILES
+        shaders/network.vert
+        shaders/network.frag
+        shaders/box.vert
+        shaders/box.frag
+        shaders/shadow.vert
+        shaders/shadow.frag
+        shaders/eclipse.vert
+        shaders/eclipse.frag
+        shaders/wave.vert
+        shaders/wave.frag
 )
 
 target_link_libraries(mun-shell PRIVATE Qt6::Core Qt6::Gui Qt6::Network Qt6::Qml Qt6::Quick PkgConfig::ALSA PkgConfig::DRM Threads::Threads)

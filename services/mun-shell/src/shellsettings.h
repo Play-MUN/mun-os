@@ -1,5 +1,6 @@
 // ShellSettings keeps the player's choices across restarts and reboots: the
-// interface language, the clock format, the resolution, the safe area, the
+// interface language, the clock format, the resolution, the colour range,
+// the safe area, the
 // interface sounds, the automatic power off and how a Game Card's MUN Shape
 // is shown. They live in an INI file in the service's state directory
 // ($STATE_DIRECTORY, /var/lib/mun-shell in the image); outside systemd, in the
@@ -12,8 +13,9 @@
 // the old one); a write that fails keeps the choice for this session and
 // reports it in `lastError`. GUI thread only.
 //
-// The resolution applies from the next start (displaymode.h): choosing one
-// restarts the shell, and a new mode stays only if the player keeps it.
+// The resolution and the colour range apply from the next start
+// (displaymode.h): choosing one restarts the shell, and a new mode stays only
+// if the player keeps it.
 #pragma once
 
 #include <QObject>
@@ -58,8 +60,11 @@ class ShellSettings : public QObject {
     Q_PROPERTY(QString nativeResolution READ nativeResolution CONSTANT)
     // The active resolution is new and waits for keepResolution().
     Q_PROPERTY(bool resolutionOnTrial READ resolutionOnTrial NOTIFY changed)
+    // The colour range this start set: "auto", "full" or "limited".
+    Q_PROPERTY(QString colourRange READ colourRange CONSTANT)
     // Where the start before this one asked to return: "resolution" (a
-    // change of resolution), "reset" (settings reset) or "".
+    // change of resolution), "range" (of colour range), "reset" (settings
+    // reset) or "".
     Q_PROPERTY(QString resume READ resume CONSTANT)
     // The shell is about to restart; input is over.
     Q_PROPERTY(bool restarting READ restarting NOTIFY changed)
@@ -90,6 +95,7 @@ public:
     QStringList resolutions() const;
     QString nativeResolution() const;
     bool resolutionOnTrial() const { return m_resolutionOnTrial; }
+    QString colourRange() const;
     QString resume() const;
     bool restarting() const { return m_restarting; }
     QString lastError() const { return m_lastError; }
@@ -104,10 +110,12 @@ public:
     Q_INVOKABLE void keepResolution();
     // Restarts with the choice before the trial.
     Q_INVOKABLE void revertResolution();
+    // "auto", "full" or "limited": kept and applied by a restart.
+    Q_INVOKABLE void changeColourRange(const QString &range);
 
     // Back to the defaults, except the language: whoever resets keeps reading
-    // the console in theirs. A resolution other than "auto" restarts the
-    // shell.
+    // the console in theirs. A resolution or a colour range other than
+    // "auto" restarts the shell.
     Q_INVOKABLE void resetKeepingLanguage();
 
 signals:

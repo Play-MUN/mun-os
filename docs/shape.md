@@ -167,8 +167,8 @@ contract, so that a publisher sees on the console what it designed.
   shifts bands of rows by two slow waves (light through water), `pulse`
   breathes between 72 % and 100 % of `opacity` every 5 s.
 - **Rate**: the world moves at `rate` frames per second; a transition's
-  front at 30. A world at rest (three minutes without input) slows to a stop
-  and draws nothing more, as MUN's own does.
+  front at 30. It keeps moving while the console is left alone, as MUN's own
+  scene does; with *Reduce motion* it is composed once and holds still.
 - **Fits the display**: before anything decodes, the console estimates what
   the world will take at its peak at the display's size from the images'
   headers, and draws it at the richest level that fits the budget (136 MiB at

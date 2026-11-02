@@ -37,9 +37,12 @@ quint32 u32(const QByteArray &bytes, qsizetype at)
 
 SystemSounds::SystemSounds(QObject *parent) : QObject(parent)
 {
-    // Filled now and never again.
-    m_sounds.reserve(4);
-    for (const char *name : {"move", "enter", "back"})
+    // Filled now and never again: the menus' three, the console's events
+    // (at the menus' level: one set, mastered to sit together) and the
+    // start-up's.
+    m_sounds.reserve(14);
+    for (const char *name : {"move", "enter", "back", "launch", "game_return", "shape_exit", "eject", "shutdown",
+                             "success", "warning", "error", "controller_connect", "controller_disconnect"})
         load(QString::fromLatin1(name), kMenuGain);
     load(QStringLiteral("startup"), kStartupGain);
     m_worker = std::thread(&SystemSounds::run, this);
@@ -160,6 +163,19 @@ void SystemSounds::queue(const SoundPtr &sound)
     m_wake.notify_one();
 }
 
+void SystemSounds::setAwake(bool awake)
+{
+    if (awake == m_awake)
+        return;
+    m_awake = awake;
+    {
+        std::lock_guard lock(m_mutex);
+        m_keepOpen = awake;
+    }
+    m_wake.notify_one();
+    emit awakeChanged();
+}
+
 void SystemSounds::playGame(const QString &name)
 {
     // Whenever the caller says (the insertion cue, as the identity begins to
@@ -177,6 +193,7 @@ void SystemSounds::play(const QString &name)
     const auto game = m_game.find(name);
     if (m_gameSounds && game != m_game.end() && name != QLatin1String("insert")) {
         queue(game->second);
+        emit queued(name);
         return;
     }
     for (const SoundPtr &sound : m_sounds) {
@@ -186,6 +203,7 @@ void SystemSounds::play(const QString &name)
                 m_progress.erase(name);   // a new play starts from nothing heard
             }
             queue(sound);
+            emit queued(name);
             return;
         }
     }
@@ -232,14 +250,21 @@ void SystemSounds::run()
         bool done;
     };
     std::vector<Moved> moved;    // how far each sound in this period has gone
-    std::chrono::steady_clock::time_point retryAt{}, lastSound{};
+    std::chrono::steady_clock::time_point retryAt{}, lastSound{}, openedAt{};
     bool reported = false;
+    bool keepOpen = false;  // the worker's copy of m_keepOpen
     int failures = 0;  // writes failed in a row
+    quint32 noise = 0x9E3779B9;  // xorshift state of the silence's noise
+    static const bool timing = qEnvironmentVariableIsSet("MUN_SHELL_TIMING");
 
-    const auto closeDevice = [&] {
+    const auto closeDevice = [&](const char *why) {
         if (pcm) {
             snd_pcm_close(pcm);
             pcm = nullptr;
+            if (timing)
+                qInfo("mun-shell: sound device let go (%s) after %lld s", why,
+                      qlonglong(std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - openedAt)
+                                    .count()));
         }
     };
     // Sounds that will not be heard: over for heard() (NaN once what was
@@ -267,7 +292,7 @@ void SystemSounds::run()
         if (!reported)
             qWarning("mun-shell: interface sounds off: %s: %s", what, snd_strerror(error));
         reported = true;
-        closeDevice();
+        closeDevice("failed");
         drop();
         failures = 0;
         retryAt = std::chrono::steady_clock::now() + kRetry;
@@ -276,10 +301,20 @@ void SystemSounds::run()
     for (;;) {
         {
             std::unique_lock lock(m_mutex);
-            if (!pcm && voices.empty())
-                m_wake.wait(lock, [this] { return m_stop || !m_requests.empty(); });
+            if (!pcm && voices.empty()) {
+                // Closed: wait for a sound, or, awake, for the device to be
+                // opened (at once, or once a failed one may be tried again).
+                const auto ready = [this, &retryAt] {
+                    return m_stop || !m_requests.empty() || (m_keepOpen && std::chrono::steady_clock::now() >= retryAt);
+                };
+                if (m_keepOpen && std::chrono::steady_clock::now() < retryAt)
+                    m_wake.wait_until(lock, retryAt, ready);
+                else
+                    m_wake.wait(lock, ready);
+            }
             if (m_stop)
                 break;
+            keepOpen = m_keepOpen;
             while (!m_requests.empty()) {
                 if (voices.size() == kVoices)
                     voices.erase(voices.begin());  // the oldest makes room
@@ -297,11 +332,11 @@ void SystemSounds::run()
         const auto now = std::chrono::steady_clock::now();
         if (!voices.empty()) {
             lastSound = now;
-        } else if (pcm && now - lastSound >= kIdle) {
-            // Silent for a while: let the device go. What is left in it is
-            // silence, so it is dropped rather than played out.
+        } else if (pcm && !keepOpen && now - lastSound >= kIdle) {
+            // Silent for a while, and not awake: let the device go. What is
+            // left in it is silence, so it is dropped rather than played out.
             snd_pcm_drop(pcm);
-            closeDevice();
+            closeDevice("silence");
             continue;
         }
 
@@ -322,6 +357,13 @@ void SystemSounds::run()
                 giveUp("the sound device refuses 16-bit 48 kHz stereo", error);
                 continue;
             }
+            const auto opened = std::chrono::steady_clock::now();
+            if (timing)
+                qInfo("mun-shell: sound device opened in %lld ms (%s)",
+                      qlonglong(std::chrono::duration_cast<std::chrono::milliseconds>(opened - now).count()),
+                      voices.empty() ? "awake" : "a sound");
+            openedAt = opened;
+            lastSound = opened;
         }
 
         // One period of everything sounding, mixed and limited; silence when
@@ -354,8 +396,19 @@ void SystemSounds::run()
         voices.erase(std::remove_if(voices.begin(), voices.end(),
                                     [](const Voice &voice) { return voice.sample >= voice.sound->samples.size(); }),
                      voices.end());
-        for (size_t i = 0; i < mix.size(); ++i)
-            period[i] = qint16(std::clamp(mix[i] / kQuarters, -32768, 32767));
+        if (moved.empty()) {
+            // Nothing sounding: a noise far below hearing (at most 2 of
+            // 32768) rather than exact zeros (see systemsounds.h).
+            for (qint16 &sample : period) {
+                noise ^= noise << 13;
+                noise ^= noise >> 17;
+                noise ^= noise << 5;
+                sample = qint16(int(noise % 5) - 2);
+            }
+        } else {
+            for (size_t i = 0; i < mix.size(); ++i)
+                period[i] = qint16(std::clamp(mix[i] / kQuarters, -32768, 32767));
+        }
 
         // Blocking writes pace the loop to the device.
         const qint16 *next = period.data();
@@ -371,7 +424,7 @@ void SystemSounds::run()
                 if (++failures > 1)
                     giveUp("the sound device stopped", int(written));
                 else
-                    closeDevice();
+                    closeDevice("stopped");
                 break;
             }
             next += written * kChannels;
@@ -394,5 +447,5 @@ void SystemSounds::run()
                 QMetaObject::invokeMethod(this, [this, name] { emit started(name); }, Qt::QueuedConnection);
         }
     }
-    closeDevice();
+    closeDevice("the shell stops");
 }

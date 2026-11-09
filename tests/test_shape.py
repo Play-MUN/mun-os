@@ -1213,6 +1213,13 @@ class ShellBehaviourTests(unittest.TestCase):
             self.assertIn(f'"{scene}"', (self.SHELL / "tests" / "behaviour.py").read_text(encoding="utf-8"))
             self.assertTrue((self.SHELL / "tests" / "scenes" / scene).is_file(), scene)
 
+    def test_a_release_judges_the_durations_the_image_build_records(self):
+        build = (ROOT / "os" / "mkosi" / "mkosi.build.chroot").read_text(encoding="utf-8")
+        self.assertIn("--timing record", build)
+        releasing = (ROOT / "docs" / "releasing.md").read_text(encoding="utf-8")
+        self.assertIn('--work "$fresh/home" --only home --timing check', releasing)
+        self.assertIn("git archive <commit>", releasing)
+
     def test_the_drawing_paths_are_compared_frame_against_frame(self):
         # The paths case's measure: mean absolute channel difference, and the
         # share of channels more than 16 levels apart, within a box.

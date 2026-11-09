@@ -42,6 +42,28 @@ name: `dev2` here. Build names take 2 to 16 lowercase letters, digits and
 `BUILD-INFO.json` must say `"clean": true` and name the commit; a build of
 uncommitted changes is for local tests only (`./mun dev bundle` warns).
 
+The image build runs the shell's behaviour regressions and fails with
+them, but it only records how long Home's transitions take (`--timing
+record`): a builder's frames are the builder's, not the shell's. Judge
+them once on the same commit, on a machine doing nothing else, with Debian
+13 and Qt 6.8 as the image build has them, and Xvfb:
+
+```sh
+fresh="$(mktemp -d)"
+git archive <commit> | tar -x -C "$fresh"
+sh "$fresh/services/mun-shell/deploy/build.sh" "$fresh/services/mun-shell" "$fresh/shell" <build_id>
+python3 "$fresh/services/mun-shell/tests/behaviour.py" "$fresh/shell/mun-shell" \
+    --work "$fresh/home" --only home --timing check
+```
+
+`<build_id>` is the one `BUILD-INFO.json` gives. It must exit with status
+0, in each of Home's three ways (the previous and the orbital designs on
+the software renderer, the orbital design through OpenGL). Keep its output
+and `$fresh/home/report.json`, with the machine it ran on (processor, cores,
+system, container). A duration out of its bounds holds the release until it
+is understood: a slower shell is a regression; a busy machine is no
+measurement, and the run is repeated on a quiet one.
+
 ## 3. The bundle
 
 ```sh

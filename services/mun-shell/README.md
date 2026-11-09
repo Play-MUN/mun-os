@@ -557,7 +557,9 @@ code (`src/shape.*`, `src/shapeworld.*`, `src/shapefront.h`):
   The image build runs it after compiling the shell, with `--timing
   record` (a builder's frames are the builder's, not the shell's), and
   fails with it; its measurements are the build's
-  `logs/shell-behaviour.json`.
+  `logs/shell-behaviour.json`. Before a release, Home's durations are
+  judged once on the release's commit
+  ([releasing](../../docs/releasing.md#2-the-image-from-that-commit)).
 
 ## Resolution
 

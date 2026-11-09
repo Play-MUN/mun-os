@@ -291,9 +291,15 @@ class Service:
 
     A script's time is seconds after the connection; or {"on": EVENT,
     "after": s}: s seconds after the scene showed EVENT (signal(): a PHASE
-    line's label, or "phase:" and its phase), at most 60 s; or {"wait": s}:
-    s seconds after the message before. A functional step then follows what
-    the shell did, not a second clock."""
+    line's label, or "phase:" and its phase), awaited at most "within"
+    seconds (60 by default); or {"wait": s}: s seconds after the message
+    before. A functional step then follows what the shell did, not a second
+    clock. An answer() waits for an event with expect(). An event that does
+    not come within its limit, or before the stand-in is closed, is kept in
+    `errors`, naming it, and nothing that should have followed it is sent:
+    that script, and those after it, stop there. Once close() returns,
+    `errors` holds every wait it ended, and home_cases fails the case with
+    them."""
 
     def __init__(self, path: Path, scripts: list, answer=None):
         self.path, self.scripts, self.answer = path, scripts, answer
@@ -306,6 +312,8 @@ class Service:
         self.lock = threading.Lock()
         self.received = []
         self.events = {}
+        self.awaiting = {}     # a wait in progress: its token, the event's name
+        self.errors = []
         self.thread = threading.Thread(target=self._serve, daemon=True)
         self.thread.start()
 
@@ -315,6 +323,32 @@ class Service:
 
     def signal(self, name):
         self.event(name).set()
+
+    def expect(self, name, within):
+        """Wait at most `within` seconds for the scene to show `name`: True
+        once it has. False when it did not come in time, or the stand-in was
+        closed first: the failure is then in `errors` and the caller sends
+        nothing of what should have followed. Already closed: False, as
+        nothing more is sent."""
+        event, token = self.event(name), object()
+        with self.lock:
+            if self.stopping:
+                return False
+            self.awaiting[token] = name
+        deadline = time.monotonic() + within
+        while True:
+            came = event.wait(max(0.0, min(0.05, deadline - time.monotonic())))
+            with self.lock:
+                if token not in self.awaiting:     # close() ended it, and said so
+                    return False
+                if came:
+                    del self.awaiting[token]
+                    return True
+                if time.monotonic() >= deadline:
+                    del self.awaiting[token]
+                    self.errors.append(f"{self.path.name}: {name!r} did not come within {within:g} s; "
+                                       "nothing after it was sent")
+                    return False
 
     def push(self, message):
         with self.lock:
@@ -356,7 +390,9 @@ class Service:
             start = last = time.monotonic()
             for at, message in script:
                 if isinstance(at, dict) and "on" in at:
-                    self.event(at["on"]).wait(60)
+                    if not self.expect(at["on"], at.get("within", 60)):
+                        self._hold(conn)
+                        return
                     time.sleep(at.get("after", 0))
                 elif isinstance(at, dict):
                     time.sleep(max(0.0, last + at["wait"] - time.monotonic()))
@@ -372,12 +408,27 @@ class Service:
                     break
                 self.push(message)
             else:
+                self._hold(conn)
+
+    def _hold(self, conn):
+        # Kept open until close(), so the shell does not see a disconnection
+        # the script did not ask for.
+        with self.lock:
+            if not self.stopping:
                 self.held.append(conn)
+                return
+        conn.close()
 
     def close(self):
-        self.stopping = True
+        with self.lock:
+            self.stopping = True
+            for name in self.awaiting.values():
+                self.errors.append(f"{self.path.name}: {name!r} had not come when the scene ended; "
+                                   "nothing after it was sent")
+            self.awaiting.clear()
+            held, self.held = self.held, []
         self.server.close()
-        for conn in self.held:
+        for conn in held:
             try:
                 conn.close()
             except OSError:
@@ -1174,6 +1225,8 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
         late = lines(output, "TIMEOUT")
         checks.expect(name, "every state a step waited for came within its limit", not late,
                       [{k: t.get(k) for k in ("t", "step", "when", "within")} for t in late[:3]])
+        missed = cardd.errors + launchd.errors
+        checks.expect(name, "every moment a stand-in waited for came within its limit", not missed, missed[:3])
         return output, phases, {g["name"]: g for g in lines(output, "GRAB")}
 
     def first(phases, since=None, **match):
@@ -1324,8 +1377,9 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
         def answer(service, message):
             if message.get("type") == "release":
                 # Confirmed only once the scene has looked (`asked`), as a
-                # card service takes its time.
-                service.event("asked").wait(30)
+                # card service takes its time; never if it does not look.
+                if not service.expect("asked", 30):
+                    return
                 time.sleep(0.2)
                 if ok:
                     cardd.push({"type": "card", "card": dict(rx, state="released", info=None)})

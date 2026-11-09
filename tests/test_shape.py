@@ -10,10 +10,12 @@ import os
 import random
 import re
 import shutil
+import socket
 import struct
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import unittest.mock
 import zlib
@@ -1334,6 +1336,83 @@ class ShellBehaviourTests(unittest.TestCase):
         self.assertIn("function onStrained(why) { world.stepDown(why) }", main)
         for name in ("ArcNode.qml", "DetailPanel.qml"):
             self.assertIn("Shape.reach(Shape.phase, Shape.kind, Shape.progress, box)", self.source_of(name))
+
+    def stand_in(self, tmp, scripts):
+        # A stand-in on a real socket, and the shell's end of it.
+        service = self.behaviour.Service(Path(tmp) / "s.sock", scripts)
+        self.addCleanup(service.close)
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.addCleanup(client.close)
+        client.connect(str(service.path))
+        client.settimeout(1.0)
+
+        def reader():
+            # One message, or socket.timeout when none comes within 1 s.
+            line = b""
+            while not line.endswith(b"\n"):
+                byte = client.recv(1)
+                if not byte:
+                    raise EOFError
+                line += byte
+            return json.loads(line)
+        return service, reader
+
+    def test_a_stand_in_sends_what_follows_a_moment_once_the_scene_shows_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            service, reader = self.stand_in(tmp, [[(0, {"n": 1}), ({"on": "shown", "within": 5}, {"n": 2})]])
+            self.assertEqual(reader(), {"n": 1})
+            service.signal("shown")
+            self.assertEqual(reader(), {"n": 2})
+            service.signal("asked")
+            self.assertTrue(service.expect("asked", 0.5))
+            service.close()
+            self.assertEqual(service.errors, [])
+
+    def test_a_moment_that_does_not_come_stops_the_stand_in_and_is_kept(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            service, reader = self.stand_in(tmp, [[(0, {"n": 1}), ({"on": "shown", "within": 0.2}, {"n": 2}),
+                                                   (0, {"n": 3})],
+                                                  [(0, {"n": 4})]])
+            self.assertEqual(reader(), {"n": 1})
+            with self.assertRaises(socket.timeout, msg="nothing after the missing moment is sent"):
+                reader()
+            self.assertEqual(len(service.errors), 1, service.errors)
+            self.assertIn("'shown' did not come within 0.2 s", service.errors[0])
+            # The scripts after it are not served either.
+            other = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            self.addCleanup(other.close)
+            other.connect(str(service.path))
+            other.settimeout(0.5)
+            with self.assertRaises(socket.timeout):
+                other.recv(64)
+            # An answer's wait: the same failure, and False.
+            self.assertFalse(service.expect("asked", 0.1))
+            self.assertIn("'asked' did not come within 0.1 s", service.errors[-1])
+            # Shown too late: the stand-in has given up on it.
+            service.signal("shown")
+            with self.assertRaises(socket.timeout):
+                reader()
+
+    def test_a_stand_in_closed_while_waiting_says_which_moment_never_came(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            service, reader = self.stand_in(tmp, [[(0, {"n": 1}), ({"on": "shown"}, {"n": 2})]])
+            self.assertEqual(reader(), {"n": 1})
+            deadline = time.monotonic() + 2
+            while not service.awaiting and time.monotonic() < deadline:
+                time.sleep(0.01)
+            service.close()
+            self.assertEqual(len(service.errors), 1, service.errors)
+            self.assertIn("'shown' had not come when the scene ended", service.errors[0])
+            self.assertFalse(service.expect("shown", 0.1), "closed: nothing more is sent")
+            self.assertEqual(len(service.errors), 1)
+
+    def test_home_cases_fail_on_a_stand_ins_missed_moment(self):
+        source = (self.SHELL / "tests" / "behaviour.py").read_text(encoding="utf-8")
+        self.assertIn("missed = cardd.errors + launchd.errors", source)
+        self.assertIn('"every moment a stand-in waited for came within its limit", not missed', source)
+        self.assertIn('if not service.expect("asked", 30):', source)
+        self.assertNotIn(".wait(60)", source)
+        self.assertNotIn('event("asked").wait', source)
 
     def source_of(self, name):
         return (self.SHELL / "qml" / name).read_text(encoding="utf-8")

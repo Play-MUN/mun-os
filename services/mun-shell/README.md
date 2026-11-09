@@ -545,7 +545,8 @@ code (`src/shape.*`, `src/shapeworld.*`, `src/shapefront.h`):
   A player's steps and a card's events follow the shell's states rather
   than two clocks: a scene's step waits for the state it needs, a stand-in
   service sends what comes next once the scene has shown it, and a state
-  that does not come within its limit fails the case. How long things take
+  or moment that does not come within its limit fails the case (a
+  stand-in that waited for it sends nothing more). How long things take
   (a transition's length, a cue's moment), and whether a frame fell at a
   given point of a moving transition to be grabbed there, is a duration:
   judged with `--timing check`, the default, on a steady machine; with

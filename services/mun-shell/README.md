@@ -298,9 +298,9 @@ same binary, the software renderer offscreen and OpenGL on Mesa's llvmpipe
 under Xvfb (in the image build's overlay), checks that each says in the
 journal which renderer and clock it took, and compares the frames: Home's
 network, objects loaded after a change, the panel's surface and shadow, a
-chosen entry's bar, glow and knob. Where Xvfb is missing it says the case
-was skipped. It cannot show an accelerated renderer's timing; that is
-measured on hardware.
+chosen entry's bar, glow and knob. Where Xvfb is missing the case fails:
+the OpenGL path is required. It cannot show an accelerated renderer's
+timing; that is measured on hardware.
 
 The same screen drawn by both renderers (the software renderer and OpenGL on
 llvmpipe, in the same binary) differs by about one level in 255 on average,

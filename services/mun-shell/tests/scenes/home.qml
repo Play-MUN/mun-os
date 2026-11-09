@@ -4,11 +4,19 @@ import MUN.Shell
 // A scene of tests/behaviour.py: the shell's own Main.qml, compiled in, made
 // here as the binary makes it after a game (no start-up), against the
 // stand-ins for the card service and the launcher the test runs. What a
-// player would do comes from CONFIG's steps (a call of one of Main's own
-// functions, at a time). It prints a PHASE line whenever Shape's phase
+// player would do comes from CONFIG's steps, in order: a call of one of
+// Main's own functions, a property set, a probe or a grab, each when it is
+// due: at a time (`at`), some time after the step before (`wait`), and once
+// the state it waits for holds (`when`: fields of the PHASE line, such as
+// the phase, the menu's level or the card's state), at most `within` ms
+// (15 s by default; then a TIMEOUT line, and the step acts anyway). The
+// test's stand-in services follow the probes' and phases' lines, so a
+// player's step and a card's event come in the order the case says, however
+// slowly the shell goes. It prints a PHASE line whenever Shape's phase
 // changes, and grabs the canvas to PPM files at the moments CONFIG.grabs
-// names (a phase and the progress it must reach, after a time if `after` is
-// given; or `first: "shaped"`, the first frame an entry is dressed), with a
+// names (a phase and the progress it must reach, after a time or a step's
+// `mark` if `after` is given; or `first: "shaped"`, the first frame an entry
+// is dressed), with a
 // GRAB line saying where each surface's text lies, how far the transition
 // has reached it and each entry's opacity, its own and on screen (`effective`:
 // with every item above it). With CONFIG.trace it prints a TRACE line on each
@@ -29,6 +37,11 @@ Item {
     property var world: null
     property var modalLayer: null
     property int next: 0
+    // When the step before acted, and since when the step in turn has been
+    // due and waiting for its state.
+    property double lastDone: 0
+    property double waitingSince: -1
+    property var marks: ({})
     property var pendingGrabs: (config.grabs || []).slice()
 
     function now() { return Date.now() - started }
@@ -142,7 +155,11 @@ Item {
     }
 
     function report(label) {
-        console.log("PHASE " + JSON.stringify({
+        console.log("PHASE " + JSON.stringify(snapshot(label)))
+    }
+
+    function snapshot(label) {
+        return {
             label: label, t: now(), phase: Shape.phase, entry: Shape.entry, exit: Shape.exit, kind: Shape.kind,
             progress: Shape.progress, source: Shape.source, insertion: Shape.insertion,
             world: Object.keys(Shape.world).length > 0,
@@ -154,13 +171,32 @@ Item {
             design: main ? (main.orbital ? "orbital" : "previous") : "",
             entriesFound: canvas ? findAll(canvas, isEntry, []).length : 0,
             cardsFound: canvas ? findAll(canvas, isCard, []).length : 0,
+            card: main ? main.cardMode : "",
             // Texts on screen cut short (an elided label).
             cut: canvas ? findAll(canvas, it => it.truncated === true && it.visible && effective(it) > 0.5, [])
                               .map(it => it.text) : []
-        }))
+        }
+    }
+
+    // A step's `when`, polled every 10 ms: only the fields that cost nothing
+    // to read (no walk through the scene's items).
+    function holds(when) {
+        const state = {
+            phase: Shape.phase, entry: Shape.entry, exit: Shape.exit, kind: Shape.kind, source: Shape.source,
+            insertion: Shape.insertion, world: Object.keys(Shape.world).length > 0,
+            modal: main ? !!main.modal : false, level: main ? main.level : -1, dimmed: main ? main.dimmed : false,
+            mainIndex: main ? main.mainIndex : -1, card: main ? main.cardMode : ""
+        }
+        for (const key in when) {
+            if (state[key] !== when[key])
+                return false
+        }
+        return true
     }
 
     function act(step) {
+        if (step.mark)
+            marks[step.mark] = now()
         if (step.call) {
             const args = step.args || []
             main[step.call].apply(main, args)
@@ -180,14 +216,33 @@ Item {
     }
 
     function run() {
-        while (next < config.steps.length && config.steps[next].at <= now())
-            act(config.steps[next++])
-        if (next < config.steps.length) {
-            clock.interval = Math.max(1, config.steps[next].at - now())
-            clock.start()
+        while (next < config.steps.length) {
+            const step = config.steps[next]
+            const t = now()
+            if ((step.at !== undefined && t < step.at) || (step.wait !== undefined && t < lastDone + step.wait))
+                return
+            if (step.when !== undefined && !holds(step.when)) {
+                if (waitingSince < 0)
+                    waitingSince = t
+                const within = step.within !== undefined ? step.within : 15000
+                if (t - waitingSince < within)
+                    return
+                console.log("TIMEOUT " + JSON.stringify({ t: t, step: next, when: step.when, within: within,
+                                                          state: snapshot("timeout") }))
+            }
+            waitingSince = -1
+            next++
+            lastDone = t
+            act(step)
         }
     }
-    Timer { id: clock; onTriggered: scene.run() }
+    Timer {
+        id: clock
+        interval: 10
+        repeat: true
+        running: scene.main !== null && scene.next < scene.config.steps.length
+        onTriggered: scene.run()
+    }
 
     // Grabs at points of a transition: taken the first frame the phase is
     // the one named and the progress has passed the point.
@@ -198,7 +253,9 @@ Item {
         onTriggered: {
             const rest = []
             for (const g of scene.pendingGrabs) {
-                const passed = g.after !== undefined && scene.now() < g.after ? false
+                const waiting = g.after === undefined ? false
+                              : typeof g.after === "string" ? scene.marks[g.after] === undefined : scene.now() < g.after
+                const passed = waiting || (g.insertion !== undefined && Shape.insertion !== g.insertion) ? false
                              : g.first === "shaped" ? scene.mainEntries().some(n => n.shaped)
                              : g.phase === "present" ? Shape.phase === "present"
                              : Shape.phase === g.phase && (g.phase === "leaving" ? Shape.progress <= g.at : Shape.progress >= g.at)

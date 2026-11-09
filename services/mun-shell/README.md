@@ -47,7 +47,7 @@ draws the parts that depend on it accordingly (*How it is drawn*).
 | `qml/Theme.qml`, `qml/I18n.qml` | Design tokens and motion; the two languages |
 | `qml/OrbitalMenu.qml`, `OrbitalNode`, `OrbitalIcon`, `OrbitalFocus`, `src/orbitalcard.*` | The orbital design's menus: the entries as nodes on the orbit's ring with their pills, their icons (each part painted once and moved by a transform), and the entry in focus large at the orbit's centre, the card object among them |
 | `qml/ArcMenu.qml`, `ArcNode`, `DetailPanel`, `OptionRow`, `StatusBar`, `MoonPhase`, `ModalLayer`, `BootLayer`, `UiText`, `MarkText`, `Shadow`, `Material`, `Logo.js` | Components: the arcs and their entries, the panel and its options, the status line, dialogs, the start-up and power-off screen, text and shadows; the MUN logo |
-| `tests/behaviour.py`, `tests/scenes/` | Behaviour regressions run on the compiled binary, offscreen (*A Game Card's identity*), and the software and OpenGL drawing paths side by side on Xvfb (*On a graphics API*) |
+| `tests/behaviour.py`, `tests/scenes/` | Behaviour regressions run on the compiled binary: offscreen with the software renderer, Home also through OpenGL on Xvfb (*A Game Card's identity*), and the two drawing paths side by side (*On a graphics API*) |
 | `tests/displaydevice_test.cpp`, `tests/Makefile` | The display rules on fake sysfs trees and mode lists, compiled and run on the host by `make check` |
 | `fonts/` | Archivo and Michroma, compiled in, with their licences |
 | `sounds/` | The interface's sounds, compiled in: the menus' `move.wav`, `enter.wav`, `back.wav`, the console's events' (`launch.wav`, `game_return.wav`, `shape_exit.wav`, `eject.wav`, `shutdown.wav`, `success.wav`, `warning.wav`, `error.wav`, `controller_connect.wav`, `controller_disconnect.wav`) and the start-up's `startup.wav` |
@@ -520,10 +520,18 @@ code (`src/shape.*`, `src/shapeworld.*`, `src/shapefront.h`):
     and palette images, a sample stepped down to still (composed in place);
     and how the extreme ones look (covered to the edges, the backdrop's
     middle);
-  - the shell's own `Main.qml` against the stand-ins: an arrival's tide, a
-    dialog that makes it wait, a return under a dialog, a removal mid-tide,
-    *Eject safely* confirmed and refused, another card, Reduce motion,
-    Colours only, Off, a defective world, Settings over the world;
+  - the shell's own `Main.qml` against the stand-ins, three ways, each
+    required: the previous design on the software renderer (the
+    reference), the orbital design on the software renderer (as the
+    virtual console draws it) and the orbital design through OpenGL (on
+    Xvfb, or a board's GPU with `--platform eglfs`); each way must come up
+    in its design and on its renderer, with its menu entries and card
+    object found, and one that cannot run fails. The cases: an arrival's
+    tide, a dialog that makes it wait, a return under a dialog, a removal
+    mid-tide, *Eject safely* confirmed and refused, another card, Reduce
+    motion, Colours only, Off, a defective world, Settings over the world,
+    the card object (a card block alone, with a world, a window that does
+    not decode), the idle dimming and the key that wakes it;
   - with the options focused, frame by frame: a package ready after the
     options took the focus (a fade and a tide), *Eject safely*, a changed
     choice (Colours only, Off, Full), another card; the dressed entries are
@@ -534,8 +542,21 @@ code (`src/shape.*`, `src/shapeworld.*`, `src/shapefront.h`):
     world, on Home, with the options focused, and mid-transition; and on
     the real world during a tide.
 
-  The image build runs it after compiling the shell and fails with it; its
-  measurements are the build's `logs/shell-behaviour.json`.
+  A player's steps and a card's events follow the shell's states rather
+  than two clocks: a scene's step waits for the state it needs, a stand-in
+  service sends what comes next once the scene has shown it, and a state
+  that does not come within its limit fails the case. How long things take
+  (a transition's length, a cue's moment), and whether a frame fell at a
+  given point of a moving transition to be grabbed there, is a duration:
+  judged with `--timing check`, the default, on a steady machine; with
+  `--timing record` measured and kept in the report without being judged.
+  What lasts is always judged: a dressed entry whole on every frame, the
+  first dressed frame's and the settled screen's contrast.
+
+  The image build runs it after compiling the shell, with `--timing
+  record` (a builder's frames are the builder's, not the shell's), and
+  fails with it; its measurements are the build's
+  `logs/shell-behaviour.json`.
 
 ## Resolution
 

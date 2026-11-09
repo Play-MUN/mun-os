@@ -705,7 +705,7 @@ going back or closing a dialog `back`: only when a key or the pointer
 changed something. The console's own events have theirs: `game_return`
 when a game's result is first shown, `shape_exit` as Shape leaves, `eject`
 when a safe release is done and `warning` when it is refused, `shutdown`
-as the console turns off (it goes down once the sound has played, 3.2 s,
+as the console turns off (it goes down once the sound has played, 3.5 s,
 the screen dark), `error` when launching, turning off or saving a choice
 fails, and `controller_connect` and `controller_disconnect` when a
 controller comes or goes while the shell runs. A card arriving is greeted

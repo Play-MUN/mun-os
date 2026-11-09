@@ -585,7 +585,7 @@ Window {
     }
     Timer {
         id: shutdownSound
-        interval: 3200
+        interval: 3500
         onTriggered: PowerControl.powerOff()
     }
 

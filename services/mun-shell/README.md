@@ -79,7 +79,9 @@ network, the console's LED white `#DDE9FF`. Type: Archivo, a variable font
 (labels are bold at 118 % width), for everything read; Michroma, the mark's
 face, for short upper-case labels, the path at the bottom and the clock.
 
-Home: on the left a large object for the entry in focus (the Game Card, a
+Home, in the previous design (kept, behind `MUN_SHELL_DESIGN=previous`, as
+the reference the checks compare with): on the left a large object for the
+entry in focus (the Game Card, a
 fan of cards, a gear, the power sign; in Settings a person with a globe, a
 screen with sound, the network's arcs, a chip) floats at the centre of a
 network of light: rings drifting out of it, slowly turning spokes, two
@@ -95,8 +97,9 @@ the keys (A Select, B Back). The card's crescent on the Game Card object
 (the logo's moon) fills while a card is in the slot. The ambient light at the orb follows the local hour:
 cold at night, pale at dawn, grey-white by day, copper at dusk.
 
-On a graphics API Home has the orbital design instead (`OrbitalBackdrop`,
-`OrbitalMenu`): a warm night, darker downwards, with an eclipse's warm
+Home's design is the orbital one, on a graphics API and on the software
+renderer alike (`OrbitalBackdrop`, `OrbitalMenu`): a warm night, darker
+downwards, with an eclipse's warm
 haze, lit edge and halo at the top left; an orbit of rings whose gaps widen
 outwards, its centre clear, a faint polar grid and a ring of dots; two
 waves along the bottom. The entries (MUN Disk, Universe, Settings, Turn off)
@@ -118,10 +121,11 @@ it runs, and hidden while a game's world covers the background. With a
 card's MUN Shape, MUN Disk's large icon gives way to the card object
 (`OrbitalCard`): the card's window on the disc, in its outline and light,
 as below, over MUN's night or the game's world. The small icons rest. At each move the ring of dots
-turns a step, as a dial. The waves and the eclipse move slowly, at 10 frames a second.
-The panel leans back a little from its right edge (7 degrees), in
-the same glass. The software renderer keeps the design above;
-`MUN_SHELL_DESIGN` (`orbital` or `previous`) chooses one for the checks.
+turns a step, as a dial. On a graphics API the waves and the eclipse move
+slowly, at 10 frames a second; on the software renderer, as in the virtual
+console, the background is drawn once and stays still. The panel leans
+back a little from its right edge (7 degrees), in the same glass.
+`MUN_SHELL_DESIGN=previous` brings back the previous design.
 Only the shown design's pieces are made, so neither costs the other memory
 or time; the navigation, the card's states, the sounds and MUN Shape are
 the same in both.

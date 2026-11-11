@@ -483,6 +483,10 @@ class Preview:
                 self.say(self.not_ours(name))
             return
         self.delete_unused()
+        # The folder as it is before the card is made from it: a change saved
+        # while that card is made and inserted is then a change, taken once
+        # the folder is still, never part of what was already seen.
+        seen = folder_digest(self.folder)
         current = self.ours_in()
         if current is None:
             self.insert(self.names[0])
@@ -490,7 +494,6 @@ class Preview:
             self.change()
         if not watch and not follow:
             return
-        seen = folder_digest(self.folder)
         pending_since: Optional[float] = None
         while not stop.is_set():
             try:

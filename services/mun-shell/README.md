@@ -47,7 +47,7 @@ draws the parts that depend on it accordingly (*How it is drawn*).
 | `qml/Theme.qml`, `qml/I18n.qml` | Design tokens and motion; the two languages |
 | `qml/OrbitalMenu.qml`, `OrbitalNode`, `OrbitalIcon`, `OrbitalFocus`, `src/orbitalcard.*` | The orbital design's menus: the entries as nodes on the orbit's ring with their pills, their icons (each part painted once and moved by a transform), and the entry in focus large at the orbit's centre, the card object among them |
 | `qml/ArcMenu.qml`, `ArcNode`, `DetailPanel`, `OptionRow`, `StatusBar`, `MoonPhase`, `ModalLayer`, `BootLayer`, `UiText`, `MarkText`, `Shadow`, `Material`, `Logo.js` | Components: the arcs and their entries, the panel and its options, the status line, dialogs, the start-up and power-off screen, text and shadows; the MUN logo |
-| `tests/behaviour.py`, `tests/scenes/` | Behaviour regressions run on the compiled binary, offscreen (*A Game Card's identity*), and the software and OpenGL drawing paths side by side on Xvfb (*On a graphics API*) |
+| `tests/behaviour.py`, `tests/scenes/` | Behaviour regressions run on the compiled binary: offscreen with the software renderer, Home also through OpenGL on Xvfb (*A Game Card's identity*), and the two drawing paths side by side (*On a graphics API*) |
 | `tests/displaydevice_test.cpp`, `tests/Makefile` | The display rules on fake sysfs trees and mode lists, compiled and run on the host by `make check` |
 | `fonts/` | Archivo and Michroma, compiled in, with their licences |
 | `sounds/` | The interface's sounds, compiled in: the menus' `move.wav`, `enter.wav`, `back.wav`, the console's events' (`launch.wav`, `game_return.wav`, `shape_exit.wav`, `eject.wav`, `shutdown.wav`, `success.wav`, `warning.wav`, `error.wav`, `controller_connect.wav`, `controller_disconnect.wav`) and the start-up's `startup.wav` |
@@ -79,7 +79,9 @@ network, the console's LED white `#DDE9FF`. Type: Archivo, a variable font
 (labels are bold at 118 % width), for everything read; Michroma, the mark's
 face, for short upper-case labels, the path at the bottom and the clock.
 
-Home: on the left a large object for the entry in focus (the Game Card, a
+Home, in the previous design (kept, behind `MUN_SHELL_DESIGN=previous`, as
+the reference the checks compare with): on the left a large object for the
+entry in focus (the Game Card, a
 fan of cards, a gear, the power sign; in Settings a person with a globe, a
 screen with sound, the network's arcs, a chip) floats at the centre of a
 network of light: rings drifting out of it, slowly turning spokes, two
@@ -95,8 +97,9 @@ the keys (A Select, B Back). The card's crescent on the Game Card object
 (the logo's moon) fills while a card is in the slot. The ambient light at the orb follows the local hour:
 cold at night, pale at dawn, grey-white by day, copper at dusk.
 
-On a graphics API Home has the orbital design instead (`OrbitalBackdrop`,
-`OrbitalMenu`): a warm night, darker downwards, with an eclipse's warm
+Home's design is the orbital one, on a graphics API and on the software
+renderer alike (`OrbitalBackdrop`, `OrbitalMenu`): a warm night, darker
+downwards, with an eclipse's warm
 haze, lit edge and halo at the top left; an orbit of rings whose gaps widen
 outwards, its centre clear, a faint polar grid and a ring of dots; two
 waves along the bottom. The entries (MUN Disk, Universe, Settings, Turn off)
@@ -118,10 +121,11 @@ it runs, and hidden while a game's world covers the background. With a
 card's MUN Shape, MUN Disk's large icon gives way to the card object
 (`OrbitalCard`): the card's window on the disc, in its outline and light,
 as below, over MUN's night or the game's world. The small icons rest. At each move the ring of dots
-turns a step, as a dial. The waves and the eclipse move slowly, at 10 frames a second.
-The panel leans back a little from its right edge (7 degrees), in
-the same glass. The software renderer keeps the design above;
-`MUN_SHELL_DESIGN` (`orbital` or `previous`) chooses one for the checks.
+turns a step, as a dial. On a graphics API the waves and the eclipse move
+slowly, at 10 frames a second; on the software renderer, as in the virtual
+console, the background is drawn once and stays still. The panel leans
+back a little from its right edge (7 degrees), in the same glass.
+`MUN_SHELL_DESIGN=previous` brings back the previous design.
 Only the shown design's pieces are made, so neither costs the other memory
 or time; the navigation, the card's states, the sounds and MUN Shape are
 the same in both.
@@ -294,9 +298,9 @@ same binary, the software renderer offscreen and OpenGL on Mesa's llvmpipe
 under Xvfb (in the image build's overlay), checks that each says in the
 journal which renderer and clock it took, and compares the frames: Home's
 network, objects loaded after a change, the panel's surface and shadow, a
-chosen entry's bar, glow and knob. Where Xvfb is missing it says the case
-was skipped. It cannot show an accelerated renderer's timing; that is
-measured on hardware.
+chosen entry's bar, glow and knob. Where Xvfb is missing the case fails:
+the OpenGL path is required. It cannot show an accelerated renderer's
+timing; that is measured on hardware.
 
 The same screen drawn by both renderers (the software renderer and OpenGL on
 llvmpipe, in the same binary) differs by about one level in 255 on average,
@@ -516,10 +520,18 @@ code (`src/shape.*`, `src/shapeworld.*`, `src/shapefront.h`):
     and palette images, a sample stepped down to still (composed in place);
     and how the extreme ones look (covered to the edges, the backdrop's
     middle);
-  - the shell's own `Main.qml` against the stand-ins: an arrival's tide, a
-    dialog that makes it wait, a return under a dialog, a removal mid-tide,
-    *Eject safely* confirmed and refused, another card, Reduce motion,
-    Colours only, Off, a defective world, Settings over the world;
+  - the shell's own `Main.qml` against the stand-ins, three ways, each
+    required: the previous design on the software renderer (the
+    reference), the orbital design on the software renderer (as the
+    virtual console draws it) and the orbital design through OpenGL (on
+    Xvfb, or a board's GPU with `--platform eglfs`); each way must come up
+    in its design and on its renderer, with its menu entries and card
+    object found, and one that cannot run fails. The cases: an arrival's
+    tide, a dialog that makes it wait, a return under a dialog, a removal
+    mid-tide, *Eject safely* confirmed and refused, another card, Reduce
+    motion, Colours only, Off, a defective world, Settings over the world,
+    the card object (a card block alone, with a world, a window that does
+    not decode), the idle dimming and the key that wakes it;
   - with the options focused, frame by frame: a package ready after the
     options took the focus (a fade and a tide), *Eject safely*, a changed
     choice (Colours only, Off, Full), another card; the dressed entries are
@@ -530,8 +542,24 @@ code (`src/shape.*`, `src/shapeworld.*`, `src/shapefront.h`):
     world, on Home, with the options focused, and mid-transition; and on
     the real world during a tide.
 
-  The image build runs it after compiling the shell and fails with it; its
-  measurements are the build's `logs/shell-behaviour.json`.
+  A player's steps and a card's events follow the shell's states rather
+  than two clocks: a scene's step waits for the state it needs, a stand-in
+  service sends what comes next once the scene has shown it, and a state
+  or moment that does not come within its limit fails the case (a
+  stand-in that waited for it sends nothing more). How long things take
+  (a transition's length, a cue's moment), and whether a frame fell at a
+  given point of a moving transition to be grabbed there, is a duration:
+  judged with `--timing check`, the default, on a steady machine; with
+  `--timing record` measured and kept in the report without being judged.
+  What lasts is always judged: a dressed entry whole on every frame, the
+  first dressed frame's and the settled screen's contrast.
+
+  The image build runs it after compiling the shell, with `--timing
+  record` (a builder's frames are the builder's, not the shell's), and
+  fails with it; its measurements are the build's
+  `logs/shell-behaviour.json`. Before a release, Home's durations are
+  judged once on the release's commit
+  ([releasing](../../docs/releasing.md#2-the-image-from-that-commit)).
 
 ## Resolution
 
@@ -677,7 +705,7 @@ going back or closing a dialog `back`: only when a key or the pointer
 changed something. The console's own events have theirs: `game_return`
 when a game's result is first shown, `shape_exit` as Shape leaves, `eject`
 when a safe release is done and `warning` when it is refused, `shutdown`
-as the console turns off (it goes down once the sound has played, 3.2 s,
+as the console turns off (it goes down once the sound has played, 3.5 s,
 the screen dark), `error` when launching, turning off or saving a choice
 fails, and `controller_connect` and `controller_disconnect` when a
 controller comes or goes while the shell runs. A card arriving is greeted

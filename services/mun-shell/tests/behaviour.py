@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Behaviour regressions of MUN Shell's MUN Shape code, on the real binary.
 
-    python3 tests/behaviour.py BUILD_DIR/mun-shell [--work DIR] [--only NAME] [--platform eglfs]
+    python3 tests/behaviour.py BUILD_DIR/mun-shell [--work DIR] [--only NAME] [--platform eglfs] [--timing record]
 
 Every case runs the compiled shell with one of tests/scenes/ in place of its
 Main.qml (MUN_SHELL_QML_DIR), offscreen with the software renderer: the
@@ -56,18 +56,23 @@ come from CardClient. The cases:
   or a dialog only once Home is wholly on screen; the card object, for
   packages with only their card block (an organic outline and a card's),
   with a world, and with a window that does not decode, each window found
-  on screen by its own colour. Every case first
-  requires the design it asked for, its ten menu entries and its card
-  object to be found. The previous design runs with the software renderer;
-  the same cases run again on the orbital design, through OpenGL on Xvfb
-  (marked orbital/), skipped and said so where Xvfb is not installed.
+  on screen by its own colour; idle dimming and the key that wakes it.
+  Three ways, each required: the previous design on the software renderer
+  (the reference), the orbital design on the software renderer (marked
+  orbital-sw/, as the virtual console draws it) and through OpenGL
+  (orbital-gl/: Xvfb, or a board's GPU with --platform eglfs; without Xvfb
+  it fails). Every case first requires the design and renderer it asked
+  for, its ten menu entries and its card object to be found. Steps and the
+  stand-ins' events follow the shell's states (a step waits for its state,
+  a service for the scene's line), each within a limit that fails the
+  case; durations are judged or recorded (--timing).
 - paths: the two drawing paths (paths.qml), the software renderer and
   OpenGL (an X server from Xvfb, Mesa's llvmpipe): each says in the journal
   which renderer and which clock it took, and the same still screen (Home's
   network, objects loaded after a change, the panel's surface and shadow, a
   chosen entry's bar, glow and knob) matches between them within measured
-  bounds. With --platform eglfs, OpenGL is the board's own GPU; elsewhere
-  it is skipped, and said so, where Xvfb is not installed.
+  bounds. With --platform eglfs, OpenGL is the board's own GPU; without
+  Xvfb elsewhere it fails.
 - settings: the player's settings file (settings.qml): a damaged file reads
   as the defaults and the next choice writes a valid one; a value outside
   the allowed set reads as its default; a change replaces the file whole (a
@@ -195,13 +200,16 @@ class Shell:
 
     def run(self, name: str, scene: str, config: dict, runtime: Path = None, socket_path: Path = None,
             exports: Path = None, timeout: float = 90, launcher: Path = None, settings: str = "",
-            scale: float = 1, display: str = None, software: bool = False, design: str = None) -> str:
+            scale: float = 1, display: str = None, software: bool = False, design: str = None,
+            watch=None) -> str:
         """Runs the shell with `scene` and returns its output. `scale` is the
         display's device pixels per canvas pixel (4/3: 2560x1440). With an X
         `display` it draws there through OpenGL (xcb) instead of offscreen
         with the software renderer; `software` keeps that renderer on a
         board's display too. `design` ("orbital" or "previous") chooses
-        Home's design (MUN_SHELL_DESIGN); none: the renderer's own."""
+        Home's design (MUN_SHELL_DESIGN); none: the shell's own. `watch` is
+        called with each line of the output as it is written, while the
+        shell runs (the stand-in services follow the scene by it)."""
         case = self.work / name
         qml = case / "qml"
         qml.mkdir(parents=True, exist_ok=True)
@@ -236,11 +244,21 @@ class Shell:
             env.update(QT_QPA_PLATFORM="eglfs", QT_QPA_EGLFS_INTEGRATION="eglfs_kms")
         # Reaped with wait4, which also gives this process's own peak memory.
         log = case / "output.log"
-        with open(log, "wb") as sink:
+        with open(log, "wb") as sink, open(log, "rb") as source:
             process = subprocess.Popen([str(self.binary)], env=env, stdout=sink, stderr=subprocess.STDOUT, cwd=case)
             deadline, timed_out = time.monotonic() + timeout, False
+            pending = b""
+
+            def follow():
+                nonlocal pending
+                pending += source.read()
+                while b"\n" in pending:
+                    line, pending = pending.split(b"\n", 1)
+                    watch(line.decode("utf-8", "replace"))
             while True:
                 pid, status, usage = os.wait4(process.pid, os.WNOHANG)
+                if watch:
+                    follow()
                 if pid:
                     break
                 if time.monotonic() > deadline:
@@ -269,7 +287,19 @@ class Service:
     script per connection, each a list of (seconds after the connection,
     message); a message "close" ends that connection. `answer(service,
     message)` sees every line the shell sends; push() sends a message on the
-    connection that is open."""
+    connection that is open.
+
+    A script's time is seconds after the connection; or {"on": EVENT,
+    "after": s}: s seconds after the scene showed EVENT (signal(): a PHASE
+    line's label, or "phase:" and its phase), awaited at most "within"
+    seconds (60 by default); or {"wait": s}: s seconds after the message
+    before. A functional step then follows what the shell did, not a second
+    clock. An answer() waits for an event with expect(). An event that does
+    not come within its limit, or before the stand-in is closed, is kept in
+    `errors`, naming it, and nothing that should have followed it is sent:
+    that script, and those after it, stop there. Once close() returns,
+    `errors` holds every wait it ended, and home_cases fails the case with
+    them."""
 
     def __init__(self, path: Path, scripts: list, answer=None):
         self.path, self.scripts, self.answer = path, scripts, answer
@@ -281,8 +311,44 @@ class Service:
         self.current = None
         self.lock = threading.Lock()
         self.received = []
+        self.events = {}
+        self.awaiting = {}     # a wait in progress: its token, the event's name
+        self.errors = []
         self.thread = threading.Thread(target=self._serve, daemon=True)
         self.thread.start()
+
+    def event(self, name):
+        with self.lock:
+            return self.events.setdefault(name, threading.Event())
+
+    def signal(self, name):
+        self.event(name).set()
+
+    def expect(self, name, within):
+        """Wait at most `within` seconds for the scene to show `name`: True
+        once it has. False when it did not come in time, or the stand-in was
+        closed first: the failure is then in `errors` and the caller sends
+        nothing of what should have followed. Already closed: False, as
+        nothing more is sent."""
+        event, token = self.event(name), object()
+        with self.lock:
+            if self.stopping:
+                return False
+            self.awaiting[token] = name
+        deadline = time.monotonic() + within
+        while True:
+            came = event.wait(max(0.0, min(0.05, deadline - time.monotonic())))
+            with self.lock:
+                if token not in self.awaiting:     # close() ended it, and said so
+                    return False
+                if came:
+                    del self.awaiting[token]
+                    return True
+                if time.monotonic() >= deadline:
+                    del self.awaiting[token]
+                    self.errors.append(f"{self.path.name}: {name!r} did not come within {within:g} s; "
+                                       "nothing after it was sent")
+                    return False
 
     def push(self, message):
         with self.lock:
@@ -321,9 +387,18 @@ class Service:
             with self.lock:
                 self.current = conn
             threading.Thread(target=self._read, args=(conn,), daemon=True).start()
-            start = time.monotonic()
+            start = last = time.monotonic()
             for at, message in script:
-                time.sleep(max(0.0, start + at - time.monotonic()))
+                if isinstance(at, dict) and "on" in at:
+                    if not self.expect(at["on"], at.get("within", 60)):
+                        self._hold(conn)
+                        return
+                    time.sleep(at.get("after", 0))
+                elif isinstance(at, dict):
+                    time.sleep(max(0.0, last + at["wait"] - time.monotonic()))
+                else:
+                    time.sleep(max(0.0, start + at - time.monotonic()))
+                last = time.monotonic()
                 if self.stopping:
                     return
                 if message == "close":
@@ -333,12 +408,27 @@ class Service:
                     break
                 self.push(message)
             else:
+                self._hold(conn)
+
+    def _hold(self, conn):
+        # Kept open until close(), so the shell does not see a disconnection
+        # the script did not ask for.
+        with self.lock:
+            if not self.stopping:
                 self.held.append(conn)
+                return
+        conn.close()
 
     def close(self):
-        self.stopping = True
+        with self.lock:
+            self.stopping = True
+            for name in self.awaiting.values():
+                self.errors.append(f"{self.path.name}: {name!r} had not come when the scene ended; "
+                                   "nothing after it was sent")
+            self.awaiting.clear()
+            held, self.held = self.held, []
         self.server.close()
-        for conn in self.held:
+        for conn in held:
             try:
                 conn.close()
             except OSError:
@@ -446,8 +536,15 @@ class Checks:
         self.skipped = 0
         self.failing = []   # the cases' folders, for their logs
         # Put before every case's name: a second run of cases in a folder of
-        # the work directory ("orbital/").
+        # the work directory ("orbital-sw/").
         self.tag = ""
+        # Durations (how long a transition took, a key to its frame): judged
+        # like any check ("check", where the machine is steady), or measured
+        # and recorded without judging ("record": a busy builder, where a
+        # slow frame is the machine's, not the shell's). What happens, and in
+        # what order, is always judged.
+        self.timing = "check"
+        self.timings = []
 
     def skip(self, case: str, why: str):
         self.skipped += 1
@@ -464,6 +561,15 @@ class Checks:
             folder = case.split(" ")[0]
             if folder not in self.failing:
                 self.failing.append(folder)
+
+
+    def duration(self, case: str, what: str, ok: bool, detail=""):
+        if self.timing == "check":
+            self.expect(case, what, ok, detail)
+            return
+        self.timings.append({"case": self.tag + case, "what": what, "within": ok, "detail": str(detail)})
+        print(f"  time  {self.tag}{case}: {what}: {'within' if ok else 'OUTSIDE'} (recorded, not judged here) {detail}",
+              flush=True)
 
 
 def last_probe(output: str, label: str):
@@ -1051,11 +1157,18 @@ def memory_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, re
 
 
 def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, report: dict, design: str = "previous",
-               display: str = None):
+               api: str = "software", display: str = None):
     """The shell's own Main.qml, against stand-ins for the card service and
     the launcher: the moments of docs/shape.md, "How the console uses a
-    package". In Home's `design`, drawn on the X `display` through OpenGL
-    if given, else offscreen with the software renderer."""
+    package". In Home's `design`, on `api`: "software", Qt Quick's software
+    renderer (offscreen, or a board's display); "opengl", OpenGL on the X
+    `display` (Xvfb) or a board's GPU.
+
+    A player's steps and a card's events follow the shell's states, not two
+    clocks: a step waits for the state it needs (the scene's `when`), and a
+    stand-in service sends what follows a moment the scene has shown (its
+    {"on": ...}), each within a limit whose passing fails the case. How long
+    things take is Checks.duration."""
     slow = sample_copy(packages, "home-slow", "sea", change=lambda d: d["transition"].update(seconds=4.0))
     broken = sample_copy(packages, "home-broken", "sea", replace={first_layer("sea"): short_png()})
     counter = iter(range(0x500, 0x600))
@@ -1068,17 +1181,34 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
         return Service(shell.work / f"{name}.sock", scripts), \
                Service(shell.work / f"{name}-launch.sock", launcher or [[(0, {"type": "snapshot", "state": "idle"})]], answer)
 
-    def run(name, cardd, launchd, steps, grabs=(), settings="", end=9000, trace=False):
+    def run(name, cardd, launchd, steps, grabs=(), settings="", end=9000, trace=False, until=None):
+        # `until`: a state to wait for after the steps (at most 20 s); the
+        # scene then ends 1.5 s later, and not before `end`.
         out_dir = shell.work / name / "grabs"
         out_dir.mkdir(parents=True, exist_ok=True)
         runtime = shell.work / name / "runtime"
         runtime.mkdir(mode=0o700, parents=True, exist_ok=True)
         (runtime / "started").write_text("")   # after a game: no start-up
+
+        # The stand-ins follow the scene: each PHASE line's label (a probe)
+        # and its phase are events they may wait for.
+        def watch(line):
+            found = re.search(r"PHASE (\{.*\})\s*$", line)
+            try:
+                shown = json.loads(found.group(1)) if found else None
+            except ValueError:
+                shown = None
+            if shown:
+                for service in (cardd, launchd):
+                    service.signal(shown["label"])
+                    service.signal("phase:" + shown["phase"])
+        tail = [{"when": until, "within": 20000, "probe": "until"}] if until else []
         try:
-            output = shell.run(name, "home.qml", {"steps": list(steps) + [{"at": end, "quit": True}], "grabs": list(grabs),
-                                                  "out": str(out_dir), "trace": trace},
+            output = shell.run(name, "home.qml", {"steps": list(steps) + tail + [{"at": end, "wait": 1500, "quit": True}],
+                                                  "grabs": list(grabs), "out": str(out_dir), "trace": trace},
                                runtime=runtime, socket_path=cardd.path, launcher=launchd.path, exports=exports,
-                               settings=settings, timeout=end / 1000 + 60, display=display, design=design)
+                               settings=settings, timeout=end / 1000 + 120, display=display, design=design,
+                               software=api == "software", watch=watch)
         finally:
             cardd.close()
             launchd.close()
@@ -1087,9 +1217,16 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
         # asked for, its ten menu entries (four on Home, six in Settings) and
         # its card object, or a green result would say nothing.
         start = next((p for p in phases if p["label"] == "start"), None)
-        checks.expect(name, f"the {design} design came up, its 10 menu entries and its card object found",
+        drawn = re.search(r"mun-shell: renderer: (\w+)", output)
+        checks.expect(name, f"the {design} design came up on {api}, its 10 menu entries and its card object found",
                       start is not None and start.get("design") == design and start.get("entriesFound") == 10
-                      and start.get("cardsFound") == 1, start and {k: start.get(k) for k in ("design", "entriesFound", "cardsFound")})
+                      and start.get("cardsFound") == 1 and drawn is not None and drawn.group(1) == api,
+                      (start and {k: start.get(k) for k in ("design", "entriesFound", "cardsFound")}, drawn and drawn.group(1)))
+        late = lines(output, "TIMEOUT")
+        checks.expect(name, "every state a step waited for came within its limit", not late,
+                      [{k: t.get(k) for k in ("t", "step", "when", "within")} for t in late[:3]])
+        missed = cardd.errors + launchd.errors
+        checks.expect(name, "every moment a stand-in waited for came within its limit", not missed, missed[:3])
         return output, phases, {g["name"]: g for g in lines(output, "GRAB")}
 
     def first(phases, since=None, **match):
@@ -1101,11 +1238,19 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
                 return p
         return None
 
-    def surfaces_hold(case, grab, name, dressed_only=False):
+    def surfaces_hold(case, grab, name, dressed_only=False, sample=False):
         # dressed_only: MUN's entries, dimmed while the options have the
-        # focus, are MUN's own look, not measured here.
+        # focus, are MUN's own look, not measured here. sample: a grab at a
+        # point of a moving transition, which a slow machine may pass between
+        # two frames (no frame at that point to grab): its absence is then a
+        # duration, judged or recorded; a state that lasts (the first dressed
+        # frame, present, Settings) must always be grabbed.
         if not grab or not grab.get("path"):
-            checks.expect(case, f"{name}: grabbed", False, grab)
+            if sample:
+                checks.duration(case, f"{name}: a frame at that point of the transition grabbed", False,
+                                "the transition passed that point between two frames")
+            else:
+                checks.expect(case, f"{name}: grabbed", False, grab)
             return
         image = read_ppm(Path(grab["path"]))
         where = grab["regions"]
@@ -1160,38 +1305,48 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
     cardd, launchd = serve("home-arrival", [[(0, snapshot()), (0.6, {"type": "card", "card": rx})]])
     out, phases, grabs = run("home-arrival", cardd, launchd, [], grabs=[
         {"name": "tide-20", "phase": "entering", "at": 0.2}, {"name": "tide-45", "phase": "entering", "at": 0.45},
-        {"name": "tide-70", "phase": "entering", "at": 0.7}, {"name": "present", "phase": "present"}], end=7500)
+        {"name": "tide-70", "phase": "entering", "at": 0.7}, {"name": "present", "phase": "present"}], end=4000,
+        until={"phase": "present"})
     entering, present = first(phases, phase="entering"), first(phases, phase="present")
     checks.expect("home-arrival", "an arrival comes in with the package's tide",
-                  entering is not None and entering["entry"] == "arrival" and entering["kind"] == "tide", entering)
+                  entering is not None and entering["entry"] == "arrival" and entering["kind"] == "tide"
+                  and present is not None, (entering, present))
     took = present["t"] - entering["t"] if entering and present else None
-    checks.expect("home-arrival", "the tide takes the package's 3.2 s", took is not None and 2600 <= took <= 4400, took)
+    checks.duration("home-arrival", "the tide takes the package's 3.2 s (2.6 to 4.4 s)", took is not None and 2600 <= took <= 4400,
+                    took)
     checks.expect("home-arrival", "adopted as an arrival, its cue due", [a["live"] for a in lines(out, "ADOPTED")] == [True],
                   lines(out, "ADOPTED"))
     cues = [s for s in lines(out, "SOUND") if s["name"] == "insert"]
     checks.expect("home-arrival", "the cue plays once, as the tide begins",
-                  len(cues) == 1 and entering is not None and cues[0]["phase"] == "entering"
-                  and abs(cues[0]["t"] - entering["t"]) <= 300, (cues, entering and entering["t"]))
+                  len(cues) == 1 and entering is not None and cues[0]["phase"] == "entering", (cues, entering and entering["t"]))
+    checks.duration("home-arrival", "the cue within 0.3 s of the tide's start",
+                    len(cues) == 1 and entering is not None and abs(cues[0]["t"] - entering["t"]) <= 300,
+                    (cues, entering and entering["t"]))
     for name in ("tide-20", "tide-45", "tide-70", "present"):
-        surfaces_hold("home-arrival", grabs.get(name), name)
+        surfaces_hold("home-arrival", grabs.get(name), name, sample=name != "present")
 
     # A dialog open: the arrival waits for Home.
     x, rx = card(SAMPLES / "sea")
     result = {"type": "snapshot", "state": "idle", "last_result": {"session": "s1", "reason": "exited", "title": "Test"}}
     cardd, launchd = serve("home-dialog", [[(0, snapshot()), (0.6, {"type": "card", "card": rx})]], [[(0, result)]])
-    out, phases, _ = run("home-dialog", cardd, launchd, [{"at": 4000, "call": "dismissResult"}], end=7000)
-    ready, entering = first(phases, phase="ready"), first(phases, phase="entering")
-    checks.expect("home-dialog", "with the session's dialog open the identity waits, ready",
-                  ready is not None and ready["modal"] and entering is not None and entering["t"] >= 4000, (ready, entering))
+    out, phases, _ = run("home-dialog", cardd, launchd, [
+        {"when": {"phase": "ready"}, "probe": "waiting"}, {"wait": 1500, "probe": "still-waiting"},
+        {"call": "dismissResult", "probe": "dismissed"}], end=1000, until={"phase": "present"})
+    still, dismissed, entering = first(phases, label="still-waiting"), first(phases, label="dismissed"), first(phases, phase="entering")
+    checks.expect("home-dialog", "with the session's dialog open the identity waits, ready; dismissed, it comes in",
+                  still is not None and still["phase"] == "ready" and still["modal"] and dismissed is not None
+                  and entering is not None and entering["t"] >= dismissed["t"], (still, dismissed, entering))
 
     # Back from a game under the same dialog: a short fade, at once.
     x, rx = card(SAMPLES / "sea")
     cardd, launchd = serve("home-return", [[(0, snapshot(rx))]], [[(0, result)]])
-    out, phases, _ = run("home-return", cardd, launchd, [], end=4000)
+    out, phases, _ = run("home-return", cardd, launchd, [], end=1000, until={"phase": "present"})
     entering, present = first(phases, phase="entering"), first(phases, phase="present")
-    checks.expect("home-return", "found at start (after a game): a short fade, even under a dialog",
+    checks.expect("home-return", "found at start (after a game): a fade, even under a dialog",
                   entering is not None and entering["entry"] == "return" and entering["kind"] == "fade" and entering["modal"]
-                  and present is not None and present["t"] - entering["t"] <= 1200, (entering, present))
+                  and present is not None, (entering, present))
+    checks.duration("home-return", "the fade is short (1.2 s at most)",
+                    entering is not None and present is not None and present["t"] - entering["t"] <= 1200, (entering, present))
     checks.expect("home-return", "no cue", [a["live"] for a in lines(out, "ADOPTED")] == [False]
                   and not [s for s in lines(out, "SOUND") if s["name"] == "insert"], lines(out, "ADOPTED"))
     sounded = [s["name"] for s in lines(out, "SYSSOUND")]
@@ -1200,16 +1355,19 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
     # Removed while the tide comes in: back to MUN at once, the way it came.
     x, rx = card(slow)
     cardd, launchd = serve("home-removal", [[(0, snapshot()), (0.6, {"type": "card", "card": rx}),
-                                             (2.8, {"type": "removed", "slot": "c1", "insertion": x})]])
-    out, phases, grabs = run("home-removal", cardd, launchd, [], grabs=[{"name": "leaving", "phase": "leaving", "at": 0.99}],
-                             end=6000)
+                                             ({"on": "phase:entering", "after": 1.0},
+                                              {"type": "removed", "slot": "c1", "insertion": x})]])
+    out, phases, grabs = run("home-removal", cardd, launchd, [{"when": {"phase": "leaving"}, "probe": "left"}],
+                             grabs=[{"name": "leaving", "phase": "leaving", "at": 0.99}], end=1000, until={"phase": "none"})
     leaving = first(phases, phase="leaving")
     gone = first(phases, since=leaving, phase="none") if leaving else None
     checks.expect("home-removal", "removed mid-tide: it leaves (removal) by the same tide, from where it was",
                   leaving is not None and leaving["exit"] == "removal" and leaving["kind"] == "tide" and leaving["progress"] < 1,
                   leaving)
-    checks.expect("home-removal", "MUN within half a second", gone is not None and leaving is not None
-                  and gone["t"] - leaving["t"] <= 800 and gone["source"] == "none", (leaving, gone))
+    checks.expect("home-removal", "then MUN alone", gone is not None and gone["source"] == "none", gone)
+    # docs/shape.md: 0.5 s back to MUN; 0.3 s more for the frames between.
+    checks.duration("home-removal", "MUN in the 0.5 s the contract gives (0.8 s measured at most)",
+                    gone is not None and leaving is not None and gone["t"] - leaving["t"] <= 800, (leaving, gone))
 
     # Eject safely: the identity stays until the release is confirmed, then leaves.
     def eject(ok):
@@ -1218,7 +1376,11 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
 
         def answer(service, message):
             if message.get("type") == "release":
-                time.sleep(0.3)
+                # Confirmed only once the scene has looked (`asked`), as a
+                # card service takes its time; never if it does not look.
+                if not service.expect("asked", 30):
+                    return
+                time.sleep(0.2)
                 if ok:
                     cardd.push({"type": "card", "card": dict(rx, state="released", info=None)})
                     service.push({"type": "released", "ok": True, "slot": "c1", "serial": rx["serial"]})
@@ -1226,9 +1388,12 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
                     service.push({"type": "released", "ok": False, "slot": "c1", "serial": rx["serial"],
                                   "error": {"code": "card_busy", "message": "La tarjeta sigue en uso; no la retires"}})
         launchd = Service(shell.work / f"home-eject-{ok}-launch.sock", [[(0, {"type": "snapshot", "state": "idle"})]], answer)
-        out, phases, _ = run(f"home-eject-{'ok' if ok else 'busy'}", cardd, launchd,
-                             [{"at": 5500, "probe": "before"}, {"at": 5600, "call": "eject"}, {"at": 5700, "probe": "asked"},
-                              {"at": 8800, "probe": "later"}], end=9200)
+        steps = [{"when": {"phase": "present"}, "probe": "before"}, {"wait": 300, "call": "eject"}, {"wait": 100, "probe": "asked"}]
+        if ok:
+            out, phases, _ = run("home-eject-ok", cardd, launchd, steps + [{"when": {"phase": "leaving"}, "probe": "leaving"}],
+                                 end=1000, until={"phase": "none"})
+        else:
+            out, phases, _ = run("home-eject-busy", cardd, launchd, steps + [{"wait": 3000, "probe": "later"}], end=1000)
         return out, phases, launchd
 
     out, phases, launchd = eject(True)
@@ -1237,9 +1402,11 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
     checks.expect("home-eject-ok", "asked to eject, the identity stays until the release is confirmed",
                   asked is not None and asked["phase"] == "present" and any(m.get("type") == "release" for m in launchd.received),
                   (asked, launchd.received))
-    checks.expect("home-eject-ok", "confirmed: it leaves (release) with the package's out tide, 2.4 s",
-                  leaving is not None and leaving["exit"] == "release" and leaving["kind"] == "tide" and gone is not None
-                  and 1800 <= gone["t"] - leaving["t"] <= 3400, (leaving, gone))
+    checks.expect("home-eject-ok", "confirmed: it leaves (release) with the package's out tide, to MUN",
+                  leaving is not None and leaving["exit"] == "release" and leaving["kind"] == "tide" and gone is not None,
+                  (leaving, gone))
+    checks.duration("home-eject-ok", "the out tide takes the package's 2.4 s (1.8 to 3.4 s)",
+                    leaving is not None and gone is not None and 1800 <= gone["t"] - leaving["t"] <= 3400, (leaving, gone))
     sounded = [s["name"] for s in lines(out, "SYSSOUND")]
     checks.expect("home-eject-ok", "the release done sounds, and so does Shape leaving",
                   sounded.count("eject") == 1 and sounded.count("shape_exit") == 1 and "warning" not in sounded, sounded)
@@ -1255,9 +1422,9 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
     x, rx = card(SAMPLES / "sea")
     y, ry = card(SAMPLES / "paper")
     cardd, launchd = serve("home-change", [[(0, snapshot()), (0.6, {"type": "card", "card": rx}),
-                                            (5.2, {"type": "removed", "slot": "c1", "insertion": x}),
-                                            (5.3, {"type": "card", "card": ry})]])
-    out, phases, _ = run("home-change", cardd, launchd, [], end=10000)
+                                            ({"on": "phase:present", "after": 1.0}, {"type": "removed", "slot": "c1", "insertion": x}),
+                                            ({"wait": 0.1}, {"type": "card", "card": ry})]])
+    out, phases, _ = run("home-change", cardd, launchd, [], end=1000, until={"phase": "present", "insertion": y})
     left = [p for p in phases if p["phase"] in ("leaving", "none", "ready", "entering", "present")]
     second = [p for p in left if p["insertion"] == y and p["phase"] == "entering"]
     checks.expect("home-change", "A leaves (removal); B then comes in (arrival, its sweep)",
@@ -1267,8 +1434,9 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
     # The player's choices.
     x, rx = card(SAMPLES / "sea")
     cardd, launchd = serve("home-reduce-motion", [[(0, snapshot()), (0.6, {"type": "card", "card": rx})]])
-    out, phases, _ = run("home-reduce-motion", cardd, launchd, [{"at": 4000, "probe": "still-1"}, {"at": 5500, "probe": "still-2"}],
-                         settings="[display]\nreduce-motion=on\n", end=6000)
+    out, phases, _ = run("home-reduce-motion", cardd, launchd, [
+        {"when": {"phase": "present"}, "wait": 2500, "probe": "still-1"}, {"wait": 1500, "probe": "still-2"}],
+        settings="[display]\nreduce-motion=on\n", end=1000)
     entering = first(phases, phase="entering")
     still = [first(phases, label=f"still-{i}") for i in (1, 2)]
     checks.expect("home-reduce-motion", "Reduce motion: a fade instead of the tide, and a still world",
@@ -1277,8 +1445,8 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
 
     x, rx = card(SAMPLES / "sea")
     cardd, launchd = serve("home-colours", [[(0, snapshot()), (0.6, {"type": "card", "card": rx})]])
-    out, phases, _ = run("home-colours", cardd, launchd, [{"at": 5000, "probe": "after"}], settings="[shape]\nmode=colours\n",
-                         end=5500)
+    out, phases, _ = run("home-colours", cardd, launchd, [{"when": {"phase": "present"}, "wait": 500, "probe": "after"}],
+                         settings="[shape]\nmode=colours\n", end=1000)
     after = first(phases, label="after")
     checks.expect("home-colours", "Colours only: the identity comes in without a world",
                   after is not None and after["phase"] == "present" and not after["world"] and not after["worldDrawn"], after)
@@ -1290,7 +1458,7 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
 
     x, rx = card(broken)
     cardd, launchd = serve("home-broken", [[(0, snapshot()), (0.6, {"type": "card", "card": rx})]])
-    out, phases, _ = run("home-broken", cardd, launchd, [{"at": 5000, "probe": "after"}], end=5500)
+    out, phases, _ = run("home-broken", cardd, launchd, [{"when": {"phase": "present"}, "wait": 500, "probe": "after"}], end=1000)
     after = first(phases, label="after")
     checks.expect("home-broken", "a world that does not decode: the identity comes in, the palette over MUN's world",
                   after is not None and after["phase"] == "present" and after["worldFailed"] and not after["worldDrawn"], after)
@@ -1299,9 +1467,10 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
     x, rx = card(SAMPLES / "sea")
     cardd, launchd = serve("home-settings", [[(0, snapshot()), (0.6, {"type": "card", "card": rx})]])
     out, phases, grabs = run("home-settings", cardd, launchd, [
-        {"at": 5000, "call": "enter"}, {"at": 6200, "grab": "options"}, {"at": 6500, "call": "back"},
-        {"at": 6700, "set": {"mainIndex": 2}}, {"at": 6900, "call": "enter"}, {"at": 8200, "grab": "settings"},
-        {"at": 8400, "probe": "settings"}], end=8800)
+        {"when": {"phase": "present"}, "call": "enter"}, {"when": {"level": 2}, "wait": 1200, "grab": "options"},
+        {"wait": 300, "call": "back"}, {"when": {"level": 0}, "wait": 200, "set": {"mainIndex": 2}},
+        {"wait": 200, "call": "enter"}, {"when": {"level": 1}, "wait": 1300, "grab": "settings"},
+        {"wait": 200, "probe": "settings"}], end=1000)
     surfaces_hold("home-settings", grabs.get("options"), "options focused")
     surfaces_hold("home-settings", grabs.get("settings"), "Settings over the scrimmed world")
     settings = first(phases, label="settings")
@@ -1313,14 +1482,12 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
 
     # In Spanish, the longer language: every section with its options
     # focused, no text on screen cut short.
-    steps = [{"at": 2500, "set": {"mainIndex": 2}}, {"at": 2700, "call": "enter"}]
+    steps = [{"at": 1500, "set": {"mainIndex": 2}}, {"wait": 200, "call": "enter"}]
     for i in range(6):
-        at = 3500 + i * 1600
-        steps += [{"at": at, "set": {"settingsIndex": i}}, {"at": at + 100, "call": "enter"},
-                  {"at": at + 1200, "probe": f"section-{i}"}, {"at": at + 1300, "call": "back"}]
+        steps += [{"when": {"level": 1}, "wait": 600, "set": {"settingsIndex": i}}, {"wait": 100, "call": "enter"},
+                  {"when": {"level": 2}, "wait": 1100, "probe": f"section-{i}"}, {"wait": 100, "call": "back"}]
     cardd, launchd = serve("home-settings-es", [[(0, snapshot())]])
-    out, phases, _ = run("home-settings-es", cardd, launchd, steps, settings="[interface]\nlanguage=es\n",
-                         end=3500 + 6 * 1600 + 400)
+    out, phases, _ = run("home-settings-es", cardd, launchd, steps, settings="[interface]\nlanguage=es\n", end=1000)
     sections = [p for p in phases if p["label"].startswith("section-")]
     checks.expect("home-settings-es", "in Spanish, every section's options show whole, nothing cut short",
                   len(sections) == 6 and all(p["level"] == 2 and not p["cut"] for p in sections),
@@ -1338,18 +1505,19 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
         x, rx = card(package)
         preparing = dict(rx, shape={"state": "preparing", "insertion": x})
         cardd, launchd = serve(name, [[(0, snapshot()), (0.3, {"type": "card", "card": preparing}),
-                                       (1.6, {"type": "card", "card": rx})]])
+                                       ({"on": "focused", "after": 0.3}, {"type": "card", "card": rx})]])
         grabs_asked = [{"name": "first", "first": "shaped"}] + [{"name": g, "phase": "entering", "at": a} for g, a in grab_points] \
             + [{"name": "present", "phase": "present"}]
-        out, phases, grabs = run(name, cardd, launchd, [{"at": 1100, "call": "enter"}, {"at": 1300, "probe": "focused"}],
-                                 grabs=grabs_asked, end=7500, trace=True)
+        out, phases, grabs = run(name, cardd, launchd, [{"when": {"card": "valid"}, "wait": 300, "call": "enter"},
+                                                        {"when": {"level": 2}, "probe": "focused"}],
+                                 grabs=grabs_asked, end=1000, trace=True, until={"phase": "present"})
         focused, entering = first(phases, label="focused"), first(phases, phase="entering")
         checks.expect(name, "the options focused before the package was ready; then it comes in",
                       focused is not None and focused["level"] == 2 and focused["phase"] == "none"
                       and entering is not None and entering["level"] == 2, (focused, entering))
         whole_when_dressed(name, out)
         for g in ["first"] + [g for g, _ in grab_points] + ["present"]:
-            surfaces_hold(name, grabs.get(g), g, dressed_only=True)
+            surfaces_hold(name, grabs.get(g), g, dressed_only=True, sample=g not in ("first", "present"))
 
     # Leaving with the options focused: Eject safely, confirmed.
     x, rx = card(SAMPLES / "sea")
@@ -1362,9 +1530,10 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
             service.push({"type": "released", "ok": True, "slot": "c1", "serial": rx["serial"]})
     launchd = Service(shell.work / "home-leave-options-launch.sock", [[(0, {"type": "snapshot", "state": "idle"})]], release)
     out, phases, grabs = run("home-leave-options", cardd, launchd,
-                             [{"at": 5000, "call": "enter"}, {"at": 5400, "probe": "focused"}, {"at": 5600, "call": "eject"}],
+                             [{"when": {"phase": "present"}, "call": "enter"}, {"when": {"level": 2}, "probe": "focused"},
+                              {"wait": 200, "call": "eject"}, {"when": {"phase": "leaving"}, "probe": "leaving"}],
                              grabs=[{"name": f"leaving-{int(a * 100)}", "phase": "leaving", "at": a} for a in (0.8, 0.5, 0.2)],
-                             end=9500, trace=True)
+                             end=1000, trace=True, until={"phase": "none"})
     leaving = first(phases, phase="leaving")
     checks.expect("home-leave-options", "Eject safely from the options: it leaves (release)",
                   (first(phases, label="focused") or {}).get("level") == 2 and leaving is not None
@@ -1373,18 +1542,20 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
     whole_when_dressed("home-leave-options", out)
     eases_to_mun("home-leave-options", out)
     for a in (80, 50, 20):
-        surfaces_hold("home-leave-options", grabs.get(f"leaving-{a}"), f"leaving-{a}", dressed_only=True)
+        surfaces_hold("home-leave-options", grabs.get(f"leaving-{a}"), f"leaving-{a}", dressed_only=True, sample=True)
 
     # A changed choice with the options focused: colours only, off, full again.
     x, rx = card(SAMPLES / "sea")
     cardd, launchd = serve("home-mode-options", [[(0, snapshot()), (0.6, {"type": "card", "card": rx})]])
     out, phases, grabs = run("home-mode-options", cardd, launchd, [
-        {"at": 5000, "call": "enter"}, {"at": 5600, "settings": {"shapeMode": "colours"}}, {"at": 7600, "probe": "colours"},
-        {"at": 7700, "settings": {"shapeMode": "off"}}, {"at": 9200, "probe": "off"},
-        {"at": 9300, "settings": {"shapeMode": "full"}}, {"at": 11300, "probe": "full"}],
-        grabs=[{"name": "leaving", "phase": "leaving", "at": 0.5, "after": 5600},
-               {"name": "colours-in", "phase": "entering", "at": 0.3, "after": 5600},
-               {"name": "full-in", "phase": "entering", "at": 0.5, "after": 9300}], end=11800, trace=True)
+        {"when": {"phase": "present"}, "call": "enter"},
+        {"when": {"level": 2}, "wait": 400, "settings": {"shapeMode": "colours"}, "mark": "colours"},
+        {"when": {"phase": "present", "world": False}, "wait": 400, "probe": "colours"},
+        {"settings": {"shapeMode": "off"}}, {"when": {"source": "none"}, "wait": 400, "probe": "off"},
+        {"settings": {"shapeMode": "full"}, "mark": "full"}, {"when": {"phase": "present", "world": True}, "wait": 400, "probe": "full"}],
+        grabs=[{"name": "leaving", "phase": "leaving", "at": 0.5, "after": "colours"},
+               {"name": "colours-in", "phase": "entering", "at": 0.3, "after": "colours"},
+               {"name": "full-in", "phase": "entering", "at": 0.5, "after": "full"}], end=1000, trace=True)
     probes = {k: first(phases, label=k) for k in ("colours", "off", "full")}
     checks.expect("home-mode-options", "colours only, off and full again, the options focused throughout",
                   all(probes.values()) and [probes[k]["level"] for k in probes] == [2, 2, 2]
@@ -1394,17 +1565,19 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
     whole_when_dressed("home-mode-options", out)
     eases_to_mun("home-mode-options", out)
     for g in ("leaving", "colours-in", "full-in"):
-        surfaces_hold("home-mode-options", grabs.get(g), g, dressed_only=True)
+        surfaces_hold("home-mode-options", grabs.get(g), g, dressed_only=True, sample=True)
 
     # Another card with the options focused: the first leaves, the second comes.
     x, rx = card(SAMPLES / "sea")
     y, ry = card(SAMPLES / "paper")
     cardd, launchd = serve("home-change-options", [[(0, snapshot()), (0.6, {"type": "card", "card": rx}),
-                                                    (5.6, {"type": "removed", "slot": "c1", "insertion": x}),
-                                                    (5.7, {"type": "card", "card": ry})]])
-    out, phases, grabs = run("home-change-options", cardd, launchd, [{"at": 5000, "call": "enter"}, {"at": 5400, "probe": "focused"}],
-                             grabs=[{"name": f"b-{int(a * 100)}", "phase": "entering", "at": a, "after": 5700} for a in (0.3, 0.6)]
-                             + [{"name": "b-present", "phase": "present", "after": 7000}], end=9500, trace=True)
+                                                    ({"on": "focused", "after": 0.2}, {"type": "removed", "slot": "c1", "insertion": x}),
+                                                    ({"wait": 0.1}, {"type": "card", "card": ry})]])
+    out, phases, grabs = run("home-change-options", cardd, launchd,
+                             [{"when": {"phase": "present"}, "call": "enter"}, {"when": {"level": 2}, "probe": "focused"}],
+                             grabs=[{"name": f"b-{int(a * 100)}", "phase": "entering", "at": a, "insertion": y} for a in (0.3, 0.6)]
+                             + [{"name": "b-present", "phase": "present", "insertion": y}], end=1000, trace=True,
+                             until={"phase": "present", "insertion": y})
     second = [p for p in phases if p["insertion"] == y and p["phase"] == "entering"]
     checks.expect("home-change-options", "from the options: A leaves, B comes in",
                   (first(phases, label="focused") or {}).get("level") == 2 and bool(second),
@@ -1412,26 +1585,30 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
     whole_when_dressed("home-change-options", out)
     eases_to_mun("home-change-options", out)
     for g in ("b-30", "b-60", "b-present"):
-        surfaces_hold("home-change-options", grabs.get(g), g, dressed_only=True)
+        surfaces_hold("home-change-options", grabs.get(g), g, dressed_only=True, sample=g != "b-present")
 
     # An arrival waits for Home wholly on screen: back from Settings (its arc
     # fading in), a dialog closed (its layer fading out).
     x, rx = card(SAMPLES / "sea")
-    cardd, launchd = serve("home-from-settings", [[(0, snapshot()), (1.5, {"type": "card", "card": rx})]])
+    cardd, launchd = serve("home-from-settings", [[(0, snapshot()), ({"on": "in-settings", "after": 0.5},
+                                                                      {"type": "card", "card": rx})]])
     out, phases, _ = run("home-from-settings", cardd, launchd, [
-        {"at": 800, "set": {"mainIndex": 2}}, {"at": 900, "call": "enter"}, {"at": 3000, "call": "back"}],
-        end=7000, trace=True)
-    entering, dressed = first(phases, phase="entering"), first_dressed(out)
+        {"at": 800, "set": {"mainIndex": 2}}, {"wait": 100, "call": "enter"}, {"when": {"level": 1}, "probe": "in-settings"},
+        {"wait": 2000, "call": "back", "probe": "back"}], end=1000, trace=True, until={"phase": "present"})
+    entering, dressed, back = first(phases, phase="entering"), first_dressed(out), first(phases, label="back")
     checks.expect("home-from-settings", "inserted in Settings: it comes in once Home's arc is whole (0.45 s after)",
-                  entering is not None and entering["t"] >= 3400 and entering["entry"] == "arrival", entering)
+                  entering is not None and back is not None and entering["t"] >= back["t"] + 400
+                  and entering["entry"] == "arrival", (back, entering))
     whole_when_dressed("home-from-settings", out)
     x, rx = card(SAMPLES / "sea")
     cardd, launchd = serve("home-dialog-closed", [[(0, snapshot()), (0.6, {"type": "card", "card": rx})]], [[(0, result)]])
-    out, phases, _ = run("home-dialog-closed", cardd, launchd, [{"at": 4000, "call": "dismissResult"}], end=7500, trace=True)
-    entering, dressed = first(phases, phase="entering"), first_dressed(out)
+    out, phases, _ = run("home-dialog-closed", cardd, launchd,
+                         [{"when": {"phase": "ready"}, "wait": 1000, "call": "dismissResult", "probe": "dismissed"}],
+                         end=1000, trace=True, until={"phase": "present"})
+    entering, dressed, dismissed = first(phases, phase="entering"), first_dressed(out), first(phases, label="dismissed")
     checks.expect("home-dialog-closed", "the dialog closed: it comes in once its layer has faded (0.5 s after)",
-                  entering is not None and entering["t"] >= 4400 and dressed is not None and not dressed["modalShown"],
-                  (entering, dressed))
+                  entering is not None and dismissed is not None and entering["t"] >= dismissed["t"] + 400
+                  and dressed is not None and not dressed["modalShown"], (dismissed, entering, dressed))
     whole_when_dressed("home-dialog-closed", out)
 
     # Idle: once dimmed, the first key only brings the interface back (and
@@ -1439,11 +1616,11 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
     cardd, launchd = serve("home-idle-dim", [[(0, snapshot())]])
     down = 0x01000015  # Qt::Key_Down
     out, phases, _ = run("home-idle-dim", cardd, launchd, [
-        {"at": 1500, "probe": "awake"}, {"at": 1600, "set": {"dimmed": True}}, {"at": 1700, "probe": "dimmed"},
-        {"at": 1800, "call": "key", "args": [down, False]}, {"at": 1900, "probe": "woken"},
-        {"at": 2000, "call": "key", "args": [down, True]}, {"at": 2100, "probe": "held"},
-        {"at": 2150, "call": "keyReleased", "args": [down]},
-        {"at": 2200, "call": "key", "args": [down, False]}, {"at": 2300, "probe": "moved"}], end=3000)
+        {"at": 1500, "probe": "awake"}, {"wait": 100, "set": {"dimmed": True}}, {"wait": 100, "probe": "dimmed"},
+        {"wait": 100, "call": "key", "args": [down, False]}, {"wait": 100, "probe": "woken"},
+        {"wait": 100, "call": "key", "args": [down, True]}, {"wait": 100, "probe": "held"},
+        {"wait": 50, "call": "keyReleased", "args": [down]},
+        {"wait": 50, "call": "key", "args": [down, False]}, {"wait": 100, "probe": "moved"}], end=3000)
     at = {p["label"]: p for p in phases if p["label"] in ("awake", "dimmed", "woken", "held", "moved")}
     checks.expect("home-idle-dim", "dimmed, the first key only undims: the focus stays",
                   len(at) == 5 and at["dimmed"]["dimmed"] and not at["woken"]["dimmed"]
@@ -1457,11 +1634,11 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
     cardd, launchd = serve("home-idle-held", [[(0, snapshot())]])
     enter = 0x01000004  # Qt::Key_Return
     out, phases, _ = run("home-idle-held", cardd, launchd, [
-        {"at": 1500, "set": {"mainIndex": 1}}, {"at": 1600, "set": {"dimmed": True}},
-        {"at": 1700, "call": "key", "args": [enter, False]}, {"at": 1800, "call": "key", "args": [down, False]},
-        {"at": 1900, "probe": "moved"}, {"at": 2000, "call": "key", "args": [enter, True]}, {"at": 2600, "probe": "repeat"},
-        {"at": 2700, "call": "keyReleased", "args": [enter]}, {"at": 2800, "call": "key", "args": [enter, False]},
-        {"at": 3400, "probe": "fresh"}], end=4000)
+        {"at": 1500, "set": {"mainIndex": 1}}, {"wait": 100, "set": {"dimmed": True}},
+        {"wait": 100, "call": "key", "args": [enter, False]}, {"wait": 100, "call": "key", "args": [down, False]},
+        {"wait": 100, "probe": "moved"}, {"wait": 100, "call": "key", "args": [enter, True]}, {"wait": 600, "probe": "repeat"},
+        {"wait": 100, "call": "keyReleased", "args": [enter]}, {"wait": 100, "call": "key", "args": [enter, False]},
+        {"wait": 600, "probe": "fresh"}], end=4000)
     at = {p["label"]: p for p in phases if p["label"] in ("moved", "repeat", "fresh")}
     checks.expect("home-idle-held", "another key between: the waking key's repeat still does nothing",
                   len(at) == 3 and at["moved"]["mainIndex"] == 2 and at["repeat"]["level"] == at["moved"]["level"]
@@ -1497,10 +1674,11 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
             ("home-object-world", sample_copy(packages, "home-object-world", "sea",
                                               replace={"card/window.png": solid_window(violet)}), violet)):
         x, rx = card(package)
-        cardd, launchd = serve(name, [[(0, snapshot()), (2.0, {"type": "card", "card": rx})]])
-        out, phases, grabs = run(name, cardd, launchd, [{"at": 1500, "grab": "before"}, {"at": 6000, "probe": "after"},
-                                                        {"at": 6100, "grab": "object"}],
-                                 settings="[display]\nreduce-motion=on\n", end=7600)
+        cardd, launchd = serve(name, [[(0, snapshot()), ({"on": "before", "after": 0.5}, {"type": "card", "card": rx})]])
+        out, phases, grabs = run(name, cardd, launchd, [{"at": 1500, "probe": "before", "grab": "before"},
+                                                        {"when": {"phase": "present"}, "wait": 1500, "probe": "after"},
+                                                        {"wait": 100, "grab": "object"}],
+                                 settings="[display]\nreduce-motion=on\n", end=1000)
         before, after, shown = grabs.get("before"), first(phases, label="after"), grabs.get("object")
         objects = shown["regions"]["cards"] if shown else []
         seen = (window_seen(before, rgb), window_seen(shown, rgb))
@@ -1522,9 +1700,10 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
     # A window that does not decode: the identity comes, the object stays MUN's.
     broken_window = sample_copy(packages, "home-object-broken", "sea", replace={"card/window.png": short_png()})
     x, rx = card(broken_window)
-    cardd, launchd = serve("home-object-broken", [[(0, snapshot()), (2.0, {"type": "card", "card": rx})]])
-    out, phases, grabs = run("home-object-broken", cardd, launchd, [{"at": 6000, "probe": "after"}, {"at": 6100, "grab": "object"}],
-                             settings="[display]\nreduce-motion=on\n", end=7600)
+    cardd, launchd = serve("home-object-broken", [[(0, snapshot()), (0.6, {"type": "card", "card": rx})]])
+    out, phases, grabs = run("home-object-broken", cardd, launchd, [{"when": {"phase": "present"}, "wait": 1500, "probe": "after"},
+                                                                    {"wait": 100, "grab": "object"}],
+                             settings="[display]\nreduce-motion=on\n", end=1000)
     after, shown = first(phases, label="after"), grabs.get("object")
     objects = shown["regions"]["cards"] if shown else []
     applied = [line for line in out.splitlines() if "shape for insertion" in line]
@@ -1673,7 +1852,8 @@ def paths_cases(shell: Shell, checks: Checks, report: dict):
     native = shell.platform == "eglfs"
     with contextlib.nullcontext(False) if native else Xvfb() as server:
         if server is None:
-            checks.skip("paths", "no Xvfb to give the OpenGL path a display; only the software path ran elsewhere")
+            checks.expect("paths", "Xvfb gives the OpenGL path a display (it is required)", False,
+                          "Xvfb is not installed: the OpenGL path was not drawn")
             return
         route_args = {"software": {"software": True}, "opengl": {"display": server.display} if server else {}}
         frames = {}
@@ -1812,6 +1992,9 @@ def main(argv=None) -> int:
     parser.add_argument("--only", choices=("card", "cue", "surfaces", "presence", "world", "memory", "boot", "home", "settings",
                                            "paths"),
                         action="append")
+    parser.add_argument("--timing", choices=("check", "record"), default="check",
+                        help="judge how long things take (check, the default, on a steady machine), or measure and "
+                             "record them without judging (record: a busy builder); what happens is always judged")
     args = parser.parse_args(argv)
     binary = args.binary.resolve()
     if not os.access(binary, os.X_OK):
@@ -1826,6 +2009,7 @@ def main(argv=None) -> int:
     exports.mkdir()
     packages.mkdir()
     shell, checks, report = Shell(binary, work, args.platform), Checks(), {}
+    checks.timing = args.timing
     only = set(args.only or ("card", "cue", "surfaces", "presence", "world", "memory", "boot", "home", "settings", "paths"))
     try:
         if "card" in only:
@@ -1850,38 +2034,44 @@ def main(argv=None) -> int:
             print("MUN Shell behaviour: the start-up, as a boot plays it")
             boot_cases(shell, checks)
         if "home" in only:
-            print("MUN Shell behaviour: Home, as a player meets it (the previous design)")
+            # The same moments three ways, each required: the previous design
+            # on the software renderer, kept as the reference it is compared
+            # with; the orbital design on the software renderer, as the
+            # virtual console draws it; and the orbital design through
+            # OpenGL, as a console with a GPU draws it (an X server of its
+            # own here, a board's display and GPU there). A way that cannot
+            # run fails: it does not count as passed.
+            print("MUN Shell behaviour: Home, as a player meets it (the previous design, software renderer)")
             home_cases(shell, checks, exports, packages, report)
-            # The same moments in the orbital design, drawn as a console
-            # draws it: through OpenGL, on an X server of its own here, on a
-            # board's own display and GPU there. Its cases and work in
-            # "orbital/".
-            print("MUN Shell behaviour: Home, as a player meets it (the orbital design)")
-            orbital = work / "orbital"
-            (orbital / "exports").mkdir(parents=True)
-            (orbital / "packages").mkdir()
-            checks.tag = "orbital/"
-            try:
-                if args.platform == "eglfs":
-                    home_cases(Shell(binary, orbital, args.platform), checks, orbital / "exports", orbital / "packages",
-                               report.setdefault("orbital", {}), design="orbital")
-                else:
-                    with Xvfb() as server:
-                        if server is None:
-                            checks.skip("home", "Xvfb is not installed: the orbital design, drawn through OpenGL, "
-                                                "was not run")
-                        else:
-                            home_cases(Shell(binary, orbital, args.platform), checks, orbital / "exports",
-                                       orbital / "packages", report.setdefault("orbital", {}), design="orbital",
-                                       display=server.display)
-            finally:
-                checks.tag = ""
+            for tag, api, title in (("orbital-sw", "software", "the orbital design, software renderer"),
+                                    ("orbital-gl", "opengl", "the orbital design, OpenGL")):
+                print(f"MUN Shell behaviour: Home, as a player meets it ({title})")
+                folder = work / tag
+                (folder / "exports").mkdir(parents=True)
+                (folder / "packages").mkdir()
+                checks.tag = tag + "/"
+                try:
+                    if api == "software" or args.platform == "eglfs":
+                        home_cases(Shell(binary, folder, args.platform), checks, folder / "exports", folder / "packages",
+                                   report.setdefault(tag, {}), design="orbital", api=api)
+                    else:
+                        with Xvfb() as server:
+                            if server is None:
+                                checks.expect("home", "Xvfb gives the OpenGL way a display (it is required)", False,
+                                              "Xvfb is not installed: Home in the orbital design through OpenGL was not run")
+                            else:
+                                home_cases(Shell(binary, folder, args.platform), checks, folder / "exports",
+                                           folder / "packages", report.setdefault(tag, {}), design="orbital", api=api,
+                                           display=server.display)
+                finally:
+                    checks.tag = ""
         if "settings" in only:
             print("MUN Shell behaviour: the player's settings file")
             settings_cases(shell, checks)
         if "paths" in only:
             print("MUN Shell behaviour: the software and OpenGL drawing paths")
             paths_cases(shell, checks, report)
+        report["durations"] = {"timing": checks.timing, "recorded": checks.timings}
         (work / "report.json").write_text(json.dumps(report, indent=1, sort_keys=True) + "\n", encoding="utf-8")
         for folder in checks.failing:
             log = work / folder / "output.log"
@@ -1891,8 +2081,11 @@ def main(argv=None) -> int:
     finally:
         if not args.work:
             shutil.rmtree(work, ignore_errors=True)
+    outside = sum(not t["within"] for t in checks.timings)
     print(f"MUN Shell behaviour: {checks.passed} passed, {checks.failed} failed"
-          + (f", {checks.skipped} skipped" if checks.skipped else ""))
+          + (f", {checks.skipped} skipped" if checks.skipped else "")
+          + (f"; {len(checks.timings)} durations recorded, {outside} outside their bounds (not judged here)"
+             if checks.timing == "record" else ""))
     return 1 if checks.failed else 0
 
 

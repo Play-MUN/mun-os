@@ -293,6 +293,23 @@ class ShellTests(unittest.TestCase):
         unit = (self.SHELL / "deploy" / "mun-shell.service").read_text()
         self.assertRegex(unit, r"(?m)^SupplementaryGroups=.*\baudio\b", "the shell may open the sound device")
 
+    def test_turning_off_waits_for_its_sound(self):
+        # Turning off (Main.qml) plays `shutdown` and goes down when the
+        # shutdownSound timer fires, counted from when the sound is asked
+        # for: the sound is over by then, and the README says the timer's
+        # figure. A new sound, or a new wait, changes all three together.
+        data = (self.SHELL / "sounds" / "shutdown.wav").read_bytes()
+        at = 12
+        while data[at:at + 4] != b"data":
+            at += 8 + int.from_bytes(data[at + 4:at + 8], "little")
+        seconds = int.from_bytes(data[at + 4:at + 8], "little") / (48000 * 4)
+        main = (self.SHELL / "qml" / "Main.qml").read_text()
+        wait = int(re.search(r"id: shutdownSound\s+interval: (\d+)", main).group(1)) / 1000
+        self.assertLessEqual(seconds, wait, "the console goes down after its sound, not during it")
+        self.assertGreater(seconds, wait - 0.5, "and not long after it")
+        readme = (self.SHELL / "README.md").read_text()
+        self.assertIn(f"it goes down once the sound has played, {wait:g} s", " ".join(readme.split()))
+
     def test_the_lab_display_describes_the_shells_three_modes(self):
         # The virtual display's EDID (os/builder/lab_edid.py): what the
         # initrd carries is the generator's output, a valid EDID 1.3 block

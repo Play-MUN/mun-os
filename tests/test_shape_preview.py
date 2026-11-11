@@ -319,6 +319,59 @@ class PreviewTests(unittest.TestCase):
         self.assertEqual(console.visible(),
                          [("attach", "pv0-shape"), ("detach", "pv0-shape", False), ("attach", "pv1-shape")])
 
+    def watch_with_a_change_saved_while_the_first_card_is_made(self, console, preview, wanted):
+        """Runs the watch, saving a change to the folder just after the first
+        card is made from it and before it is in the console: the moment a
+        player may save while the preview prepares a card. Returns, for each
+        card made, whether the change was in the folder then."""
+        made, make_card = [], preview.make_card
+
+        def made_then_saved(name):
+            made.append('"seconds": 2.0' in (self.folder / "shape.json").read_text())
+            summary = make_card(name)
+            if len(made) == 1:
+                document = (self.folder / "shape.json").read_text().replace('"seconds": 3.2', '"seconds": 2.0')
+                (self.folder / "shape.json").write_text(document)
+            return summary
+        stop = threading.Event()
+        with contextlib.ExitStack() as stack:
+            for item in console.patches():
+                stack.enter_context(item)
+            stack.enter_context(patch.object(preview, "make_card", made_then_saved))
+            stack.enter_context(patch.object(shapepreview, "POLL_SECONDS", 0.05))
+            stack.enter_context(patch.object(shapepreview, "SETTLE_SECONDS", 0.1))
+            stack.enter_context(patch.object(shapepreview, "SHELL_GRACE_SECONDS", 0))
+            worker = threading.Thread(target=preview.run, args=(stop, True, True))
+            worker.start()
+            deadline = time.monotonic() + 30
+            while console.visible() != wanted and time.monotonic() < deadline:
+                time.sleep(0.05)
+            stop.set()
+            worker.join(10)
+        return made
+
+    def test_a_change_saved_while_the_first_card_is_made_is_taken(self):
+        # The folder's state is taken before the card is made: a change saved
+        # meanwhile is a change, inserted once the folder is still.
+        console = Console()
+        wanted = [("attach", "pv0-shape"), ("detach", "pv0-shape", False), ("attach", "pv1-shape")]
+        made = self.watch_with_a_change_saved_while_the_first_card_is_made(console, self.preview(), wanted)
+        self.assertEqual(console.visible(), wanted)
+        self.assertEqual(made, [False, True], "the second card is made with the change")
+
+    def test_a_change_saved_while_its_card_already_in_is_replaced_is_taken(self):
+        # Started with a card of its own already in, the preview replaces it
+        # with the folder as it is; a change saved while that card is made is
+        # taken after it.
+        console = Console()
+        preview = self.preview()
+        self.made_and_inserted(preview, console, "pv0-shape")
+        wanted = [("detach", "pv0-shape", False), ("attach", "pv1-shape"), ("detach", "pv1-shape", False),
+                  ("attach", "pv0-shape")]
+        made = self.watch_with_a_change_saved_while_the_first_card_is_made(console, preview, wanted)
+        self.assertEqual(console.visible(), wanted)
+        self.assertEqual(made, [False, True], "the next card is made with the change")
+
     def test_a_console_that_stops_answering_ends_the_watch_without_a_trace(self):
         # Turned off from its menu, the console stops answering through
         # qemu-ga while its QEMU still runs, then QEMU ends.

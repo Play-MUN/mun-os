@@ -179,6 +179,11 @@ are only read. The other sample is `examples/shape/paper`.
 Without e2fsprogs, the release's own dressed card shows the same:
 `./mun play --card collect-sea` (it is installed as
 `.local/gamecards/collect-sea.img` beside MUN Collect, with saves of its own).
+A release whose image plays MUN Shape's motion, an experimental draft
+([MUN Shape motion](shape-motion.md#trying-it)), also brings
+`collect-reef`, MUN Collect dressed in Reef, its example:
+`./mun play --card collect-reef`. Installing a release never replaces a
+card you already have.
 
 *Settings* › *Appearance and accessibility* › *MUN Shape* (Full, Colours
 only, Off) and *Reduce motion* change how much of it you see.

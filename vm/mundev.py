@@ -692,14 +692,20 @@ def shape_of(build: Path) -> str:
 # third-party game (from a recipe, `--recipe`) is not bundled, whatever that
 # game's terms.
 OWN_GAMES = {"mun-collect", "mun-gl-probe"}
-# The cards a bundle carries, made from the build's own example game. The
-# third is MUN Collect dressed in the sea sample, under a name of its own, so
-# a player sees MUN Shape without the card tools (which need e2fsprogs).
+# The cards a bundle carries, made from the build's own example game. Two are
+# MUN Collect dressed in a MUN Shape package, each under a name of its own,
+# so a player sees MUN Shape without the card tools (which need e2fsprogs):
+# collect-sea in the sea sample (mun-shape/1), collect-reef in Reef, the
+# example with motion (mun-shape/1.1, a draft; a console without the motion
+# player shows its v1 look). Installing a bundle never replaces a card that
+# exists (vm/bundle.py): it may hold saves.
 BUNDLED_CARDS = {
     "demo": ("MUN Test Card", []),
     "collect": ("MUN Collect", ["--variant", "game", "--game", "{games}/mun-collect/mun-collect"]),
     "collect-sea": ("MUN Collect", ["--variant", "game", "--game", "{games}/mun-collect/mun-collect",
                                     "--shape", "{repo}/examples/shape/sea"]),
+    "collect-reef": ("MUN Collect", ["--variant", "game", "--game", "{games}/mun-collect/mun-collect",
+                                     "--shape", "{repo}/examples/shape/reef"]),
 }
 
 
@@ -887,6 +893,29 @@ def screen_drawn(guest: str) -> bool:
     return any(value > 24 for value in pixels[::997])
 
 
+# What the shell says of a card's MUN Shape motion in this boot's journal: the
+# player's line once its images are decoded, or why the package's v1 look is
+# shown instead (services/mun-shell/src/motionscene.cpp).
+MOTION_SAID = ("journalctl -u mun-shell -b --no-pager -o cat | "
+               "grep -E 'mun-shell: motion: (backend |.*v1 look instead)' | tail -1")
+
+
+def shell_plays_motion(timeout: float) -> str:
+    """Wait up to `timeout` seconds for the selected guest's shell to say it
+    plays the inserted card's motion; what it said of it (backend, look,
+    images, memory). A LabError if it shows the package's v1 look instead, or
+    says nothing of the motion in time."""
+    deadline = time.monotonic() + timeout
+    while True:
+        said = vm.guest_command(MOTION_SAID, timeout=60).stdout.strip()
+        if said or time.monotonic() >= deadline:
+            break
+        time.sleep(3)
+    if "motion: backend " not in said:
+        raise vm.LabError(f"the shell does not play the card's motion: {said or 'it said nothing of it'}")
+    return said.split("motion: ", 1)[-1]
+
+
 def cmd_smoke(args: argparse.Namespace) -> int:
     """Boot a build (a bundle installed first, if given) and play its MUN
     Collect card: start, card, game, exit, clean power-off. The check each
@@ -935,6 +964,10 @@ def cmd_smoke(args: argparse.Namespace) -> int:
         if vm.main(["--instance", guest, "card-attach", card]) != 0:
             raise vm.LabError(f"card {card} could not be inserted")
         step("card inserted")
+        if args.motion:
+            # A card dressed in a package with motion (collect-reef).
+            report["motion"] = shell_plays_motion(args.card_timeout)
+            step("motion drawn", report["motion"])
         launch = vm.guest_command(GUEST_LAUNCH.replace("SECONDS", str(args.card_timeout))
                                   .replace("SERIAL", vm.card_serial(card)), timeout=args.card_timeout + 60)
         if launch.returncode != 0:
@@ -1030,6 +1063,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--bundle", help="install this bundle first (address as for ./mun get)")
     p.add_argument("--guest", default="smoke", help="guest name (default smoke)")
     p.add_argument("--card", default="collect", help="game card to play (default collect)")
+    p.add_argument("--motion", action="store_true",
+                   help="the card's MUN Shape has motion (collect-reef): the shell must say it plays it")
     p.add_argument("--wait", type=int, default=1500, help="seconds to wait for the guest (emulated hosts are slow)")
     p.add_argument("--card-timeout", type=int, default=240, help="seconds for the card and for the game's end")
     p.add_argument("--play", type=int, default=15, help="seconds the game runs before Esc")

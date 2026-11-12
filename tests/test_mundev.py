@@ -434,5 +434,36 @@ class LicenceTests(unittest.TestCase):
             self.assertIn(f'"$MUN/{name}" "$DESTDIR/usr/share/doc/mun-os/{name}"', image)
 
 
+class SmokeMotionTests(unittest.TestCase):
+    """`./mun dev smoke --motion`: the shell's own words decide whether it plays
+    the inserted card's motion (lines as services/mun-shell/src/motionscene.cpp
+    writes them)."""
+
+    def said(self, *outputs, timeout=30):
+        answers = iter(outputs)
+        with patch.object(vm, "guest_command",
+                          side_effect=lambda *a, **k: subprocess.CompletedProcess(a, 0, next(answers), "")), \
+                patch.object(mundev.time, "sleep"):
+            return mundev.shell_plays_motion(timeout)
+
+    def test_the_player_ready_passes_with_what_it_said(self):
+        line = ("mun-shell: motion: backend graph, look 640x360 (whole pixels), 32 images, 20.8 MiB decoded, "
+                "20 frames a second\n")
+        self.assertEqual(self.said("", "", line), line.strip().split("motion: ", 1)[1],
+                         "waited for the line while the images were decoded")
+
+    def test_the_v1_look_instead_fails_saying_why(self):
+        line = "mun-shell: motion: over its budget; nothing of it is drawn, the package's v1 look instead\n"
+        with self.assertRaises(vm.LabError) as failed:
+            self.said(line)
+        self.assertIn("over its budget", str(failed.exception))
+
+    def test_nothing_said_in_time_fails(self):
+        with self.assertRaises(vm.LabError) as failed:
+            self.said("", timeout=0)
+        self.assertIn("said nothing", str(failed.exception))
+        self.assertEqual(mundev.MOTION_SAID.count("-u mun-shell -b"), 1, "this boot's shell only")
+
+
 if __name__ == "__main__":
     unittest.main()

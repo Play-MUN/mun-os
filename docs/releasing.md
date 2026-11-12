@@ -73,7 +73,8 @@ measurement, and the run is repeated on a quiet one.
 `.local/mun/bundles/dev2/` then holds the files a release carries: the
 image, `BUILD-INFO.json`, the Game Cards (`card-collect.img.xz`,
 `card-collect-sea.img.xz`, MUN Collect dressed in the `sea` MUN Shape
-sample, and `card-demo.img.xz`), `LICENSE`, `NOTICE`, `NAME-AND-LOGO.txt`,
+sample, `card-collect-reef.img.xz`, dressed in Reef, the example of MUN
+Shape's motion, and `card-demo.img.xz`), `LICENSE`, `NOTICE`, `NAME-AND-LOGO.txt`,
 the typefaces' licences and `release.json`, which lists all of them with
 their sizes and SHA-256.
 
@@ -110,9 +111,13 @@ bundle="$PWD/.local/mun/bundles/dev2"
 fresh="$(mktemp -d)"
 git archive <commit> | tar -x -C "$fresh"
 (cd "$fresh" && ./mun dev smoke --bundle "$bundle")
+(cd "$fresh" && ./mun dev smoke --bundle "$bundle" --guest smoke-reef --card collect-reef --motion)
 ```
 
 The console starts, plays MUN Collect, gives the card back and powers off.
+The second run, in a guest of its own with the card dressed in Reef (the
+bundle is installed already), also requires the shell to say it plays the
+card's motion, not the package's v1 look.
 The copy installs the image and the cards in its own `.local/`; remove
 `"$fresh"` afterwards.
 

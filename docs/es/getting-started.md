@@ -195,7 +195,11 @@ ejemplo es `examples/shape/paper`.
 Sin e2fsprogs, la tarjeta vestida que trae la versión muestra lo mismo:
 `./mun play --card collect-sea` (se instala como
 `.local/gamecards/collect-sea.img` junto a MUN Collect, con sus propias
-partidas).
+partidas). Una versión cuya imagen reproduce el movimiento de MUN Shape, un
+borrador experimental ([MUN Shape motion](../shape-motion.md#trying-it), en
+inglés), trae además `collect-reef`, MUN Collect vestido con Reef, su
+ejemplo: `./mun play --card collect-reef`. Instalar una versión nunca
+sustituye una tarjeta que ya tengas.
 
 *Configuración* › *Apariencia y accesibilidad* › *MUN Shape* (Completo,
 Solo colores, Desactivado) y *Reducir movimiento* cambian cuánto de ella

@@ -379,12 +379,14 @@ class CommandTests(Fixture):
         game = [command for command in made if "--variant" in command][0]
         self.assertIn(str(build / "games" / "mun-collect" / "mun-collect"), game)
         dressed = [command for command in made if "--shape" in command]
-        self.assertEqual(len(dressed), 1, "one card carries a MUN Shape package")
-        self.assertEqual(dressed[0][dressed[0].index("--shape") + 1], str(mundev.REPO_ROOT / "examples" / "shape" / "sea"))
-        self.assertIn(str(build / "games" / "mun-collect" / "mun-collect"), dressed[0])
+        self.assertEqual(sorted(command[command.index("--shape") + 1] for command in dressed),
+                         sorted(str(mundev.REPO_ROOT / "examples" / "shape" / name) for name in ("reef", "sea")),
+                         "two cards carry a MUN Shape package: the sea sample (v1) and Reef (motion)")
+        for command in dressed:
+            self.assertIn(str(build / "games" / "mun-collect" / "mun-collect"), command)
         manifest = json.loads((self.root / "out" / "release.json").read_text())
         self.assertEqual(sorted(e["card"] for e in manifest["files"] if e["kind"] == "card"),
-                         ["collect", "collect-sea", "demo"])
+                         ["collect", "collect-reef", "collect-sea", "demo"])
 
 
 if __name__ == "__main__":

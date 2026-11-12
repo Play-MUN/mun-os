@@ -17,8 +17,9 @@ and [How the console uses a package](#how-the-console-uses-a-package); what
 it was measured to cost, in a virtual machine, is under
 [Measured](#measured).
 
-A draft of motion for packages (format `mun-shape/1.1`, in no release) is
-described in [MUN Shape motion](shape-motion.md).
+A draft of motion for packages (format `mun-shape/1.1`, experimental:
+consoles built from this source play it, the previews up to v0.1.0-dev.4
+do not) is described in [MUN Shape motion](shape-motion.md).
 
 ## Where the package lives
 

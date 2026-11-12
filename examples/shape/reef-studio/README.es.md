@@ -2,13 +2,13 @@
 
 [English](README.md) · **Español**
 
-**Borrador.** El arrecife usa los bloques de movimiento de MUN Shape
-(`mun-shape/1.1`, [docs/shape-motion.md](../../../docs/shape-motion.md), en
-inglés), que están en desarrollo y en ninguna versión publicada; sus
-nombres, límites y presupuestos aún pueden cambiar. Las consolas que solo
-leen `mun-shape/1` muestran su aspecto v1: el póster quieto, la paleta, los
-sonidos y la ventana; solo una consola construida desde este código
-reproduce el movimiento
+**Borrador, experimental.** El arrecife usa los bloques de movimiento de
+MUN Shape (`mun-shape/1.1`, [docs/shape-motion.md](../../../docs/shape-motion.md),
+en inglés), que están en desarrollo; sus nombres, límites y presupuestos
+aún pueden cambiar. Las consolas que solo leen `mun-shape/1`, entre ellas
+las versiones preliminares hasta la v0.1.0-dev.4, muestran su aspecto v1:
+el póster quieto, la paleta, los sonidos y la ventana; solo una consola
+construida desde este código reproduce el movimiento
 ([probarlo](../../../docs/shape-motion.md#trying-it), en inglés).
 
 Reef — ejemplo de MUN Shape, el arrecife para abreviar, es una escena

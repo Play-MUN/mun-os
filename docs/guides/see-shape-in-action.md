@@ -72,8 +72,8 @@ do not show MUN Shape. List what you have:
 ```
 
 A build from this source also says that its shell plays the draft of
-Shape motion (`shape mun-shape/1 with motion (draft 1)`); the published
-previews play none and show a package with motion in its v1 look
+Shape motion (`shape mun-shape/1 with motion (draft 1)`); the previews up
+to v0.1.0-dev.4 play none and show a package with motion in its v1 look
 ([MUN Shape motion](../shape-motion.md#trying-it)).
 
 If none records it, get v0.1.0-dev.4

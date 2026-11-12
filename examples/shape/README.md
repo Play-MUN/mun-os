@@ -40,8 +40,9 @@ is MUN Shape's official example of motion: the console's player plays it as
 any package, the studio is its source, and `reef` is written only by the
 studio; used anywhere else, it is taken whole from one commit
 ([three parts](reef-studio/README.md#three-parts)). Only a
-console built from this source plays the motion; a published preview's
-console shows the reef's v1 look, its still poster
+console built from this source plays the motion, and a bundle of one
+carries MUN Collect dressed in the reef (the card `collect-reef`); the
+previews up to v0.1.0-dev.4 show the reef's v1 look, its still poster
 ([trying it](../../docs/shape-motion.md#trying-it)).
 
 Every image and sound of `sea` and `paper` is made by

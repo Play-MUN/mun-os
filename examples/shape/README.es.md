@@ -41,10 +41,11 @@ El arrecife es el ejemplo oficial del movimiento de MUN Shape: el
 reproductor de la consola lo reproduce como cualquier paquete, el estudio
 es su fuente y `reef` solo lo escribe el estudio; para usarlo en otro sitio
 se toma entero de un commit ([tres partes](reef-studio/README.es.md#tres-partes)).
-Solo una consola construida desde este código reproduce el movimiento; la
-consola de una versión preliminar publicada muestra el aspecto v1 de reef,
-su póster fijo ([probarlo](../../docs/shape-motion.md#trying-it), en
-inglés).
+Solo una consola construida desde este código reproduce el movimiento, y
+la descarga de una de ellas (`./mun dev bundle`) trae MUN Collect vestido
+con el arrecife (la tarjeta `collect-reef`); las versiones preliminares hasta la
+v0.1.0-dev.4 muestran el aspecto v1 de reef, su póster fijo
+([probarlo](../../docs/shape-motion.md#trying-it), en inglés).
 
 Cada imagen y cada sonido de `sea` y `paper` los hace
 [`generate.py`](generate.py) con la biblioteca estándar de Python y semillas

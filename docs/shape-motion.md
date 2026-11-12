@@ -1,11 +1,12 @@
 # MUN Shape motion (draft)
 
-**Status: draft, in development, in no release.** This page describes the
+**Status: experimental draft, in development.** This page describes the
 motion blocks of format `mun-shape/1.1` as the package checker reads them
-today. Names, defaults, limits and budgets are provisional until the
-console's player is measured; any of them may change before a release
-carries them. [MUN Shape](shape.md) (v1, `mun-shape/1`) is the released
-contract and is unchanged.
+today. Consoles built from this source play them; the previews up to
+v0.1.0-dev.4 do not. Names, defaults, limits and budgets are provisional
+until the console's player is measured; any of them may change in a later
+version, which the draft's revision tells apart (below). [MUN Shape](shape.md)
+(v1, `mun-shape/1`) is the stable contract and is unchanged.
 
 Motion lets a package's scene move and answer the console: planes at
 depths, characters with frame animations following paths, particles,
@@ -329,9 +330,12 @@ other:
 Only a console whose shell has the player draws the motion: an image built
 from this source (`./mun dev build`,
 [build the image yourself](getting-started.md#build-the-image-yourself)).
-The published previews (v0.1.0-dev.4 and before) read `mun-shape/1` and
-show such a package's v1 look: its still poster, palette, sounds and
-window. In a guest of an image built from this source,
+The previews up to v0.1.0-dev.4 read `mun-shape/1` and show such a
+package's v1 look: its still poster, palette, sounds and window. A bundle
+of a build with the player (`./mun dev bundle`) carries MUN Collect dressed
+in the reef, the card `collect-reef`, beside `collect-sea` (the `sea`
+sample, v1): `./mun play --card collect-reef` plays it without the card
+tools. In a guest of an image built from this source,
 `./mun dev shape examples/shape/reef --window` shows the motion behind Home
 ([see MUN Shape in action](guides/see-shape-in-action.md)).
 
@@ -341,7 +345,7 @@ While it is a draft:
   (`"format": "mun-shape/1"`, what every tool reads), the revision of the
   motion draft its shell plays: `"minor": 1, "motion": {"draft": 1}` in
   `BUILD-INFO.json` (`./mun dev list`: `with motion (draft 1)`). The
-  published previews record none and play no motion. `./mun dev shape`
+  previews up to v0.1.0-dev.4 record none and play no motion. `./mun dev shape`
   with a package that has motion, on a guest whose build plays none or
   another revision, warns before the console starts and with each card it
   inserts: that console shows the package's v1 look. What it says is
@@ -350,9 +354,10 @@ While it is a draft:
   declares; whether the console draws the motion is not observed (the
   guest is not asked: `./mun dev vm shape shell-log` shows what its shell
   says of it).
-- The motion is drawn behind Home as Home is: its previous design (on the
-  software renderer, as the virtual console draws it) or its orbital design
-  (on a graphics API). Fixed positions in a package assume where Home's
+- The motion is drawn behind Home as Home is: its orbital design, on the
+  software renderer (as the virtual console draws it) or on a graphics API,
+  or its previous design (`MUN_SHELL_DESIGN=previous`, the reference the
+  shell's checks compare with). Fixed positions in a package assume where Home's
   card object is; the `disc` anchor, and points measured from it
   (`origin`), follow it wherever it is. In the reef, the light, the dive
   into the disc and the school's milling with Play in focus (below the
@@ -367,7 +372,8 @@ a 60 Hz display), both at 1920 × 1080, drawn the scene graph way. Those runs us
 laboratory arrangement of Home (its entries in a row along the bottom, the
 card object in the middle), not Home's own designs, and a shell built from
 the same player code with other shell changes this source does not have.
-What was found:
+Neither machine has yet been measured with the motion behind Home's own
+designs. What was found:
 
 - **The same scene on both.** Driven by the same keys, both machines applied
   the same nine events at the same simulation steps, and the simulation's

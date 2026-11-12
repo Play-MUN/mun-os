@@ -82,8 +82,8 @@ muestran MUN Shape. Mira lo que tienes:
 
 Una build de este código dice además que su shell reproduce el borrador
 del movimiento de Shape (`shape mun-shape/1 with motion (draft 1)`); las
-versiones preliminares publicadas no reproducen ninguno y muestran un
-paquete con movimiento con su aspecto v1
+versiones preliminares hasta la v0.1.0-dev.4 no reproducen ninguno y
+muestran un paquete con movimiento con su aspecto v1
 ([MUN Shape motion](../../shape-motion.md#trying-it), en inglés).
 
 Si ninguna lo registra, descarga la v0.1.0-dev.4

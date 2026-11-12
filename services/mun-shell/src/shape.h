@@ -130,6 +130,14 @@ class Shape : public QObject {
     // The world (full mode): the export's normalised block with the export's
     // size ("bytes"), and the export's folder. Empty: none.
     Q_PROPERTY(QVariantMap world READ world NOTIFY changed)
+    // The package's motion (mun-shape/1.1, draft; docs/shape-motion.md),
+    // normalised by the card service's checker: MotionScene plays it. When
+    // a package has motion, its v1 world (`world`, still given) is drawn
+    // only if the motion cannot be loaded (MotionScene.failed): an image
+    // that does not decode, more than its budget, its export gone. Empty
+    // for an insertion whose motion was being decoded when the shell last
+    // ended (the marker `shape-decoding-motion`): its v1 look is shown.
+    Q_PROPERTY(QVariantMap motion READ motion NOTIFY changed)
     Q_PROPERTY(QString root READ root NOTIFY changed)
     // The eligible surfaces sit on plates: the game's set, or MUN's own on
     // plates of their proven opacity when a world is drawn behind them.
@@ -167,6 +175,7 @@ public:
     QPointF orb() const { return m_orb; }
     void setOrb(const QPointF &orb);
     QVariantMap world() const { return m_world; }
+    QVariantMap motion() const { return m_motion; }
     QString root() const { return m_root; }
     bool plated() const { return m_plated; }
     qreal neutralOpacity() const { return m_neutralOpacity; }
@@ -236,6 +245,7 @@ private:
     QString m_key;             // what the current resolution was made for
     quint64 m_token = 0;       // of the newest load
     QString m_skip;            // an insertion whose decoding crashed the last start
+    QString m_skipMotion;      // an insertion whose motion's decoding did
     QString m_arrival;         // the insertion that arrived while the shell watched
     QString m_adoptedFor;      // the insertion the last `adopted` was for
     QString m_cueSpent;        // the insertion whose cue is spent (the `shape-cue` marker)
@@ -265,6 +275,7 @@ private:
     QString m_transitionIn = QStringLiteral("fade"), m_transitionOut = QStringLiteral("fade");
     qreal m_seconds = 1.6;
     QVariantMap m_world;
+    QVariantMap m_motion;
     QString m_root;
     bool m_plated = false;
     qreal m_neutralOpacity = 1;

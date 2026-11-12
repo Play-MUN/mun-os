@@ -80,6 +80,12 @@ muestran MUN Shape. Mira lo que tienes:
 ./mun dev list        # cada build e invitado: "shape mun-shape/1" o "shape not recorded"
 ```
 
+Una build de este código dice además que su shell reproduce el borrador
+del movimiento de Shape (`shape mun-shape/1 with motion (draft 1)`); las
+versiones preliminares publicadas no reproducen ninguno y muestran un
+paquete con movimiento con su aspecto v1
+([MUN Shape motion](../../shape-motion.md#trying-it), en inglés).
+
 Si ninguna lo registra, descarga la v0.1.0-dev.4
 ([primeros pasos](../getting-started.md#3-la-imagen)) o construye una con
 `./mun dev build`

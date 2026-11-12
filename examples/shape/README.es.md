@@ -29,13 +29,33 @@ afplay examples/shape/sea/sfx/insert.wav               # macOS; aplay en Linux
 De una copia a una tarjeta tuya:
 [vestir la consola con tu juego](../../docs/es/guides/shape-your-game.md).
 
-Cada imagen y cada sonido de aquí los hace [`generate.py`](generate.py) con
-la biblioteca estándar de Python y semillas fijas: degradados, siluetas a
-partir de sumas de senos de periodo entero (para que las capas en movimiento
-encajen al repetirse), sprites sobremuestreados, y síntesis aditiva, de ruido
-filtrado y de cuerda pulsada para los sonidos. Son obra propia de este
-repositorio, bajo su licencia ([licencias](../../docs/licensing.md), en
+Un tercer ejemplo, `reef` (Reef — ejemplo de MUN Shape), es una plantilla del movimiento de Shape
+(`mun-shape/1.1`, un borrador: [docs/shape-motion.md](../../docs/shape-motion.md),
+en inglés): una escena marina construida en código, horneada en 3D y puesta
+en movimiento por la consola, con bancos de peces que giran en profundidad,
+un tiburón, cangrejos, medusas, algas, rayos, luz en la arena, la vista a
+la deriva y un banco que responde a Jugar.
+[`reef-studio`](reef-studio/README.es.md) es la escena y el horneado que lo
+hacen; parte de cualquiera de los dos (`./mun card shape init DIR --example reef`).
+El arrecife es el ejemplo oficial del movimiento de MUN Shape: el
+reproductor de la consola lo reproduce como cualquier paquete, el estudio
+es su fuente y `reef` solo lo escribe el estudio; para usarlo en otro sitio
+se toma entero de un commit ([tres partes](reef-studio/README.es.md#tres-partes)).
+Solo una consola construida desde este código reproduce el movimiento; la
+consola de una versión preliminar publicada muestra el aspecto v1 de reef,
+su póster fijo ([probarlo](../../docs/shape-motion.md#trying-it), en
 inglés).
+
+Cada imagen y cada sonido de `sea` y `paper` los hace
+[`generate.py`](generate.py) con la biblioteca estándar de Python y semillas
+fijas: degradados, siluetas a partir de sumas de senos de periodo entero
+(para que las capas en movimiento encajen al repetirse), sprites
+sobremuestreados, y síntesis aditiva, de ruido filtrado y de cuerda pulsada
+para los sonidos. Las imágenes de reef las renderiza su estudio a partir de
+una escena construida en código (con las cáusticas y la burbuja de `sea`), y
+sus sonidos son los de `sea`. Todo ello es obra propia de este repositorio,
+bajo su licencia ([licencias](../../docs/licensing.md), en inglés); la
+página del estudio dice qué hay en él que no lo es.
 
 ```sh
 python3 examples/shape/generate.py            # rehace los dos paquetes

@@ -71,6 +71,11 @@ do not show MUN Shape. List what you have:
 ./mun dev list        # each build and guest: "shape mun-shape/1" or "shape not recorded"
 ```
 
+A build from this source also says that its shell plays the draft of
+Shape motion (`shape mun-shape/1 with motion (draft 1)`); the published
+previews play none and show a package with motion in its v1 look
+([MUN Shape motion](../shape-motion.md#trying-it)).
+
 If none records it, get v0.1.0-dev.4
 ([getting started](../getting-started.md#3-the-image)) or build one with
 `./mun dev build`

@@ -69,8 +69,8 @@
       "translation": "docs/es/guides/see-shape-in-action.md",
       "source": "docs/guides/see-shape-in-action.md",
       "language": "es",
-      "reviewed": "2026-10-15",
-      "source_sha256": "d198eca17977b316e5e3d001efe8925cd3fde5c075689aee77cbaa1449f279f5"
+      "reviewed": "2026-11-11",
+      "source_sha256": "5a2bc96017e62272102f2a9257bb93188cfa031a345c7708b19a4a1dd4fefdf2"
     },
     {
       "translation": "docs/es/guides/shape-your-game.md",
@@ -83,8 +83,8 @@
       "translation": "examples/README.es.md",
       "source": "examples/README.md",
       "language": "es",
-      "reviewed": "2026-10-05",
-      "source_sha256": "b0c01f896e42a04fe772adb92ec3017327eae44bccf69db9d8a06242554c8d80"
+      "reviewed": "2026-11-09",
+      "source_sha256": "1ee18901cfb526c341d41b3750ace827f842798ae32ce6d921265d6610190a3e"
     },
     {
       "translation": "examples/mun-collect/README.es.md",
@@ -97,8 +97,8 @@
       "translation": "examples/shape/README.es.md",
       "source": "examples/shape/README.md",
       "language": "es",
-      "reviewed": "2026-10-06",
-      "source_sha256": "9ee73d38823784c32b880270d491629f0bb3ef6168c6b774dc836e28dededebb"
+      "reviewed": "2026-11-11",
+      "source_sha256": "fe2297c7c657f22caaa4bc058ba191a00013211f211a8e463078c7b2056acfc1"
     },
     {
       "translation": "docs/es/contributor-map.md",
@@ -106,6 +106,13 @@
       "language": "es",
       "reviewed": "2026-10-15",
       "source_sha256": "ff1c3d4c1296a18fe8da00162b154f6467428d78321629cb644d9d8df56b9692"
+    },
+    {
+      "translation": "examples/shape/reef-studio/README.es.md",
+      "source": "examples/shape/reef-studio/README.md",
+      "language": "es",
+      "reviewed": "2026-11-11",
+      "source_sha256": "5101fd7b23433ce9a98d917e23359af62de036be812b550a8acfb421478e2ced"
     }
   ]
 }

@@ -65,6 +65,12 @@ Environment=XDG_RUNTIME_DIR=/run/mun-shell
 Environment=QT_LOGGING_RULES=qt.qpa.*=false
 
 ExecStart=/opt/mun/shell/bin/mun-shell
+# A clean stop (the launcher's, around every game; a shutdown; a new
+# resolution) is not a crash: the decoding markers are removed then, so the
+# next start does not skip an identity or a motion that was only being
+# decoded (src/shape.cpp, src/motionscene.cpp). After a crash or a kill they
+# stay and name the insertion to skip. "$$" passes "$" to the shell.
+ExecStopPost=/bin/sh -c 'if [ "$$SERVICE_RESULT" = success ]; then rm -f -- "$$XDG_RUNTIME_DIR/shape-decoding" "$$XDG_RUNTIME_DIR/shape-decoding-motion"; fi'
 Restart=on-failure
 RestartSec=5
 # Qt's framebuffer VT handler exits with status 1 after SIGTERM; that is a clean stop.

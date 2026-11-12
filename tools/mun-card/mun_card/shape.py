@@ -31,7 +31,8 @@ PACKAGE_DIR = "mun-shape"
 MANIFEST = "shape.json"
 FORMAT_NAME = "mun-shape"
 FORMAT_MAJOR = 1
-FORMAT_MINOR = 0
+# 1.1 adds the motion blocks (docs/shape-motion.md, draft); 1.0 packages read as before.
+FORMAT_MINOR = 1
 FORMAT = f"{FORMAT_NAME}/{FORMAT_MAJOR}"
 
 # The strict JSON profile. Enforced limits, not performance objectives.
@@ -40,6 +41,17 @@ MAX_DEPTH = 6
 MAX_STRING_CHARS = 512
 MAX_NUMBER_CHARS = 32
 
+# The normalised document the card service exports, as the shell reads it
+# at most (services/mun-shell/src/shape.cpp, kDocumentMaxBytes): its exact
+# bytes, with the insertion and the content version the service adds to it
+# (export_bytes). A card's check knows its version and measures exactly; a
+# package checked on its own, before it is on a card, leaves
+# EXPORT_RESERVE bytes for them.
+EXPORT_MAX_BYTES = 256 * 1024
+EXPORT_RESERVE = 1024
+# The card service's insertions: secrets.token_hex(8), sixteen characters.
+INSERTION_CHARS = 16
+
 # Files. The package is copied to RAM before the shell reads it, so every
 # byte is bounded before it is read.
 PACKAGE_MAX_BYTES = 32 * 1024 * 1024
@@ -47,7 +59,9 @@ IMAGE_MAX_BYTES = 4 * 1024 * 1024
 SOUND_MAX_BYTES = 1024 * 1024
 # Largest side of each kind of image, which bounds its decoded size before
 # anything decodes it (2048 x 2048 ARGB is 16 MiB).
-SIDE_LIMITS = {"backdrop": 2048, "layer": 2048, "light": 2048, "sprite": 256, "window": 1024}
+SIDE_LIMITS = {"backdrop": 2048, "layer": 2048, "light": 2048, "sprite": 256, "window": 1024,
+               # motion (mun-shape/1.1): a sheet of frames, a plane, the still poster
+               "sheet": 2048, "plane": 2048, "poster": 2048}
 MAX_LAYERS = 3
 MAX_EMITTERS = 2
 MAX_SPRITES = 128
@@ -124,6 +138,21 @@ NOTE_CODES = {
     # Information only.
     "shape_unknown_field": "Campo desconocido; se ignora",
     "shape_minor_newer": "Versión menor posterior a la de esta consola; lo que no conoce se ignora",
+    # The motion (mun-shape/1.1) is dropped as a whole; the v1 look stays.
+    "shape_motion_field": "Un dato del movimiento falta o tiene un tipo incorrecto",
+    "shape_motion_reference": "El movimiento nombra algo que no existe",
+    "shape_motion_count": "El movimiento supera uno de sus límites",
+    "shape_motion_budget": "Las imágenes del movimiento superan su presupuesto",
+    "shape_motion_draft": "El movimiento es de una revisión del borrador que esta consola no lee (motion_draft)",
+    "shape_motion_empty": "El movimiento no declara nada que dibujar",
+    # Information only: the motion is used.
+    "shape_motion_not_drawn": "El movimiento usa algo que esta consola lee pero todavía no dibuja",
+    # A failure of the checker's own, not a defect it names: the motion is
+    # dropped all the same, and the note says what failed, for a report.
+    "shape_motion_error": "El comprobador no pudo leer el movimiento (un fallo suyo); queda el aspecto v1",
+    # The package is not used: even without its motion, the document the
+    # shell would read is over its size with the card's version.
+    "shape_export_size": "El documento exportado supera lo que lee el shell",
 }
 
 _COLOUR = re.compile(r"#[0-9A-Fa-f]{6}")
@@ -506,6 +535,7 @@ SCHEMA: Dict[str, Callable] = {
 }
 
 _ROLE_KIND = {"window": "png", "backdrop": "png", "layer": "png", "sprite": "png", "light": "png",
+              "sheet": "png", "plane": "png", "poster": "png",
               "move": "wav", "enter": "wav", "back": "wav", "insert": "wav"}
 
 
@@ -890,11 +920,29 @@ def _read_file(package: _Scoped, reference: _Reference, size: int, cache: Dict[s
     return found
 
 
-def check_package(source, base: str = "") -> ShapeResult:
+def export_bytes(document: Dict[str, Any], insertion: str, version: str) -> bytes:
+    """The exported shape.json, byte for byte, as the card service writes
+    it for an insertion of a card of `version` (services/mun-cardd/cardd.py)
+    and as the shell measures it."""
+    exported = dict(document, insertion=insertion, version=version)
+    return (json.dumps(exported, ensure_ascii=False, allow_nan=False) + "\n").encode("utf-8")
+
+
+def exported_size(document: Dict[str, Any], version: Optional[str]) -> int:
+    """The exported document's size: exact for a card of `version`, with
+    EXPORT_RESERVE for the insertion and version of a package not yet on a
+    card (None)."""
+    if version is None:
+        return len(json.dumps(document, ensure_ascii=False, allow_nan=False).encode("utf-8")) + EXPORT_RESERVE
+    return len(export_bytes(document, "0" * INSERTION_CHARS, version))
+
+
+def check_package(source, base: str = "", version: Optional[str] = None) -> ShapeResult:
     """Check the package at `base` in `source` (a card source: stat/read of
     relative paths, never following links): the whole reading a console
     does. `base` is "<content.root>/mun-shape" on a card, "" for a folder
-    that is the package itself."""
+    that is the package itself. `version`: the card's content version, so
+    that the exported document is measured as the service writes it."""
     package = _Scoped(source, base)
     notes: List[Note] = []
     try:
@@ -917,8 +965,10 @@ def check_package(source, base: str = "") -> ShapeResult:
         return ShapeResult("unused", notes=[Note("shape_unreadable", "unused", exc.message)])
     if minor > FORMAT_MINOR:
         notes.append(Note("shape_minor_newer", "info", document["format"], where="format"))
+    from . import motion
+    known = set(SCHEMA) | (set(motion.BLOCKS) | {motion.DRAFT_KEY} if minor >= 1 else set())
     for key in document:
-        if key != "format" and key not in SCHEMA:
+        if key != "format" and key not in known:
             notes.append(Note("shape_unknown_field", "ignored", block=None, where=key))
 
     blocks: Dict[str, Any] = {}
@@ -963,8 +1013,21 @@ def check_package(source, base: str = "") -> ShapeResult:
         total += added
         files.update(found)
 
+    # The motion, after the v1 blocks: one aspect, dropped as a whole on any
+    # defect, its images within a budget of their own.
+    moving, moving_files = None, {}
+    if minor >= 1 and any(name in document for name in motion.BLOCKS):
+        try:
+            moving, moving_files, findings = motion.check(document, package, stats, cache, files)
+        except _Invalid as exc:
+            notes.append(Note(exc.code, "dropped", exc.detail, block="motion", where=exc.where))
+        except Exception as exc:  # noqa: BLE001 - the checker's own failure must not cost the v1 look
+            # The card service runs this on the console: a checker that
+            # stopped here would leave the card without any of its look.
+            notes.append(Note("shape_motion_error", "dropped", f"{type(exc).__name__}: {exc}"[:200], block="motion"))
+
     declared = [name for name in BLOCKS if name in document]
-    if declared and not blocks:
+    if declared and not blocks and moving is None:
         return ShapeResult("unused", notes=notes)
     materials = {surface: blocks.get("surfaces", {}).get(surface, {"material": "solid"})["material"]
                  for surface in ("entries", "panel")}
@@ -973,14 +1036,38 @@ def check_package(source, base: str = "") -> ShapeResult:
         if name in blocks and name != "surfaces":
             shape[name] = blocks[name]
     shape["surfaces"] = surfaces_for(blocks.get("palette"), materials, notes)
+    if moving is not None:
+        # The document the shell will read, with the motion normalised (its
+        # defaults filled in) and its files: within what the shell reads,
+        # or the motion is dropped and the rest of the package stays.
+        shape["motion"] = moving
+        shape["files"] = sorted(set(files) | set(moving_files))
+        size = exported_size(shape, version)
+        if size > EXPORT_MAX_BYTES:
+            del shape["motion"]
+            notes.append(Note("shape_motion_count", "dropped",
+                              f"el documento exportado mediría {size} bytes; el shell lee hasta {EXPORT_MAX_BYTES}",
+                              block="motion", where="motion"))
+        else:
+            files.update(moving_files)
+            for _kind, where, detail in findings:
+                notes.append(Note("shape_motion_not_drawn", "info", detail, block="motion", where=where))
     shape["files"] = sorted(files)
+    # What stays (the v1 look, the motion dropped or not) must fit as well,
+    # or the shell would read none of it: then nothing is used.
+    size = exported_size(shape, version)
+    if size > EXPORT_MAX_BYTES:
+        notes.append(Note("shape_export_size", "unused",
+                          f"el documento exportado mediría {size} bytes; el shell lee hasta {EXPORT_MAX_BYTES}"))
+        return ShapeResult("unused", notes=notes)
     changed = any(note.level in ("dropped", "fallback") for note in notes)
     return ShapeResult("partial" if changed else "ready", shape, notes, files)
 
 
-def check_card(source, content_root: str) -> ShapeResult:
-    """The package of a valid card, from its content root."""
-    return check_package(source, f"{content_root.strip('/')}/{PACKAGE_DIR}")
+def check_card(source, content_root: str, version: Optional[str] = None) -> ShapeResult:
+    """The package of a valid card, from its content root; `version`, its
+    content version (see check_package)."""
+    return check_package(source, f"{content_root.strip('/')}/{PACKAGE_DIR}", version=version)
 
 
 def exit_status(result: ShapeResult) -> int:

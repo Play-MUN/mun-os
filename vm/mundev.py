@@ -598,6 +598,11 @@ def cmd_shape(args: argparse.Namespace) -> int:
     build_dir, recorded = guest_build(args.guest, args.build)
     available = [b for b in builds() if runs_in_guest(b)]
     shapepreview.check_build(args.guest, build_dir, available[-1] if available else None, recorded)
+    # A package with motion on a console that plays none: said before the
+    # console starts, and again with each card the preview makes.
+    notice = shapepreview.folder_notice(args.guest, build_dir, folder)
+    if notice:
+        print(f"[shape] warning: {notice}", flush=True)
     build_dir = ensure_guest(args.guest, args.build)
     base = None
     if args.base:
@@ -674,7 +679,11 @@ def shape_of(build: Path) -> str:
     import shapepreview
     if not (build / "BUILD-INFO.json").is_file():
         return "unknown (build not here)"
-    return shapepreview.build_shape(build) or "not recorded"
+    found = shapepreview.build_shape(build)
+    if found is None:
+        return "not recorded"
+    draft = shapepreview.build_motion(build)
+    return found + (f" with motion (draft {draft})" if draft is not None else "")
 
 
 # ------------------------------------------------------------ downloads

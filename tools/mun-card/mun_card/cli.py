@@ -69,7 +69,7 @@ def cmd_create(args: argparse.Namespace) -> int:
         except CardError as exc:
             print(f"  MUN Shape en la tarjeta: sin comprobar, la tarjeta no es válida [{exc.code}]")
         else:
-            result = shape.check_card(source, card.root)
+            result = shape.check_card(source, card.root, version=card.version)
             print(f"  MUN Shape en la tarjeta: {_STATE_WORDS[result.state]}")
     return 0
 
@@ -102,7 +102,7 @@ def cmd_inspect(args: argparse.Namespace) -> int:
         info = validate_card(source)
         report["valid"] = True
         report["card"] = info.to_dict()
-        report["shape"] = shape_summary(shape.check_card(source, info.root))
+        report["shape"] = shape_summary(shape.check_card(source, info.root, version=info.version))
     except CardError as exc:
         report["valid"] = False
         report["error"] = exc.to_dict()
@@ -185,7 +185,7 @@ _MEMORY_WORDS = {"frames": "fotogramas", "export": "exportación", "backdrop": "
 _LEVEL_WORDS = ("completo", "sin texturas de luz", "fondo y capa cercana a 10 fps", "quieto (compuesto una vez)",
                 "ninguno (la paleta sobre el mundo de MUN)")
 _BLOCK_WORDS = {"palette": "paleta", "card": "objeto", "world": "mundo", "surfaces": "superficies",
-                "transition": "transición", "sounds": "sonidos"}
+                "transition": "transición", "sounds": "sonidos", "motion": "movimiento"}
 
 
 def shape_summary(result) -> dict:
@@ -204,6 +204,13 @@ def shape_summary(result) -> dict:
                             "where": note.where}
         elif result.shape is not None and name in result.shape and name != "surfaces":
             blocks[name] = {"state": "used"}
+    # The motion (mun-shape/1.1, draft): used, or dropped with its reason.
+    if "motion" in dropped:
+        note = dropped["motion"]
+        blocks["motion"] = {"state": "dropped", "code": note.code, "message": note.message, "detail": note.detail,
+                            "where": note.where}
+    elif result.shape is not None and "motion" in result.shape:
+        blocks["motion"] = {"state": "used", "draft": result.shape["motion"]["draft"]}
     if result.shape is not None:
         colours = result.shape["surfaces"]["colours"]
         blocks["surfaces"] = blocks.get("surfaces") or {
@@ -292,6 +299,19 @@ def _print_shape(label: str, result, report: bool, read_level) -> None:
                       + (f" ({dropped[0].where})" if dropped[0].where else ""))
             else:
                 print(f"  {_BLOCK_WORDS[name]:12s} no declarado → MUN")
+        moving = result.shape.get("motion")
+        dropped = [n for n in notes_by_block.get("motion", []) if n.level == "dropped"]
+        if moving is not None:
+            look = moving["look"]
+            res = f"{look['resolution'][0]}×{look['resolution'][1]}" if look["resolution"] else "la de la pantalla"
+            print(f"  {'movimiento':12s} declarado   composición a {res}, {moving['rate']} pasos de simulación/s · "
+                  f"planos {len(moving['planes'])}, personajes {len(moving['actors'])}, recorridos {len(moving['paths'])}, "
+                  f"emisores {len(moving['emitters'])}, luces {len(moving['lights'])}, "
+                  f"reacciones {', '.join(moving['react']) or 'ninguna'}")
+        elif dropped:
+            print(f"  {'movimiento':12s} DESCARTADO  [{dropped[0].code}] {dropped[0].message}"
+                  + (f" — {dropped[0].detail}" if dropped[0].detail else "")
+                  + (f" ({dropped[0].where})" if dropped[0].where else "") + "; queda el aspecto v1")
         surfaces = result.shape["surfaces"]
         colours = surfaces["colours"]
         origin = "del juego" if colours["source"] == "shape" else "de MUN"
@@ -322,6 +342,19 @@ def _print_shape(label: str, result, report: bool, read_level) -> None:
         if others["window"] or others["sounds"]:
             print(f"    además, fuera del presupuesto del mundo: ventana {others['window']:g} MiB, "
                   f"sonidos {others['sounds']:g} MiB")
+        if result.shape.get("motion") is not None:
+            from . import motion
+            cost = motion.estimate(result.shape["motion"], result.files)
+            print(f"  movimiento, antes de decodificar (estimación; sus presupuestos aún no están medidos): "
+                  f"imágenes {cost['decoded_bytes'] / 1048576:.1f} MiB decodificadas; "
+                  f"{cost['drawn_per_frame'] / 1e6:.2f} Mpx por fotograma a {cost['resolution'][0]}×{cost['resolution'][1]}, "
+                  f"{cost['drawn_per_second'] / 1e6:.1f} Mpx/s a {cost['display_rate']} fotogramas/s de pantalla "
+                  f"({cost['steps_per_second']} pasos de simulación/s); cuenta lo que se dibuja, no el coste de cada backend")
+            order = cost["keep"]["detail"] + cost["keep"]["ambient"]
+            # keep is read and not acted on yet (shape_motion_not_drawn)
+            print(f"    keep, sin efecto todavía (esta consola dibuja todo o nada): se quitarían antes "
+                  f"{', '.join(order) or '—'}; se conservarían hasta el final "
+                  f"{', '.join(cost['keep']['identity']) or '—'}")
     if read_level is not None:
         tokens = " ".join(f"{key} {value}" for key, value in read_level.items() if key not in ("focus", "plate_opacity"))
         print(f"  nivel de lectura de la portada: {tokens}")
@@ -367,7 +400,7 @@ def cmd_shape_check(args: argparse.Namespace) -> int:
             raise CardError("shape_cover_with_card", "--cover es para una carpeta: con una tarjeta se usa su portada")
         source = DebugfsSource(path, image.find_tool("debugfs"))
         info = validate_card(source)
-        result = shape.check_card(source, info.root)
+        result = shape.check_card(source, info.root, version=info.version)
         cover = source.read(info.cover, COVER_MAX_BYTES) if info.cover else None
         read_level = _read_level_of(cover) if cover else None
         extra = []
@@ -418,6 +451,34 @@ def cmd_shape_variants(args: argparse.Namespace) -> int:
     for name in shapetools.FIXTURES:
         shapetools.write_fixture(out, name)
     print(f"{len(shapetools.FIXTURES)} paquetes defectuosos en {out}; compruébalos con ./mun card shape check {out}/<nombre>")
+    return 0
+
+
+def cmd_shape_export(args: argparse.Namespace) -> int:
+    from . import shapeexport
+    target = shapeexport.export(Path(args.package), Path(args.out), [Path(s) for s in args.sources], args.name)
+    manifest = json.loads((target / shapeexport.MANIFEST).read_text(encoding="utf-8"))
+    print(f"exportado en {target}: {len(manifest['files'])} archivos, commit {manifest['source']['commit'][:12]}")
+    print(f"  identidad: {shapeexport.MANIFEST} sha256 {shapeexport.identity(target)}")
+    # Said, not written: what this checkout knows, as information.
+    result = shape.check_package(DirectorySource(target / "package"))
+    where = shapeexport.context(Path(args.package))
+    branches = ", ".join(where["remote_branches"]) or "ninguna"
+    print(f"  paquete: {_STATE_WORDS[result.state]}")
+    print(f"  según este checkout (información, no una autorización para publicar): origin {where['origin'] or '—'}; "
+          f"ramas remotas con el commit: {branches}")
+    return 0
+
+
+def cmd_shape_verify_export(args: argparse.Namespace) -> int:
+    from . import shapeexport
+    problems = shapeexport.verify(Path(args.folder), args.expect)
+    for problem in problems:
+        print(f"  {problem}")
+    if problems:
+        print(f"{args.folder}: no es la exportación esperada, entera ({len(problems)} diferencias)")
+        return 2
+    print(f"{args.folder}: entera, como se exportó (identidad {shapeexport.identity(Path(args.folder))})")
     return 0
 
 
@@ -474,7 +535,7 @@ def build_parser() -> argparse.ArgumentParser:
     s = shape_sub.add_parser("init", help="write a template package (or copy a sample) into a folder")
     s.add_argument("folder")
     s.add_argument("--cover", metavar="PNG", help="fill the palette with the one the console would read from this cover")
-    s.add_argument("--example", choices=("sea", "paper"), help="start from one of the sample packages instead")
+    s.add_argument("--example", choices=("sea", "paper", "reef"), help="start from one of the sample packages instead")
     s.add_argument("--force", action="store_true",
                    help="replace existing regular files at the names written (never links or folders; nothing else is touched)")
     s.set_defaults(func=cmd_shape_init)
@@ -489,6 +550,18 @@ def build_parser() -> argparse.ArgumentParser:
     s = shape_sub.add_parser("variants", help="list the defective packages, or write them all into OUT")
     s.add_argument("out", nargs="?")
     s.set_defaults(func=cmd_shape_variants)
+    s = shape_sub.add_parser("export", help="export a package and its sources at the current commit, every file "
+                             "listed with its SHA-256 (docs/shape.md, \"Exporting a package\")")
+    s.add_argument("package", help="the package folder, in a Git checkout, its changes committed")
+    s.add_argument("out", help="where to write <name>-<commit>/")
+    s.add_argument("--sources", action="append", default=[], metavar="PATH",
+                   help="a folder or file that makes the package, exported by its path in the repository (repeatable)")
+    s.add_argument("--name", help="the export's name (default: the package folder's)")
+    s.set_defaults(func=cmd_shape_export)
+    s = shape_sub.add_parser("verify-export", help="check that an export is whole, as it was made; exit 0 or 2")
+    s.add_argument("folder")
+    s.add_argument("--expect", metavar="SHA256", help="the identity pinned (the SHA-256 of its export.json)")
+    s.set_defaults(func=cmd_shape_verify_export)
     return parser
 
 

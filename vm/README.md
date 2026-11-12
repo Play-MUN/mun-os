@@ -184,6 +184,12 @@ laboratory, through the real card service and shell
   v0.1.0-dev.2 shows no MUN Shape); a guest of one is refused and left as it
   is, with the way to one that shows it: `--guest NAME` for a new guest from
   the latest build, or `./mun dev vm NAME destroy --yes`.
+  Builds of this source also record, beside `format`, the minor version and
+  the revision of the Shape motion draft their shell plays (`"minor": 1,
+  "motion": {"draft": 1}`; `./mun dev list` says `with motion (draft 1)`).
+  A package with motion on a guest whose build plays none, or another
+  revision, is a warning, not a refusal: that console shows the package's
+  v1 look, and the preview says so before it starts and with each card.
 - The card is MUN Collect from that build with the package
   (`mun-card create --variant game --shape`), or, with `--base`, a copy of a
   card from `.local/gamecards/`, cloned and given the package with debugfs;

@@ -36,6 +36,7 @@ Item {
     property var canvas: null
     property var world: null
     property var modalLayer: null
+    property var motion: null
     property int next: 0
     // When the step before acted, and since when the step in turn has been
     // due and waiting for its state.
@@ -166,6 +167,10 @@ Item {
             worldDrawn: world ? world.drawn : false, worldFailed: world ? world.failed : false,
             frames: world ? world.frames : 0, still: world ? world.still : false, dim: world ? world.dim : 0,
             modal: main ? !!main.modal : false, level: main ? main.level : -1,
+            motionDrawn: motion ? motion.drawn : false, motionFailed: motion ? motion.failed : false,
+            motionVisible: motion ? motion.visible : false, hasMotion: Object.keys(Shape.motion).length > 0,
+            objectCentre: main ? [main.objectCentre.x, main.objectCentre.y] : null,
+            panelOverWorld: canvas ? (find(canvas, it => it.plating !== undefined) || {}).overWorld === true : false,
             dimmed: main ? main.dimmed : false, mainIndex: main ? main.mainIndex : -1,
             sections: main ? main.settingsEntries.map(e => e.key) : [],
             design: main ? (main.orbital ? "orbital" : "previous") : "",
@@ -209,6 +214,10 @@ Item {
                 ShellSettings[key] = step.settings[key]
         if (step.probe)
             report(step.probe)
+        if (step.actor && motion)
+            console.log("ACTOR " + JSON.stringify(Object.assign({ label: step.label || step.actor, t: now(),
+                                                                  centre: [main.objectCentre.x, main.objectCentre.y] },
+                                                                motion.actorAt(step.actor))))
         if (step.grab)
             grab(step.grab)
         if (step.quit)
@@ -309,6 +318,7 @@ Item {
         canvas = find(main.contentItem, it => it.width === Theme.canvasWidth && it.height === Theme.canvasHeight && it.focus === true)
         world = find(canvas, it => it.covering !== undefined && it.transition !== undefined)
         modalLayer = find(canvas, it => it.shownContent !== undefined)
+        motion = find(canvas, it => it.failed !== undefined && it.runs !== undefined)
         report("start")
         run()
     }

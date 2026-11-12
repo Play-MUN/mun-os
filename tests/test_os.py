@@ -7,7 +7,9 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 import re
+import shlex
 import shutil
 import stat
 import subprocess
@@ -195,6 +197,32 @@ class ShellTests(unittest.TestCase):
         success = re.search(r"(?m)^SuccessExitStatus=(.+)$", unit).group(1).split()
         self.assertIn(status, success)
         self.assertIn("1", success, "Qt's VT handler exits 1 after SIGTERM: a stop, not a failure")
+
+    def test_a_clean_stop_removes_the_decoding_markers_and_a_crash_keeps_them(self):
+        # The launcher stops the shell around every game (SIGTERM, a clean
+        # stop): an identity or a motion that was only being decoded then must
+        # not be skipped at the next start. After a crash the markers stay.
+        unit = (self.SHELL / "deploy" / "mun-shell.service").read_text()
+        self.assertRegex(unit, r"(?m)^Environment=XDG_RUNTIME_DIR=/run/mun-shell$")
+        self.assertRegex(unit, r"(?m)^RuntimeDirectory=mun-shell$")
+        line = re.search(r"(?m)^ExecStopPost=(.+)$", unit).group(1)
+        argv = shlex.split(line.replace("$$", "$"))
+        self.assertEqual(argv[:2], ["/bin/sh", "-c"])
+        names = ("shape-decoding", "shape-decoding-motion")
+        sources = (self.SHELL / "src" / "shape.cpp").read_text() + (self.SHELL / "src" / "motionscene.cpp").read_text()
+        for name in names:
+            self.assertRegex(sources, rf'"/?{name}"', f"{name} is the shell's own marker")
+        for result, kept in (("success", False), ("signal", True), ("core-dump", True), ("exit-code", True),
+                             ("oom-kill", True), ("watchdog", True)):
+            with tempfile.TemporaryDirectory() as runtime:
+                for name in names:
+                    (Path(runtime) / name).write_text("0123456789abcdef")
+                (Path(runtime) / "started").write_text("")
+                subprocess.run(["/bin/sh", "-c", argv[2]], check=True,
+                               env={"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "SERVICE_RESULT": result,
+                                    "XDG_RUNTIME_DIR": runtime})
+                self.assertEqual([(Path(runtime) / name).exists() for name in names], [kept, kept], result)
+                self.assertTrue((Path(runtime) / "started").exists(), "nothing else is removed")
 
     def test_the_shell_waits_for_its_display_and_failures_restart_it(self):
         # A display driver can come up after the unit: no condition may skip
@@ -443,10 +471,19 @@ class InputTests(unittest.TestCase):
         self.assertNotIn("sources", self.inputs, "no third-party game source is pinned here")
         self.assertEqual(sorted(p.name for p in (ROOT / "examples").iterdir() if p.is_dir()),
                          ["mun-collect", "mun-gl-probe", "shape"])
-        # examples/shape holds Shape packages drawn by its own script, data
-        # for the console's presentation, not a game.
-        suffixes = {p.suffix for p in (ROOT / "examples" / "shape").rglob("*") if p.is_file()}
-        self.assertLessEqual(suffixes, {".py", ".md", ".json", ".png", ".wav"})
+        # examples/shape holds Shape packages drawn by its own scripts, data
+        # for the console's presentation, not a game; the reef's studio is
+        # the 3D scene and the bake that draw one of them (its installed
+        # modules and its renders stay local, ignored).
+        listed = subprocess.run(["git", "ls-files", "-z", "--", "examples/shape"], cwd=ROOT, capture_output=True)
+        files = ([Path(name) for name in listed.stdout.decode().split("\0") if name] if listed.returncode == 0 else
+                 [p.relative_to(ROOT) for p in (ROOT / "examples" / "shape").rglob("*")
+                  if p.is_file() and not {"node_modules", "render"} & set(p.parts)])
+        studio = Path("examples/shape/reef-studio")
+        self.assertLessEqual({p.suffix for p in files if studio not in p.parents},
+                             {".py", ".md", ".json", ".png", ".wav"})
+        self.assertLessEqual({p.suffix for p in files if studio in p.parents},
+                             {".js", ".mjs", ".html", ".json", ".py", ".md", ""})
         build = (OS / "mkosi" / "mkosi.build.chroot").read_text()
         self.assertIn('"$SRCDIR"/recipes/*/', build, "other games come from recipes only")
 
@@ -549,8 +586,9 @@ class BuildInfoTests(unittest.TestCase):
         self.assertEqual(info["initrd"]["packages"], [{"name": "lvm2", "version": "2.03.31-2", "architecture": "arm64"}])
         self.assertEqual(info["initrd"]["sha256"], hashlib.sha256(b"cpio").hexdigest())
         self.assertEqual(info["debian"]["snapshot"], json.loads((OS / "inputs.json").read_text())["debian"]["snapshot"])
-        self.assertEqual(info["shape"], {"format": "mun-shape/1"},
-                         "the MUN Shape format the console reads, from the checker the card service uses")
+        self.assertEqual(info["shape"], {"format": "mun-shape/1", "minor": 1, "motion": {"draft": 1}},
+                         "the MUN Shape format the console reads, from the checker the card service uses, and "
+                         "beside it, for tools that know them, its minor version and the motion draft it plays")
 
     def test_a_qemu_build_records_its_qcow2_and_no_pinned_package(self):
         info = self.build_info()

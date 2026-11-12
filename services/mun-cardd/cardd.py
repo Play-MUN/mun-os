@@ -1090,7 +1090,9 @@ class ShapeExport:
         self.check()
         self.root.mkdir(mode=0o755, parents=True, exist_ok=True)
         source = _StagingSource(self.mount, f"{self.content_root.strip('/')}/{shape.PACKAGE_DIR}", self.staging, self.check)
-        result = shape.check_card(source, self.content_root)
+        # Measured with this card's version: the document written below is
+        # the one the checker measured (shape.export_bytes).
+        result = shape.check_card(source, self.content_root, version=self.version)
         self.check()
         notes = [{"code": n.code, "level": n.level, "block": n.block, "where": n.where, "detail": n.detail[:200]}
                  for n in result.notes]
@@ -1103,11 +1105,19 @@ class ShapeExport:
         # The export holds what the shell may use and nothing else: the
         # accepted files and the normalised document, bound to this insertion.
         _prune(self.staging, set(result.files))
-        document = dict(result.shape, insertion=self.insertion, version=self.version)
+        data = shape.export_bytes(result.shape, self.insertion, self.version)
+        if len(data) > shape.EXPORT_MAX_BYTES:
+            # The checker measured it with a 16-character insertion; an
+            # insertion of another length could still take it over. Then
+            # nothing is published: the shell would read none of it.
+            notes.append({"code": "shape_export_size", "level": "unused", "block": None, "where": "",
+                          "detail": f"{len(data)} bytes; el shell lee hasta {shape.EXPORT_MAX_BYTES}"})
+            return {"state": "unused", "insertion": self.insertion, "version": self.version,
+                    "notes": notes[:SHAPE_NOTES_MAX]}, notes
         out = os.open(self.staging / shape.MANIFEST, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
                       0o600)
         with os.fdopen(out, "wb") as handle:
-            handle.write((json.dumps(document, ensure_ascii=False, allow_nan=False) + "\n").encode("utf-8"))
+            handle.write(data)
         _seal(self.staging, _shape_group())
         self.check()
         # Publication is the last step: nothing that can fail comes after it.

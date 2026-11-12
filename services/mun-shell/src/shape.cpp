@@ -218,11 +218,20 @@ void ShapeLoader::load(quint64 token, const QVariantMap &request)
 Shape::Shape(QObject *parent) : QObject(parent)
 {
     const QString marker = runtimeFile("shape-decoding");
-    if (QFile::exists(marker)) {
+    if (QFileInfo(marker).isFile()) {
         m_skip = readMarker(marker);
         QFile::remove(marker);
         qWarning("mun-shell: shape: the last start ended while decoding insertion %s; its identity is skipped",
                  qPrintable(m_skip));
+    }
+    // The same for a motion's images (MotionScene's loader): that
+    // insertion's motion is not played again, its v1 look is.
+    const QString motionMarker = runtimeFile("shape-decoding-motion");
+    if (QFileInfo(motionMarker).isFile()) {
+        m_skipMotion = readMarker(motionMarker);
+        QFile::remove(motionMarker);
+        qWarning("mun-shell: shape: the last start ended while decoding the motion of insertion %s; its motion is "
+                 "skipped, its v1 look shown", qPrintable(m_skipMotion));
     }
     m_cueSpent = readMarker(runtimeFile("shape-cue"));
     // Every decode of the shell's (the card window, the cover, the world) has
@@ -357,6 +366,7 @@ void Shape::clear(bool notify)
     m_sounds.clear();
     m_live = false;
     m_world.clear();
+    m_motion.clear();
     m_root.clear();
     m_plated = false;
     m_veil = QColor();
@@ -525,6 +535,13 @@ void Shape::apply(quint64 token, const QVariantMap &result, const QImage &window
 
     // The world and the transition (full mode: colours only draws no world).
     const QVariantMap world = document.value("world").toMap();
+    const QVariantMap motion = document.value("motion").toMap();
+    // Both, when the package has both: QML draws the world only if the
+    // motion cannot be loaded.
+    if (full && !motion.isEmpty() && insertion != m_skipMotion) {
+        m_motion = motion;
+        m_root = m_card.value("shape").toMap().value("path").toString();
+    }
     if (full && !world.isEmpty() && world.contains("backdrop")) {
         m_world = world;
         m_world.insert("bytes", m_card.value("shape").toMap().value("bytes"));
@@ -540,7 +557,7 @@ void Shape::apply(quint64 token, const QVariantMap &result, const QImage &window
     bool ok = false;
     const double seconds = transition.value("seconds").toDouble(&ok);
     m_seconds = ok && seconds >= 0.8 && seconds <= 4 ? seconds : 1.6;
-    m_plated = m_dressed || !m_world.isEmpty();
+    m_plated = m_dressed || !m_world.isEmpty() || !m_motion.isEmpty();
     if (!palette.isEmpty())
         m_veil = atLuminanceOf(colourOf(palette.value("deep")), kHandOver);
 
@@ -578,6 +595,8 @@ void Shape::apply(quint64 token, const QVariantMap &result, const QImage &window
     }
     if (!m_world.isEmpty())
         said << QStringLiteral("world");
+    if (!m_motion.isEmpty())
+        said << QStringLiteral("motion");
     if (package)
         said << QStringLiteral("%1 %2/%3 %4 s").arg(m_entry, m_transitionIn, m_transitionOut).arg(m_seconds, 0, 'f', 1);
     if (first)

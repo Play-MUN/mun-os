@@ -29,12 +29,30 @@ afplay examples/shape/sea/sfx/insert.wav               # macOS; aplay on Linux
 From a copy to a card of your own: [dress the console in your
 game](../../docs/guides/shape-your-game.md).
 
-Every image and sound here is made by [`generate.py`](generate.py) with
-Python's standard library and fixed seeds: gradients, silhouettes from sums
-of whole-period sines (so moving layers tile), supersampled sprites, and
-additive, filtered-noise and plucked-string synthesis for the sounds. They
-are this repository's own work under its licence
-([licensing](../../docs/licensing.md)).
+A third sample, `reef` (Reef — MUN Shape example), is a template for Shape's motion (`mun-shape/1.1`,
+a draft: [docs/shape-motion.md](../../docs/shape-motion.md)): a sea scene
+built in code, rendered from 3D and set moving by the console, with
+schools of fish going round in depth, a shark, crabs, jellyfish, kelp,
+rays, light on the sand, the view drifting, and a school that answers Play.
+[`reef-studio`](reef-studio/README.md) is the scene and the bake that make
+it; start from either (`./mun card shape init DIR --example reef`). The reef
+is MUN Shape's official example of motion: the console's player plays it as
+any package, the studio is its source, and `reef` is written only by the
+studio; used anywhere else, it is taken whole from one commit
+([three parts](reef-studio/README.md#three-parts)). Only a
+console built from this source plays the motion; a published preview's
+console shows the reef's v1 look, its still poster
+([trying it](../../docs/shape-motion.md#trying-it)).
+
+Every image and sound of `sea` and `paper` is made by
+[`generate.py`](generate.py) with Python's standard library and fixed
+seeds: gradients, silhouettes from sums of whole-period sines (so moving
+layers tile), supersampled sprites, and additive, filtered-noise and
+plucked-string synthesis for the sounds. The reef's images are rendered by
+its studio from a scene built in code (with `sea`'s caustics and bubble),
+and its sounds are `sea`'s. All of them are this repository's own work
+under its licence ([licensing](../../docs/licensing.md)); the studio's page
+says what in it is not.
 
 ```sh
 python3 examples/shape/generate.py            # remake both packages

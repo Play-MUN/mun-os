@@ -30,6 +30,7 @@ draws the parts that depend on it accordingly (*How it is drawn*).
 | `src/cardclient.*` | Mirror of the card service over its UNIX socket: snapshot, events, reconnection; exposes state, manifest, error, cover (data URL) and whether the active card arrived while the shell was watching to QML |
 | `src/shape.*`, `src/contrast.h`, `src/readpalette.*` | A Game Card's MUN Shape on the eligible surfaces: the export read and decoded off the GUI thread, its colours verified again with the contrast rule, the palette read from a cover, the phases of its coming in and leaving (*A Game Card's identity*) |
 | `src/shapeworld.*`, `src/shapefront.h` | The package's world, prepared and painted on its own thread, and the fronts of its transitions |
+| `src/motionscene.*`, `shaders/sprite.*` | The motion of a `mun-shape/1.1` package (draft, [docs/shape-motion.md](../../docs/shape-motion.md)): its images decoded off the GUI thread, one simulation drawn as one composed image or as scene graph nodes (on a graphics API, every run of things from one image as one node of quads), its reactions to the console's events |
 | `src/framewatch.*` | The interface's frame and key timings while a world is drawn; the step down when navigation suffers |
 | `src/renderinfo.*` | How the window is drawn: the software renderer or a graphics API, whether that API is accelerated, the renderer and render loop, in the journal |
 | `src/memory.*` | Once the start-up is over, most of the memory the shell frees goes back to the system (glibc's thresholds fixed, then a trim) |
@@ -365,6 +366,38 @@ code (`src/shape.*`, `src/shapeworld.*`, `src/shapefront.h`):
   - The world behind Home (`ShapeWorld`): the package's backdrop, layers,
     sprite emitters and light textures, in motion (docs/shape.md, "How the
     console draws a world").
+  - For a package with motion (format `mun-shape/1.1`, a draft in no
+    release), its scene in place of the world (`MotionScene`,
+    [docs/shape-motion.md](../../docs/shape-motion.md)): its planes,
+    characters, particles and lights, the moments of activity, and its
+    reactions to Play in focus, Play pressed, the card coming in, coming
+    back after a game and being released; a launch that is refused, or
+    accepted and ended before its game started (matched to this shell's own
+    launch by its session), gives back what Play pressed changed. If it cannot be loaded (an image that
+    does not decode, its images over 64 MiB decoded, its export gone, nothing in it to draw) the
+    journal says why and Home draws the package's v1 world instead. The
+    motion, its export and its insertion reach the scene together, and the
+    export must be the insertion's own (`<insertion>.<attempt>`, as the card
+    service names it). Before its images are decoded, the marker
+    `shape-decoding-motion` in the runtime directory is written naming the
+    insertion; if it cannot be, nothing is decoded and the v1 world is
+    drawn. If decoding takes the shell down, the next start skips that
+    insertion's motion and shows its v1 look; other insertions are not
+    affected. A clean stop (the launcher's, around every game) removes the
+    markers (`ExecStopPost` in `deploy/mun-shell.service`), so a motion that
+    was only being decoded is not skipped. MUN's panel sits on its plate
+    over the motion as over a world.
+    It is drawn by one of two ways
+    (`MUN_SHELL_MOTION_BACKEND`, laboratory only): `cpu` composes each frame
+    into one image at the look's resolution on a worker thread; `graph`
+    (the default) puts one scene graph node per thing (on a graphics API,
+    one node per run of things from one image). The journal says the way,
+    the look and the images decoded, and every 10 s the ticks, the frames
+    composed, the ticks skipped and the composition times. With
+    `MUN_SHELL_MOTION_TRACE` set (laboratory only) it also logs, each second
+    of scene time, a digest of what the simulation decided (actors,
+    particles, lights): the same events at the same steps give the same
+    digests on any console, which is how two machines' runs are compared.
   - The main arc's entries: the game's plate under each label, in its
     material and at the opacity its text needs over any world; its text
     colour; a chosen bar of that colour with the plate's colour as label;
@@ -515,6 +548,24 @@ code (`src/shape.*`, `src/shapeworld.*`, `src/shapefront.h`):
     another card, a changed choice, a result that waits;
   - the world alone: its detail, its frames in motion, still and at rest,
     its steps down, a world that does not decode;
+  - the motion player alone (draft), both ways: it keeps drawing while
+    what it draws grows on screen, simulating at its rate; a still frame
+    holds and matches between the two ways, the character and the glow
+    compared where they are; a plant bends from its foot in bands alike
+    both ways; Play in focus takes a character to its path's end; an
+    export gone, an image missing and images over their budget draw
+    nothing and say so; a frame's list is bounded; events while held still
+    do not pile up; the focus coming and going quickly; the same events at
+    the same steps give the same simulation both ways, with particles, a
+    light and reactions;
+  - the motion with the shell's own `Main.qml`, in both designs: the
+    reef's school mills below the card object with Play in focus, every
+    fish of it in sight all the way round; Play
+    pressed and the launch refused (the scene given back) or accepted (the
+    dive), and pressed while the focus reaction settled; coming back after
+    a game; released and removed; MUN's panel on its plate over a white
+    motion; a motion that does not decode, drawn as the v1 world; a motion
+    whose decoding took the shell down, skipped;
   - the world's memory at 1080p and 1440p, the shell's own peak measured
     against the estimate: layers and a backdrop that scale large, 16-bit
     and palette images, a sample stepped down to still (composed in place);

@@ -16,7 +16,8 @@ it ([os/README.md](../os/README.md)).
 
 - [`shape`](shape/README.md): two MUN Shape packages, `sea` and `paper`,
   drawn and synthesised by a script here; the same contract, two different
-  identities ([docs/shape.md](../docs/shape.md)).
+  identities ([docs/shape.md](../docs/shape.md)). And `reef`, a template for
+  Shape's motion (a draft), with the 3D scene and the bake that make it.
 
 A game this repository does not carry, such as a port of one you own, is
 compiled from a recipe you keep outside it (`./mun dev build --recipe DIR`,

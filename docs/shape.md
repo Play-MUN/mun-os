@@ -17,6 +17,9 @@ and [How the console uses a package](#how-the-console-uses-a-package); what
 it was measured to cost, in a virtual machine, is under
 [Measured](#measured).
 
+A draft of motion for packages (format `mun-shape/1.1`, in no release) is
+described in [MUN Shape motion](shape-motion.md).
+
 ## Where the package lives
 
 The package is the directory `mun-shape/` at the root of the card's content
@@ -467,7 +470,9 @@ The algorithm, exact so that the console and the checker agree:
   identity are checked between chunks. The service never decodes an image
   or a sound.
 - The export holds only the files the checker accepted and the normalised
-  `shape.json`, bound to the insertion and content version; files are 0440,
+  `shape.json`, bound to the insertion and content version (the bytes the
+  checker measured with that version: within the shell's 256 KiB, or the
+  motion is dropped, or nothing is published); files are 0440,
   folders 0550 and the export's own folder 0750 (group: the shell's, which
   reads and never writes), sealed before it is published,
   as the last step, with one rename as `/run/mun/shape/<insertion>.<attempt>/`.
@@ -622,7 +627,80 @@ On a card, the package is the folder `content/mun-shape/`.
   only in a console with no other card in. The console's build must record
   the MUN Shape it reads (`shape` in its BUILD-INFO); an older guest is
   refused, with the way to one that shows it
-  ([the laboratory](../vm/README.md#mun-shape-preview)).
+  ([the laboratory](../vm/README.md#mun-shape-preview)). A package with
+  motion on a console that plays none is a warning: it shows the v1 look.
+
+### Exporting a package
+
+A package used outside this repository (a website that shows it, a
+development kit that starts from it) is taken from one commit, whole, so
+that no copy is edited apart from its source:
+
+```sh
+./mun card shape export examples/shape/reef OUT \
+  --sources examples/shape/reef-studio \
+  --sources examples/shape/sea/world/caustics.png --sources examples/shape/sea/world/bubble.png
+./mun card shape verify-export OUT/reef-<commit>      # exit 0: whole, as exported
+```
+
+`export` writes `OUT/<name>-<first 12 digits of the commit>/`: `package/`
+(`shape.json` and every file the checker uses), `sources/` (what Git tracks
+under each `--sources` path, by its path in the repository, so a relative
+reference between them still holds), `notices/` (the repository's
+`LICENSE`, `NOTICE` and `NAME-AND-LOGO.txt`) and `export.json`. That
+manifest holds only what the commit and the paths decide: the commit, the
+paths, the package's declared `format` and `motion_draft`, and every file
+with its SHA-256 and size. The same commit and paths give the same bytes,
+and the SHA-256 of `export.json` names the export. What the checkout knows
+besides (its `origin`, the remote branches that hold the commit as last
+fetched) and the checker's verdict are said when exporting, not written: a
+remote branch seen locally is information, not an authorisation to use the
+export anywhere.
+
+It takes everything from the commit of the package's own repository (never
+the working tree, nor the repository a Git hook running it points at): the
+package is checked, and the files it uses chosen, from the commit's bytes.
+It refuses:
+
+- a package or source with changes not committed, or with files Git is
+  told not to compare (`assume-unchanged`, `skip-worktree`)
+  (`export_uncommitted`);
+- a new file Git does not track under them, or a file the package uses
+  that the commit does not have (`export_untracked`; ignored files, such
+  as a bake's output, are not sources);
+- a `--sources` path the commit does not have or that gives no file
+  (`export_source_missing`), or one that is the package, holds it, is
+  inside it or is inside another source (`export_source`);
+- a symbolic link (`export_symlink`) or a submodule (`export_submodule`)
+  in the package or a source: Git keeps neither as a file of this
+  repository, and a link is never written as a file holding its target;
+- a name `verify-export` would not accept (`export_path`): every part of
+  every path letters, digits, `.`, `_` or `-`, and no two paths that
+  differ only in case;
+- a package no console would use (`export_unused`).
+
+The sources are sorted and repeated ones dropped, so the same paths in any
+order give the same export. `export.json` is written as the same bytes on
+every system (ASCII, one `\n` at the end). The export is written beside
+its final name (`.<name>-<commit>.part-…`), checked with `verify-export`,
+and only then given its name; an export that fails, is refused or cannot
+be written (`export_write`, `export_verify`) leaves nothing. It records a
+commit, not a branch: whoever uses it takes a new version only by
+exporting again.
+
+`verify-export` takes nothing for an export but a whole one, and exactly
+what `export` writes: a manifest of this format with no other key, its
+commit, package and sources (repository paths, each source giving at least
+one file), its package's format and draft, and its files (`package/shape.json`
+among them, every path inside `package/`, `sources/` under a declared
+source, or `notices/` for the repository's notices); every file there with
+its digest and size and no other file, link or folder; and the package in it
+one a console would use, as declared, with every file it uses and no other.
+It answers with what differs (exit 2), never with a failure of its own, for
+a manifest or `shape.json` that is not JSON or not an object, or a file it
+cannot read. With `--expect SHA256` it also requires the identity pinned.
+Whoever uses the export pins that identity and runs the same check in its
+own tests.
 
 ### Defective packages
 
@@ -704,6 +782,15 @@ around any of them stays valid.
 | `shape_contrast` | colours | the game's set does not keep contrast; MUN's set is used |
 | `shape_unknown_field` | note | an unknown field, ignored |
 | `shape_minor_newer` | note | a later minor version; what is known is used |
+| `shape_motion_field` | motion | a missing or mistyped field in the motion (draft, [motion](shape-motion.md)) |
+| `shape_motion_reference` | motion | the motion names something that does not exist |
+| `shape_motion_count` | motion | the motion over one of its limits |
+| `shape_motion_budget` | motion | the motion's images over their budget |
+| `shape_motion_not_drawn` | note | the motion uses something this console reads and does not draw yet (the motion is used) |
+| `shape_motion_draft` | motion | the motion written for another revision of its draft (`motion_draft`), or for none |
+| `shape_motion_empty` | motion | the motion declares nothing to draw; the v1 look stays |
+| `shape_export_size` | package | the exported document, measured with the card's content version, over the shell's 256 KiB even without the motion |
+| `shape_motion_error` | motion | the checker failed reading the motion (its own failure, said in the detail); the motion is dropped, the v1 look stays |
 
 Messages are in Spanish, the console's language; the list is `NOTE_CODES` in
 [`mun_card/shape.py`](../tools/mun-card/mun_card/shape.py).

@@ -50,7 +50,7 @@ class Fixture(unittest.TestCase):
         self.enterContext(patch.object(vm, "GUESTS_ROOT", self.root / "guests"))
         self.enterContext(contextlib.redirect_stdout(io.StringIO()))
 
-    def build(self, name="b1", shape=None, image_format=None):
+    def build(self, name="b1", shape=None, image_format=None, motion=None):
         """A finished build: a qcow2 one as builds made before BUILD-INFO
         recorded the format, or one of `image_format`."""
         build = self.root / "builds" / name
@@ -66,6 +66,8 @@ class Fixture(unittest.TestCase):
             info["image_format"] = image_format
         if shape:
             info["shape"] = {"format": shape}
+        if motion is not None:
+            info["shape"].update(minor=1, motion={"draft": motion})
         (build / "BUILD-INFO.json").write_text(json.dumps(info))
         (build / "SHA256SUMS").write_text(f"{digest}  {image.name}\n")
         return build
@@ -384,9 +386,24 @@ class ShapeConsoleTests(Fixture):
         preview.return_value.run.assert_called_once()
         self.assertIn("already on, so no window opens", out.getvalue())
 
+    def test_a_package_with_motion_on_a_console_that_plays_none_is_said_before_it_starts(self):
+        import shapepreview
+        self.build("b1", shape="mun-shape/1")
+        with patch.object(vm, "run"), patch.object(vm, "which", side_effect=lambda name: name):
+            mundev.create_guest("shape", self.root / "builds" / "b1")
+        args = self.shape_args("shape")
+        args.folder = str(ROOT / "examples" / "shape" / "reef")
+        out = io.StringIO()
+        with patch.object(vm, "select_instance"), patch.object(vm, "read_pid", return_value=4242), \
+                patch.object(vm, "main"), patch.object(shapepreview, "Preview"), contextlib.redirect_stdout(out):
+            self.assertEqual(mundev.cmd_shape(args), 0)
+        self.assertIn("[shape] warning: guest shape runs build b1, whose BUILD-INFO says it plays no Shape motion",
+                      out.getvalue())
+
     def test_the_list_says_which_builds_and_guests_show_shape(self):
         self.build("b1")
         self.build("b2", shape="mun-shape/1")
+        self.build("b3", shape="mun-shape/1", motion=1)
         with patch.object(vm, "run"), patch.object(vm, "which", side_effect=lambda name: name):
             mundev.create_guest("old", self.root / "builds" / "b1")
             mundev.create_guest("new", self.root / "builds" / "b2")
@@ -394,6 +411,8 @@ class ShapeConsoleTests(Fixture):
         with contextlib.redirect_stdout(out):
             mundev.cmd_list(argparse.Namespace())
         lines = out.getvalue().splitlines()
+        self.assertTrue(any(line.startswith("build b3") and line.endswith("shape mun-shape/1 with motion (draft 1)")
+                            for line in lines), lines)
         self.assertTrue(any(line.startswith("build b1") and line.endswith("shape not recorded") for line in lines))
         self.assertTrue(any(line.startswith("build b2") and line.endswith("shape mun-shape/1") for line in lines))
         self.assertTrue(any(line.startswith("guest new") and line.endswith("shape mun-shape/1") for line in lines))

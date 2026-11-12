@@ -159,11 +159,27 @@ Window {
                 window.sound("shape_exit")
                 window.shapeLeave()
             }
+            // The motion's events (docs/shape-motion.md): the identity coming
+            // in after an insertion or after a game, and leaving on release.
+            if (Shape.phase === "entering")
+                motionScene.event(Shape.entry === "arrival" ? "arrive" : "return")
+            else if (Shape.phase === "leaving" && Shape.exit === "release")
+                motionScene.event("leave")
         }
     }
+    // Play in focus (MUN Disk's options, on Play), and leaving it, for the
+    // motion's reactions; Play pressed is its launch.
+    readonly property bool playFocused: Shape.phase === "present" && level === 2 && previousLevel === 0
+                                        && focusedEntry.key === "card" && !!selectedOption && selectedOption.sound === "launch"
+    onPlayFocusedChanged: motionScene.event(playFocused ? "focus.play" : "focus.away")
+    // A refused launch (onLaunchRejected, below) gives back what it changed.
+    // Starting may drop for a moment as the launcher accepts (its answer
+    // comes before its new state): the motion takes one launch until then.
+    onStartingChanged: if (starting) motionScene.event("launch")
     readonly property bool homeOnScreen: powered && !inSettings && !modal && !starting && !boot.playing && !boot.visible
                                          && menus.mainOpacity === 1 && !modalLayer.visible && !startCover.visible
     readonly property bool shapeMayBegin: Shape.phase === "ready" && world.ready
+                                          && (Object.keys(Shape.motion).length === 0 || motionScene.drawn || motionScene.failed)
                                           && (Shape.entry === "arrival" ? homeOnScreen : powered)
     onShapeMayBeginChanged: if (shapeMayBegin) Qt.callLater(shapeBegin)
     function shapeBegin() {
@@ -592,8 +608,15 @@ Window {
     Connections {
         target: LaunchClient
         function onLaunchRejected(code, message) {
+            motionScene.event("launch.refused")
             window.sound("error")
             window.feedback = I18n.launchError({ code: code, message: message })
+        }
+        // Accepted, then it ended before the game started (the result says
+        // why): what the launch changed in the motion goes back as well, and
+        // Play can be pressed again.
+        function onLaunchFailed(reason) {
+            motionScene.event("launch.refused")
         }
         function onReleaseFinished(ok, code, message) {
             if (ok) {
@@ -761,14 +784,14 @@ Window {
             sourceComponent: Backdrop {
                 anchors.fill: parent
                 // Covered by a game's world, MUN's rests and is not drawn.
-                visible: !world.covering
+                visible: !canvas.covered
                 orb: Theme.orb
                 hour: status.now.getHours() + status.now.getMinutes() / 60
                 // A package's light and tint come with its transition; a lent or
                 // read one at once.
                 glowColor: Shape.phase === "ready" ? "transparent" : Shape.ambient
                 tint: Shape.phase === "ready" ? "transparent" : Shape.tint
-                running: window.powered && !ShellSettings.reduceMotion && !world.covering
+                running: window.powered && !ShellSettings.reduceMotion && !canvas.covered
             }
         }
         // The orbital design's background, its slow motion on 10 frames a
@@ -779,8 +802,8 @@ Window {
             active: window.orbital
             sourceComponent: OrbitalBackdrop {
                 anchors.fill: parent
-                visible: !world.covering
-                running: window.powered && !ShellSettings.reduceMotion && !world.covering
+                visible: !canvas.covered
+                running: window.powered && !ShellSettings.reduceMotion && !canvas.covered
                 dial: ShellSettings.reduceMotion ? 0 : window.dial
                 Behavior on dial {
                     enabled: !ShellSettings.reduceMotion
@@ -794,7 +817,9 @@ Window {
             id: world
             anchors.fill: parent
             visible: Shape.phase === "entering" || Shape.phase === "present" || Shape.phase === "leaving"
-            world: Shape.world
+            // The v1 world, unless the package's motion plays in its place:
+            // drawn after all if the motion cannot be loaded.
+            world: Object.keys(Shape.motion).length === 0 || motionScene.failed ? Shape.world : ({})
             root: Shape.root
             transition: Shape.kind
             progress: Shape.progress
@@ -809,6 +834,29 @@ Window {
             still: ShellSettings.reduceMotion
             frontLight: Shape.glow.valid ? Shape.glow : Shape.ambient.valid ? Shape.ambient : Theme.led
             frontAccent: Shape.focus
+        }
+        // A package's motion (mun-shape/1.1, draft; docs/shape-motion.md),
+        // played instead of its v1 world: it comes in and leaves with the
+        // identity's transition, under MUN's scrim in Settings and dialogs.
+        readonly property bool covered: world.covering || (motionScene.visible && Shape.phase === "present")
+        MotionScene {
+            id: motionScene
+            anchors.fill: parent
+            // One package, whole: its motion, its export and its insertion
+            // (src/motionscene.h).
+            source: ({ motion: Shape.motion, root: Shape.root, insertion: Shape.insertion })
+            disc: window.objectCentre
+            visible: drawn && (Shape.phase === "entering" || Shape.phase === "present" || Shape.phase === "leaving")
+            opacity: Shape.phase === "present" ? 1 : Math.min(1, Shape.progress)
+            running: window.powered && visible
+            still: ShellSettings.reduceMotion
+        }
+        Rectangle {
+            anchors.fill: motionScene
+            visible: motionScene.visible
+            color: Theme.screen
+            opacity: (window.inSettings || !!window.modal) ? 0.78 : 0
+            Behavior on opacity { NumberAnimation { duration: 400; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.ease } }
         }
         Loader {
             id: heroLoader
@@ -900,7 +948,7 @@ Window {
                     OrbitalFocus {
                         icon: window.focusedEntry.icon || ""
                         tint: window.sectionLight
-                        overNight: !world.covering
+                        overNight: !canvas.covered
                         // The card object (docs/shape.md): the window, outline
                         // and light the card's package gives, as the
                         // transition reaches it.
@@ -938,7 +986,8 @@ Window {
                 content: window.panel
                 // The game's panel: the Game Card entry's, on the main arc.
                 dressed: window.focusedEntry.key === "card" && !window.inSettings
-                overWorld: world.drawn && !window.inSettings
+                // Over a game's world or its motion, on a plate.
+                overWorld: (world.drawn || motionScene.visible) && !window.inSettings
                 selected: window.level === 2 ? window.optionIndex : -1
                 note: window.note
                 onOptionClicked: (index) => { if (!window.wake()) window.clickOption(index) }

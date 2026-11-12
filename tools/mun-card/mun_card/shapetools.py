@@ -17,7 +17,7 @@ import zlib
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from . import shape
+from . import motion, shape
 from .errors import CardError
 from .validate import COVER_MAX_BYTES, COVER_MAX_SIDE
 
@@ -745,7 +745,8 @@ def write_fixture(folder: Path, name: str) -> Path:
 
 def named_files(document: Dict[str, object]) -> List[str]:
     """Every file a package's document names, whether the checker keeps its
-    block or not: the card's window, the sounds and the world's images."""
+    block or not: the card's window, the sounds and the world's images,
+    and from format 1.1 the motion's (motion.named_files)."""
     names: List[str] = []
 
     def take(value) -> None:
@@ -773,6 +774,14 @@ def named_files(document: Dict[str, object]) -> List[str]:
             take(emitter.get("sprite"))
         for light in items(world.get("light")):
             take(light.get("texture"))
+    # A 1.1 document's motion names files of its own; an older or unreadable
+    # format names none, as a console that reads it would see none.
+    try:
+        _, minor = shape.format_version(document)
+    except shape._Unusable:
+        minor = 0
+    if minor >= 1:
+        names.extend(motion.named_files(document))
     return sorted(set(names))
 
 

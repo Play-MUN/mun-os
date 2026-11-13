@@ -34,6 +34,18 @@
 // the next sound tries again after kRetry. With MUN_SHELL_TIMING set, the
 // journal says when the device is opened and let go.
 //
+// The start-up sound is the one case where that moment is never available
+// later: a display that was given no stream before it would swallow its
+// first notes while the picture already moves (measured on a board's HDMI
+// display: about two seconds). So at the first start of a boot main() makes
+// the one instance before the application, awake, and the device plays its
+// silence while the interface loads; the start-up waits until it has played
+// for long enough (openFor(), BootLayer.qml). Where the sound card comes up
+// after the shell starts (a board's audio DSP), expectDevice() says one is
+// coming: until then a closed device is tried every kExpectRetry instead of
+// kRetry, and the failed attempts stay out of the journal (ALSA's own
+// messages included).
+//
 // stop() fades a sound out over kFadeFrames instead of cutting it.
 //
 // A Game Card's MUN Shape package may bring its own menu sounds and an
@@ -49,10 +61,13 @@
 // again) is over: heard() says NaN for it from then on, and dropped() says
 // so, as it does for a sound asked for while the device is being retried.
 //
-// Thread contract: play(), stop(), useGameSounds(), playGame() and heard() on
-// the GUI thread (heard() reads what the worker wrote under a lock), started()
-// and dropped() delivered on it; the worker owns the ALSA handle and is joined
-// by the destructor, before any member it reads is destroyed.
+// Thread contract: play(), stop(), useGameSounds(), playGame(), heard(),
+// openFor() and expecting() on the GUI thread (heard() reads what the worker
+// wrote under a lock, openFor() and expecting() atomics), started() and
+// dropped() delivered on it; expectDevice() and setAwake() also on the thread
+// that makes the instance before the application exists. The worker owns the
+// ALSA handle and is joined by the destructor, before any member it reads is
+// destroyed.
 #pragma once
 
 #include <QByteArray>
@@ -62,6 +77,7 @@
 #include <QVariantMap>
 #include <QtQml/qqmlregistration.h>
 
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <deque>
@@ -70,6 +86,9 @@
 #include <mutex>
 #include <thread>
 #include <vector>
+
+class QJSEngine;
+class QQmlEngine;
 
 class SystemSounds : public QObject {
     Q_OBJECT
@@ -87,8 +106,16 @@ class SystemSounds : public QObject {
     Q_PROPERTY(bool awake READ awake WRITE setAwake NOTIFY awakeChanged)
 
 public:
-    explicit SystemSounds(QObject *parent = nullptr);
+    // No default argument: QML makes a default-constructible singleton
+    // itself, without asking create(), and would play through a second
+    // instance beside main()'s.
+    explicit SystemSounds(QObject *parent);
     ~SystemSounds() override;
+
+    // The instance QML gets: the one main() made and provided (owned by
+    // main(), outliving the engine), or a new one the engine owns.
+    static void provide(SystemSounds *one);
+    static SystemSounds *create(QQmlEngine *, QJSEngine *);
 
     // Queues one of the named sounds; unknown names are ignored.
     Q_INVOKABLE void play(const QString &name);
@@ -108,6 +135,14 @@ public:
     // playing (not yet started, played out, or dropped). A device that stalls
     // leaves it where it was until it plays again or the sound is dropped.
     Q_INVOKABLE double heard(const QString &name) const;
+    // Seconds the device has been open and fed without a break; below zero
+    // while it is closed.
+    Q_INVOKABLE double openFor() const;
+    // A device is still expected (expectDevice()) and none is open.
+    Q_INVOKABLE bool expecting() const;
+    // A sound device is expected within `wait`, though there may be none yet
+    // (see above). Zero or less: none is expected.
+    void expectDevice(std::chrono::milliseconds wait);
     int latency() const { return int(kLatencyMicroseconds / 1000); }
     bool gameSounds() const { return m_gameSounds; }
     void setGameSounds(bool on);
@@ -151,6 +186,7 @@ private:
     static constexpr size_t kFadeFrames = kRate / 10;   // 100 ms
     static constexpr std::chrono::seconds kIdle{3};
     static constexpr std::chrono::seconds kRetry{5};
+    static constexpr std::chrono::milliseconds kExpectRetry{250};
 
     static SoundPtr parse(const QByteArray &wav, const QString &name, int gain, double maxSeconds);
     void load(const QString &name, int gain);
@@ -177,5 +213,9 @@ private:
     bool m_keepOpen = false;          // guarded by m_mutex: the worker's
     mutable std::mutex m_progressMutex;
     std::map<QString, Progress> m_progress;  // guarded by m_progressMutex: the worker writes, heard() reads
+    // steady_clock ticks: when the open device was opened (0: closed), the
+    // worker's; until when a device is expected (0: none), expectDevice()'s.
+    std::atomic<std::chrono::steady_clock::rep> m_openedAt{0};
+    std::atomic<std::chrono::steady_clock::rep> m_expectUntil{0};
     std::thread m_worker;
 };

@@ -55,6 +55,11 @@ QString ShellSettings::filePath()
     return directory + QStringLiteral("/settings.ini");
 }
 
+bool ShellSettings::systemSoundsIn(const QSettings &file)
+{
+    return readChoice(file, kSoundsKey, kOnOff) == kOnOff.first();
+}
+
 ShellSettings::ShellSettings(QObject *parent)
     : QObject(parent), m_file(std::make_unique<QSettings>(filePath(), QSettings::IniFormat))
 {
@@ -62,7 +67,7 @@ ShellSettings::ShellSettings(QObject *parent)
     m_language = readChoice(*m_file, kLanguageKey, kLanguages);
     m_clockFormat = readChoice(*m_file, kClockKey, kClockFormats);
     m_safeArea = readNumber(*m_file, kSafeAreaKey, kSafeAreas, 100);
-    m_systemSounds = readChoice(*m_file, kSoundsKey, kOnOff) == kOnOff.first();
+    m_systemSounds = systemSoundsIn(*m_file);
     m_autoPowerOffHours = readNumber(*m_file, kAutoOffKey, kAutoOffHours, 1);
     m_shapeMode = readChoice(*m_file, kShapeKey, kShapeModes);
     m_reduceMotion = readChoice(*m_file, kMotionKey, kOffOn) == QLatin1String("on");

@@ -148,7 +148,18 @@ service and the launcher have answered, "A Skip" shows at the bottom right
 and A (or Enter, or Space) ends the start-up; until then no key does
 anything. When the picture has faded (11.75 s), Home comes in if they have
 answered, while the sound rings on; if not, the LED waits, breathing, until
-they do, or 20 s after the start whatever they do. The picture keeps time
+they do, or 20 s after the start whatever they do. The sound's first notes
+are never the first thing the display hears: a display given a new stream
+plays it only a moment later (on a board's HDMI display, about two
+seconds), so the shell opens the sound device as it starts, before the
+interface loads, feeding it silence, and the start-up begins only once the
+device has played for 2 s; meanwhile the LED breathes in the dark. That is
+usually over before the interface has loaded. Where the sound card comes
+up after the shell starts (a board's audio DSP), the unit sets
+`MUN_SHELL_SOUND_WAIT` (seconds): the shell looks for the device every
+0.25 s until then, and the start-up waits for it; without a device, or none
+expected, it does not wait. The journal says how long it waited. The
+picture keeps time
 with the sound: on every frame its clock is what has been heard of it, the
 samples written to the device less what the device still holds. The black
 screen waits up to 3 s for the sound's first samples, and the picture holds
@@ -789,7 +800,9 @@ I/O error). That silence is a noise far below hearing (at most 2 of 32768)
 rather than exact zeros. While the menus are shown with their sounds on,
 dimmed too, the device stays open, at about one percent of a core on a
 board: an HDMI display may need a moment to hear a stream that starts
-again, and the first move after a pause would be lost in it. Otherwise it
+again, and the first move after a pause would be lost in it. For the same
+reason, at the first start of a boot it is opened as the shell starts,
+before the start-up (*Motion*). Otherwise it
 is let go after three seconds of silence; the shell holds none of it while
 a game runs (the launcher stops the shell first). A device that
 fails is opened afresh at once; no device, or one that fails again, means

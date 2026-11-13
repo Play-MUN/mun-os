@@ -1,6 +1,7 @@
 #include "systemsounds.h"
 
 #include <QFile>
+#include <QJSEngine>
 #include <QMetaObject>
 #include <QStringList>
 #include <QtEndian>
@@ -9,6 +10,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdarg>
+#include <cstdio>
 #include <limits>
 
 namespace {
@@ -33,7 +36,63 @@ quint32 u32(const QByteArray &bytes, qsizetype at)
     return qFromLittleEndian<quint32>(bytes.constData() + at);
 }
 
+SystemSounds *provided = nullptr;
+
+// ALSA's messages, as its own handler prints them, except while a device is
+// expected: its attempts to open one that is not there yet are not news.
+std::atomic<bool> alsaQuiet{false};
+
+void alsaMessage(const char *file, int line, const char *function, int error, const char *format, ...)
+{
+    if (alsaQuiet.load(std::memory_order_relaxed))
+        return;
+    std::fprintf(stderr, "ALSA lib %s:%i:(%s) ", file, line, function);
+    va_list arguments;
+    va_start(arguments, format);
+    std::vfprintf(stderr, format, arguments);
+    va_end(arguments);
+    if (error)
+        std::fprintf(stderr, ": %s", snd_strerror(error));
+    std::fputc('\n', stderr);
+}
+
 } // namespace
+
+void SystemSounds::provide(SystemSounds *one)
+{
+    provided = one;
+}
+
+SystemSounds *SystemSounds::create(QQmlEngine *, QJSEngine *)
+{
+    if (!provided)
+        return new SystemSounds(nullptr);
+    QJSEngine::setObjectOwnership(provided, QJSEngine::CppOwnership);
+    return provided;
+}
+
+void SystemSounds::expectDevice(std::chrono::milliseconds wait)
+{
+    m_expectUntil = wait > std::chrono::milliseconds::zero()
+        ? (std::chrono::steady_clock::now() + wait).time_since_epoch().count()
+        : 0;
+    m_wake.notify_one();
+}
+
+bool SystemSounds::expecting() const
+{
+    const auto until = m_expectUntil.load();
+    return until != 0 && m_openedAt.load() == 0 && std::chrono::steady_clock::now().time_since_epoch().count() < until;
+}
+
+double SystemSounds::openFor() const
+{
+    const auto opened = m_openedAt.load();
+    if (opened == 0)
+        return -1;
+    const auto now = std::chrono::steady_clock::now().time_since_epoch().count();
+    return std::chrono::duration<double>(std::chrono::steady_clock::duration(now - opened)).count();
+}
 
 SystemSounds::SystemSounds(QObject *parent) : QObject(parent)
 {
@@ -250,17 +309,24 @@ void SystemSounds::run()
         bool done;
     };
     std::vector<Moved> moved;    // how far each sound in this period has gone
-    std::chrono::steady_clock::time_point retryAt{}, lastSound{}, openedAt{};
+    std::chrono::steady_clock::time_point retryAt{}, lastSound{}, openedAt{}, lookedFrom{};
     bool reported = false;
+    bool looked = false;  // a device was expected and not there: lookedFrom says since when
     bool keepOpen = false;  // the worker's copy of m_keepOpen
     int failures = 0;  // writes failed in a row
     quint32 noise = 0x9E3779B9;  // xorshift state of the silence's noise
     static const bool timing = qEnvironmentVariableIsSet("MUN_SHELL_TIMING");
+    snd_lib_error_set_handler(alsaMessage);
+    const auto expected = [this](std::chrono::steady_clock::time_point now) {
+        const auto until = m_expectUntil.load();
+        return until != 0 && now.time_since_epoch().count() < until;
+    };
 
     const auto closeDevice = [&](const char *why) {
         if (pcm) {
             snd_pcm_close(pcm);
             pcm = nullptr;
+            m_openedAt = 0;
             if (timing)
                 qInfo("mun-shell: sound device let go (%s) after %lld s", why,
                       qlonglong(std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - openedAt)
@@ -289,13 +355,22 @@ void SystemSounds::run()
         voices.clear();
     };
     const auto giveUp = [&](const char *what, int error) {
-        if (!reported)
+        const auto now = std::chrono::steady_clock::now();
+        // A device still expected is looked for again soon, and not
+        // reported: it is not there yet.
+        const bool coming = expected(now);
+        if (coming && !looked) {
+            looked = true;
+            lookedFrom = now;
+        }
+        if (!reported && !coming) {
             qWarning("mun-shell: interface sounds off: %s: %s", what, snd_strerror(error));
-        reported = true;
+            reported = true;
+        }
         closeDevice("failed");
         drop();
         failures = 0;
-        retryAt = std::chrono::steady_clock::now() + kRetry;
+        retryAt = now + (coming ? std::chrono::steady_clock::duration(kExpectRetry) : std::chrono::steady_clock::duration(kRetry));
     };
 
     for (;;) {
@@ -345,6 +420,7 @@ void SystemSounds::run()
                 drop();
                 continue;
             }
+            alsaQuiet = expected(now);
             int error = snd_pcm_open(&pcm, "default", SND_PCM_STREAM_PLAYBACK, 0);
             if (error < 0) {
                 pcm = nullptr;
@@ -357,12 +433,19 @@ void SystemSounds::run()
                 giveUp("the sound device refuses 16-bit 48 kHz stereo", error);
                 continue;
             }
+            alsaQuiet = false;
             const auto opened = std::chrono::steady_clock::now();
             if (timing)
                 qInfo("mun-shell: sound device opened in %lld ms (%s)",
                       qlonglong(std::chrono::duration_cast<std::chrono::milliseconds>(opened - now).count()),
                       voices.empty() ? "awake" : "a sound");
+            if (looked) {
+                qInfo("mun-shell: the sound device came %.2f s after the shell first looked for it",
+                      std::chrono::duration<double>(opened - lookedFrom).count());
+                looked = false;
+            }
             openedAt = opened;
+            m_openedAt = opened.time_since_epoch().count();
             lastSound = opened;
         }
 

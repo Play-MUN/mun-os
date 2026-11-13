@@ -46,7 +46,9 @@ come from CardClient. The cases:
   another key does nothing; with them answering late, nothing skips it, the
   LED waits for them once the picture has faded and Home follows them; with
   neither, Home comes after its 20 s; with the interface sounds off its
-  clock runs from the start.
+  clock runs from the start; with a sound device expected
+  (MUN_SHELL_SOUND_WAIT) that never comes, the LED breathes until the
+  wait is over, then the picture runs on its own and the journal says so.
 - home: the shell's own Main.qml (home.qml) against stand-ins for the card
   service and the launcher: an arrival, dialogs, a return, removal, Eject
   safely confirmed and refused, another card, the player's choices, a
@@ -2131,7 +2133,7 @@ def motion_home_cases(shell: Shell, checks: Checks, packages: Path, card, serve,
 
 def boot_cases(shell: Shell, checks: Checks):
     """The start-up as the first start of a boot plays it (boot.qml)."""
-    def run(name, ready_at=None, steps=(), end=16000, settings=""):
+    def run(name, ready_at=None, steps=(), end=16000, settings="", env=None):
         cardd = launchd = None
         if ready_at is not None:
             cardd = Service(shell.work / f"{name}.sock", [[(ready_at, snapshot())]])
@@ -2139,18 +2141,22 @@ def boot_cases(shell: Shell, checks: Checks):
         try:
             output = shell.run(name, "boot.qml", {"steps": list(steps) + [{"at": end, "quit": True}]},
                                socket_path=cardd.path if cardd else None, launcher=launchd.path if launchd else None,
-                               settings=settings, timeout=end / 1000 + 60)
+                               settings=settings, timeout=end / 1000 + 60, env=env)
         finally:
             for service in (cardd, launchd):
                 if service:
                     service.close()
         clocks[name] = re.findall(r"mun-shell: start-up: the picture (follows the sound|runs on its own[^\n]*)", output)
+        waits[name] = re.findall(r"mun-shell: start-up: waited ([0-9.]+) s for the sound device: ([^\n]*)", output)
+        sounds_off[name] = output.count("mun-shell: interface sounds off")
         return lines(output, "BOOT"), lines(output, "KEY")
 
     def first(states, **match):
         return next((s for s in states if all(s[k] == v for k, v in match.items())), None)
 
     clocks = {}   # what each run's start-up said about its clock
+    waits = {}    # what it said about waiting for the sound device
+    sounds_off = {}  # how many times it said the interface sounds are off
 
     # Both services answer at once: the hint shows; Down does nothing, A ends it.
     states, keys = run("boot-ready", ready_at=0, steps=[{"at": 2000, "key": "Down"}, {"at": 3000, "key": "A"}], end=5000)
@@ -2173,6 +2179,8 @@ def boot_cases(shell: Shell, checks: Checks):
     early = next((s for s in states if s["at"] >= 1500), None)
     checks.expect("boot-ready", "without a sound device the picture does not wait for one",
                   early is not None and early["t"] >= 0.5, early)
+    checks.expect("boot-ready", "none expected: the LED never waits for one before the start-up",
+                  not any(s["warming"] for s in states) and not waits.get("boot-ready"), waits.get("boot-ready"))
 
     checks.expect("boot-ready", "the journal says which clock the picture follows", bool(clocks.get("boot-ready")),
                   clocks.get("boot-ready"))
@@ -2208,6 +2216,24 @@ def boot_cases(shell: Shell, checks: Checks):
     early = next((s for s in states if s["at"] >= 1300), None)
     checks.expect("boot-silent", "without the sound, its clock runs from the start (no wait for a device)",
                   early is not None and early["t"] >= 0.8, early)
+
+    # A sound device expected within 4 s of the shell's start (a board's
+    # sound card comes up after the shell starts) that never comes: the LED
+    # breathes in the dark until the wait is over, then the picture runs on
+    # its own. The scene's clock starts once the interface has loaded.
+    states, _ = run("boot-expected", ready_at=0, steps=[], end=7000, env={"MUN_SHELL_SOUND_WAIT": "4"})
+    begun = first(states, playing=True)
+    held = [s for s in states if begun and begun["at"] <= s["at"] < min(begun["at"] + 1000, 2500)]
+    checks.expect("boot-expected", "while the device is expected the start-up waits, the LED breathing",
+                  held and all(s["warming"] and s["t"] < 0 and s["playing"] for s in held), held[-2:])
+    late = next((s for s in states if s["at"] >= 6000), None)
+    checks.expect("boot-expected", "once none is expected any more, the picture runs on its own",
+                  late is not None and not late["warming"] and late["t"] >= 1.0, late)
+    said = waits.get("boot-expected") or []
+    checks.expect("boot-expected", "the journal says how long it waited and that none came",
+                  len(said) == 1 and 1.5 <= float(said[0][0]) <= 4.2 and said[0][1] == "none came", said)
+    checks.expect("boot-expected", "one player of sounds: the device's absence is said once, after the wait",
+                  sounds_off.get("boot-expected") == 1, sounds_off.get("boot-expected"))
 
 
 class Xvfb:

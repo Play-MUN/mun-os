@@ -38,7 +38,8 @@ Item {
     function state() {
         // Looked up each time: the layer lets its drawing go once it has left.
         const hint = find(boot, it => it.objectName === "skipHint")
-        return { t: Math.round(boot.t * 100) / 100, playing: boot.playing, waiting: boot.waiting, canSkip: boot.canSkip,
+        return { t: Math.round(boot.t * 100) / 100, playing: boot.playing, waiting: boot.waiting, warming: boot.warming,
+                 canSkip: boot.canSkip,
                  hint: hint ? Math.round(hint.opacity * 100) / 100 : -1, shown: boot.shown,
                  ready: boot.ready, powered: main.powered, settled: Memory.settled }
     }

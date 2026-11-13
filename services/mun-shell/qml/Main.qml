@@ -126,11 +126,12 @@ Window {
     // sounds are on, dimmed too, so the first sound after a pause, and the
     // first move after the input that undims, is heard (src/systemsounds.h);
     // with System sounds off (every sound the shell plays follows it) it is
-    // let go.
+    // let go. During the start-up too: main.cpp opened it before the
+    // interface loaded, for the start-up's sound (BootLayer.qml).
     Binding {
         target: SystemSounds
         property: "awake"
-        value: window.powered && ShellSettings.systemSounds
+        value: (window.powered || boot.shown) && ShellSettings.systemSounds
     }
     readonly property string shapeSounds: JSON.stringify(Shape.sounds)
     onShapeSoundsChanged: SystemSounds.useGameSounds(Shape.sounds)

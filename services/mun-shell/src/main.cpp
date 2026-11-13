@@ -16,6 +16,9 @@
 #include "shellsettings.h"
 #include "systemsounds.h"
 
+#include <algorithm>
+#include <chrono>
+
 namespace {
 
 // The exit status when the interface cannot be loaded (EX_SOFTWARE): a
@@ -42,6 +45,16 @@ bool firstStartThisBoot()
     return true;
 }
 
+// MUN_SHELL_SOUND_WAIT: seconds within which a sound device that is not
+// there yet is expected at the start of a boot (a board whose sound card
+// comes up after the shell starts sets it in its unit). Unset or 0: none.
+std::chrono::milliseconds expectedSoundWait()
+{
+    bool ok = false;
+    const int seconds = qEnvironmentVariableIntValue("MUN_SHELL_SOUND_WAIT", &ok);
+    return std::chrono::seconds(ok ? std::clamp(seconds, 0, 60) : 0);
+}
+
 } // namespace
 
 int main(int argc, char *argv[])
@@ -55,9 +68,22 @@ int main(int argc, char *argv[])
     // the shell exits and systemd starts it again (displaymode.h).
     if (!display::awaitDisplay())
         return display::kNoDisplayStatus;
+    bool soundsOn = true;
     {
         QSettings settings(ShellSettings::filePath(), QSettings::IniFormat);
         display::prepare(settings);
+        soundsOn = ShellSettings::systemSoundsIn(settings);
+    }
+    const bool firstStart = firstStartThisBoot();
+    // The sounds before the application, so that at the first start of a
+    // boot the device plays its silence while the interface loads: the
+    // start-up's sound must not be the first thing a display hears
+    // (systemsounds.h). QML gets this instance; it outlives the engine.
+    SystemSounds sounds(nullptr);
+    SystemSounds::provide(&sounds);
+    if (firstStart && soundsOn) {
+        sounds.expectDevice(expectedSoundWait());
+        sounds.setAwake(true);
     }
     QGuiApplication app(argc, argv);
     app.setApplicationVersion(QStringLiteral(MUN_SHELL_VERSION));
@@ -80,7 +106,7 @@ int main(int argc, char *argv[])
     QQmlApplicationEngine engine;
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app,
                      [] { QCoreApplication::exit(kInterfaceFailedStatus); }, Qt::QueuedConnection);
-    engine.rootContext()->setContextProperty(QStringLiteral("shellFirstStart"), firstStartThisBoot());
+    engine.rootContext()->setContextProperty(QStringLiteral("shellFirstStart"), firstStart);
     // Home's design is the orbital one, on a graphics API and on Qt Quick's
     // software renderer alike (there, as in the virtual console, its
     // background is drawn once and stays still). MUN_SHELL_DESIGN=previous
@@ -105,14 +131,13 @@ int main(int argc, char *argv[])
     // that comes or goes sounds, with the interface sounds on.
     Gamepads gamepads(engine.singletonInstance<FrameWatch *>("MUN.Shell", "FrameWatch"));
     auto *settings = engine.singletonInstance<ShellSettings *>("MUN.Shell", "ShellSettings");
-    auto *sounds = engine.singletonInstance<SystemSounds *>("MUN.Shell", "SystemSounds");
-    QObject::connect(&gamepads, &Gamepads::connected, [settings, sounds] {
-        if (settings && sounds && settings->systemSounds())
-            sounds->play(QStringLiteral("controller_connect"));
+    QObject::connect(&gamepads, &Gamepads::connected, [settings, &sounds] {
+        if (settings && settings->systemSounds())
+            sounds.play(QStringLiteral("controller_connect"));
     });
-    QObject::connect(&gamepads, &Gamepads::disconnected, [settings, sounds] {
-        if (settings && sounds && settings->systemSounds())
-            sounds->play(QStringLiteral("controller_disconnect"));
+    QObject::connect(&gamepads, &Gamepads::disconnected, [settings, &sounds] {
+        if (settings && settings->systemSounds())
+            sounds.play(QStringLiteral("controller_disconnect"));
     });
     return app.exec();
 }

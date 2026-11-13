@@ -34,10 +34,22 @@ Rectangle {
     property bool shown: true
     // Seconds into the start-up sound; below 0, nothing is lit yet.
     property real t: -1
-    // The start-up is on screen, or its LED waits for the system.
-    readonly property bool playing: running || waiting
+    // The start-up is on screen, its LED waits for the sound device before
+    // it, or waits for the system after it.
+    readonly property bool playing: running || waiting || warming
     property bool running: false
     property bool waiting: false
+    // Before the start-up's sound, the device has to have played its
+    // silence for kWarm: a display hears a stream only a moment after it
+    // starts (on a board's HDMI display, about two seconds), and the
+    // sound's first notes would be lost while the picture moved. main.cpp
+    // opens the device as the shell starts, so this is usually over before
+    // the interface has loaded; otherwise the LED breathes in the dark.
+    // Without a device, or none expected (SystemSounds.expecting()), the
+    // start-up does not wait.
+    readonly property int kWarm: 2000
+    property bool warming: false
+    property double warmFrom: 0
     property bool leaving: false
     property bool late: false
     readonly property bool ready: CardClient.readerAvailable && LaunchClient.available
@@ -65,15 +77,28 @@ Rectangle {
         waiting = false
         heardOnce = false
         t = -1
-        running = true
         ready_.restart()
-        if (ShellSettings.systemSounds) {
-            audible = true
-            SystemSounds.play("startup")
-            noSound.restart()
-        } else {
+        if (!ShellSettings.systemSounds) {
+            running = true
             runAlone(0, "the interface sounds are off")
+        } else if (soundReady()) {
+            begin()
+        } else {
+            warming = true
+            warmFrom = Date.now()
+            warm.start()
         }
+    }
+    // The device has played long enough, or there is none to wait for.
+    function soundReady() {
+        const open = SystemSounds.openFor()
+        return open * 1000 >= kWarm || (open < 0 && !SystemSounds.expecting())
+    }
+    function begin() {
+        running = true
+        audible = true
+        SystemSounds.play("startup")
+        noSound.restart()
     }
     function runAlone(from, why) {
         console.info("mun-shell: start-up: the picture runs on its own from " + from.toFixed(2) + " s: " + why)
@@ -134,7 +159,9 @@ Rectangle {
     function leave() {
         leaving = true
         waiting = false
+        warming = false
         running = false
+        warm.stop()
         noSound.stop()
         ready_.stop()
         shown = false
@@ -143,7 +170,9 @@ Rectangle {
     function powerOff() {
         running = false
         waiting = false
+        warming = false
         leaving = false
+        warm.stop()
         noSound.stop()
         ready_.stop()
         t = -1
@@ -155,6 +184,24 @@ Rectangle {
     FrameAnimation {
         running: root.running
         onTriggered: root.tick()
+    }
+    // The sound device before the start-up (kWarm): checked until it has
+    // played long enough, or until none is expected any more.
+    Timer {
+        id: warm
+        interval: 50
+        repeat: true
+        onTriggered: {
+            if (!root.soundReady())
+                return
+            warm.stop()
+            const open = SystemSounds.openFor()
+            console.info("mun-shell: start-up: waited " + ((Date.now() - root.warmFrom) / 1000).toFixed(2)
+                         + " s for the sound device: "
+                         + (open < 0 ? "none came" : "it had played for " + open.toFixed(2) + " s"))
+            root.warming = false
+            root.begin()
+        }
     }
     // No first samples after kStartWait: the picture goes on alone.
     Timer {
@@ -233,17 +280,18 @@ Rectangle {
                             }
                         }
                     }
-                    // The LED waiting for the system, breathing.
+                    // The LED waiting for the sound device (before the
+                    // start-up) or for the system (after it), breathing.
                     BootIntro {
                         id: waitingLed
                         part: BootIntro.Led
-                        opacity: root.waiting ? 1 : 0
+                        opacity: root.waiting || root.warming ? 1 : 0
                         visible: opacity > 0
                         Behavior on opacity { NumberAnimation { duration: 600 } }
                         breath: -1
                         x: area.x; y: area.y; width: area.width; height: area.height
                         SequentialAnimation on breath {
-                            running: root.waiting
+                            running: root.waiting || root.warming
                             loops: Animation.Infinite
                             NumberAnimation { from: 0; to: 1; duration: 1200; easing.type: Easing.InOutSine }
                             NumberAnimation { from: 1; to: 0; duration: 1200; easing.type: Easing.InOutSine }

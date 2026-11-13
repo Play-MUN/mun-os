@@ -1052,3 +1052,58 @@ class NamingGenerationSaveTests(unittest.TestCase):
         # The same envelopes are valid on a card of the earlier generation.
         out, target = self.handout(game_info(naming="earlier", **self.DIRECTORY))
         self.assertEqual((out["copied"], out["recovered"]), (True, False))
+
+
+class ReaderSlotTests(unittest.TestCase):
+    """A board's card reader (MUN_CARDD_SLOTS): only a whole disk under the
+    named controller is a card, named by its CID; the board's other disks,
+    the system's eMMC among them, never are. Checked on a sysfs tree laid out
+    as the Dragon Q6A's (2026-11-12)."""
+
+    SLOT = "devices/platform/soc@0/8804000.mmc"
+    CID = "1b534d454231515430c1b2c3d40169b2"
+
+    def setUp(self):
+        import tempfile
+        self.sys = Path(tempfile.mkdtemp())
+        self.addCleanup(__import__("shutil").rmtree, self.sys)
+        (self.sys / "block").mkdir()
+        self.disk("mmcblk1", f"{self.SLOT}/mmc_host/mmc1/mmc1:aaaa", cid=self.CID)               # the microSD slot
+        self.disk("mmcblk0", "devices/platform/soc@0/7c4000.mmc/mmc_host/mmc0/mmc0:0001",
+                  cid="45010044413230313601d7a3b2c10e2d")                                         # the eMMC: the system
+        self.disk("sda", "devices/platform/soc@0/a600000.usb/xhci-hcd.1.auto/usb2/2-1/2-1:1.0/host0/target0:0:0/0:0:0:0")
+        self.disk("vdc", "devices/platform/a003c00.virtio_mmio/virtio1", serial="NPT-card01")
+        # A controller whose name starts like the slot's, to catch a prefix of a name.
+        self.disk("mmcblk2", "devices/platform/soc@0/8804000.mmc2/mmc_host/mmc2/mmc2:aaaa", cid=self.CID)
+
+    def disk(self, name, parent, cid=None, serial=None):
+        real = self.sys / parent / "block" / name
+        real.mkdir(parents=True)
+        if cid is not None:
+            (self.sys / parent / "cid").write_text(cid + "\n")
+            (real / "device").symlink_to(self.sys / parent)
+        if serial is not None:
+            (real / "serial").write_text(serial + "\n")
+        (self.sys / "block" / name).symlink_to(real)
+
+    def found(self, slots):
+        with patch.object(cardd, "SYS_ROOT", self.sys), patch.object(cardd, "SLOTS", slots):
+            return {name: serial for name, serial, _ in cardd.enumerate_devices()}
+
+    def test_without_a_reader_only_virtio_cards_are_found(self):
+        self.assertEqual(self.found(()), {"vdc": "NPT-card01"})
+
+    def test_the_slots_card_is_found_by_its_cid_and_nothing_else_of_the_board(self):
+        self.assertEqual(self.found((self.SLOT,)), {"vdc": "NPT-card01", "mmcblk1": f"NPT-sd-{self.CID}"})
+
+    def test_a_card_without_a_readable_cid_is_not_a_card(self):
+        (self.sys / self.SLOT / "mmc_host/mmc1/mmc1:aaaa/cid").write_text("not hex\n")
+        self.assertEqual(self.found((self.SLOT,)), {"vdc": "NPT-card01"})
+
+    def test_the_reader_is_read_from_the_environment(self):
+        script = ("import os, sys; sys.path.insert(0, sys.argv[1]); os.environ['MUN_CARDD_SLOTS'] = "
+                  "'/devices/platform/soc@0/8804000.mmc/:/x/'; import cardd; print(cardd.SLOTS)")
+        import subprocess
+        out = subprocess.run([sys.executable, "-c", script, str(ROOT / "services" / "mun-cardd")],
+                             capture_output=True, text=True, env=dict(os.environ, PYTHONPATH=str(ROOT / "tools" / "mun-card")))
+        self.assertEqual(out.stdout.strip(), "('devices/platform/soc@0/8804000.mmc', 'x')", out.stderr)

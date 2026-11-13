@@ -2,7 +2,9 @@
 """mun-cardd: detects lab Game Cards, validates them and tells the shell.
 
 Responsibilities (docs/game-cards.md): watch block devices, admit only virtio disks whose
-serial starts with `NPT-`, check the ext4 superblock, mount read-only under a
+serial starts with `NPT-` and, where the image names a board's card reader
+(`MUN_CARDD_SLOTS`), the whole card in that reader, check the ext4
+superblock, mount read-only under a
 service-chosen slot directory, validate with the shared `mun_card` package
 and publish state over a local UNIX socket. It never executes card content and
 writes to a card only for a save. For a valid card it also copies the card's
@@ -48,6 +50,14 @@ from mun_card.saves import (FILES_PAYLOAD_MAX_FILES, SAVE_FILE_MAX_BYTES, SAVE_M
 
 PROTOCOL = 1
 SERIAL_PREFIX = "NPT-"
+# A board's card readers, for a laboratory image that has one (a profile sets
+# it; none by default): sysfs paths of the reader's controller, without /sys,
+# separated by ':' (q6a-dev: /devices/platform/soc@0/8804000.mmc, the Dragon
+# Q6A's microSD slot). Only a whole disk under one of them is a card, named by
+# the card's own identity (its CID), so the console's other disks, the system's
+# among them, never are, whatever the device policy lets this service open.
+SLOTS = tuple(path.strip("/") for path in os.environ.get("MUN_CARDD_SLOTS", "").split(":") if path.strip("/"))
+SYS_ROOT = Path("/sys")
 MOUNT_ROOT = Path(os.environ.get("MUN_CARDD_MOUNT_ROOT", "/run/mun/cards"))
 SOCKET_PATH = Path(os.environ.get("MUN_CARDD_SOCKET", "/run/mun/cardd.sock"))
 SOCKET_GROUP = os.environ.get("MUN_CARDD_SOCKET_GROUP", "mun-shell")
@@ -1254,18 +1264,41 @@ def validate_mount(mount: Path) -> dict:
 
 def block_serial(device: str) -> str:
     try:
-        return Path(f"/sys/block/{device}/serial").read_text().strip()
+        return (SYS_ROOT / "block" / device / "serial").read_text().strip()
     except OSError:
         return ""
 
 
+def slot_serial(device: str) -> str:
+    """The identity of the card a board's reader holds as `device`: `NPT-sd-`
+    and the card's CID (32 hex digits, the card's own, as a virtio card's
+    serial is), or "" for any disk not in one of SLOTS or without a CID."""
+    if not SLOTS:
+        return ""
+    try:
+        where = (SYS_ROOT / "block" / device).resolve().relative_to(SYS_ROOT.resolve()).parts
+        cid = (SYS_ROOT / "block" / device / "device" / "cid").read_text().strip().lower()
+    except (OSError, ValueError):
+        return ""
+    if not any(where[:len(slot.split("/"))] == tuple(slot.split("/")) for slot in SLOTS):
+        return ""
+    return f"{SERIAL_PREFIX}sd-{cid}" if re.fullmatch(r"[0-9a-f]{32}", cid) else ""
+
+
+def card_serial(device: str) -> str:
+    """A block device's card identity: a virtio disk's serial, or a board's
+    reader's card (slot_serial); device_added admits only what begins with
+    SERIAL_PREFIX."""
+    return block_serial(device) if device.startswith("vd") else slot_serial(device)
+
+
 def enumerate_devices() -> List[tuple]:
     found = []
-    for entry in sorted(Path("/sys/block").iterdir()):
+    for entry in sorted((SYS_ROOT / "block").iterdir()):
         name = entry.name
-        if not name.startswith("vd"):
+        if not name.startswith("vd") and not SLOTS:
             continue
-        serial = block_serial(name)
+        serial = card_serial(name)
         if serial.startswith(SERIAL_PREFIX):
             found.append((name, serial, f"/dev/{name}"))
     return found
@@ -1570,7 +1603,7 @@ def start_udev_monitor(callback: Callable[[str, str, str, str], None]) -> Option
         for device in iter(monitor.poll, None):
             name = device.sys_name
             if device.action == "add":
-                callback("add", name, block_serial(name), device.device_node or f"/dev/{name}")
+                callback("add", name, card_serial(name), device.device_node or f"/dev/{name}")
             elif device.action == "remove":
                 callback("remove", name, "", "")
     thread = threading.Thread(target=loop, name="udev", daemon=True)
@@ -1608,7 +1641,8 @@ def main(argv=None) -> int:
     control = ControlServer(CONTROL_SOCKET_PATH, manager)
     control_listener = control.start()
     log(f"mun-cardd ready: socket {args.socket}, mounts under {args.mount_root}, "
-        f"serial prefix {SERIAL_PREFIX}, validation delay {VALIDATION_DELAY}s")
+        f"serial prefix {SERIAL_PREFIX}, validation delay {VALIDATION_DELAY}s, "
+        f"readers: {', '.join('/' + slot for slot in SLOTS) or 'none (virtio cards only)'}")
 
     def on_udev(action: str, device: str, serial: str, path: str) -> None:
         if action == "add":

@@ -105,8 +105,11 @@ a card with `content.access = "mount"`, systemd also mounts it, read-only,
 inside the game's unit ([runtime.md](runtime.md#content-during-play)).
 
 - **Eligible media.** In the laboratory, virtio block devices whose serial
-  starts with `NPT-`, the serial the laboratory tool gives a card; the system
-  disk and anything else are never inspected or mounted.
+  starts with `NPT-`, the serial the laboratory tool gives a card; on a
+  laboratory board whose image names its card reader, the whole card in that
+  reader, named by the card's own CID (`NPT-sd-<cid>`; the Dragon Q6A's
+  microSD slot in the `q6a-dev` profile). The system disk and anything else
+  are never inspected or mounted.
 - **Mount.** `ro,nosuid,nodev,noexec`, with the journal loaded, inside the
   service's private mount namespace. The card is written only for a save, in a
   short read-write window ([saves.md](saves.md)).

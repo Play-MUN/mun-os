@@ -10,8 +10,14 @@ stages a game's entry and writes saves. Card format:
 ## Behaviour
 
 - Eligible devices: virtio disks whose serial starts with `NPT-` (what
-  `./mun vm card-attach` assigns). System disks and anything else are never
-  inspected or mounted.
+  `./mun vm card-attach` assigns) and, when the image names a board's card
+  reader in `MUN_CARDD_SLOTS` (sysfs paths of the reader's controller,
+  separated by `:`; none by default), the whole card in that reader, named
+  `NPT-sd-` and the card's CID. Only a whole disk whose sysfs path lies
+  under a named controller counts: the board's other disks, its system
+  eMMC among them, never do, although the device policy that lets the
+  service open the reader's MMC devices also covers them. System disks and
+  anything else are never inspected or mounted.
 - Present at start and inserted later: udev events plus a sysfs rescan every
   5 s as a safety net.
 - Before mounting: whole-image ext4, clean superblock, no recovery flag, no

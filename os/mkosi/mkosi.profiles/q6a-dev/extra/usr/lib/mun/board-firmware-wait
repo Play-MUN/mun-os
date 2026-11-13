@@ -1,0 +1,87 @@
+#!/usr/bin/python3 -I
+"""Development image for a board (profile q6a-dev): how long the board's
+firmware waits at power-on for a key (F2 for its setup, F12 for its boot
+menu) before it boots, showing its own logo meanwhile. Radxa's firmware for
+the Dragon Q6A keeps it in the UEFI variable BootAskTimeoutSecs (a 32-bit
+count of seconds); it ships at 5.
+
+    board-firmware-wait            prints the seconds
+    board-firmware-wait SECONDS    sets them (0 to 10), from the next power-on
+
+mun-board-firmware-wait.service sets 1 at every boot where it is not 1
+already: the console's start shows as little of the board's firmware as
+possible, and a key pressed at power-on still reaches its menu. For a
+longer window on the next boot only, set more and reboot: that boot sets 1
+again. Masking the service keeps any value.
+
+The firmware cannot be asked from Linux to start its setup
+(OsIndicationsSupported is absent), so the window is not set to 0: a key
+at power-on might then not reach the menu at all (not tried).
+"""
+import array
+import fcntl
+import os
+import struct
+import sys
+
+PATH = "/sys/firmware/efi/efivars/BootAskTimeoutSecs-5f4065c9-d7bf-4555-b55d-820b3defd23a"
+FS_IOC_GETFLAGS = 0x80086601
+FS_IOC_SETFLAGS = 0x40086602
+FS_IMMUTABLE_FL = 0x10
+LIMIT = 10
+
+
+def read():
+    """(attributes, seconds) as the variable holds them."""
+    with open(PATH, "rb") as f:
+        data = f.read()
+    if len(data) != 8:
+        raise OSError(f"{PATH}: {len(data)} bytes, not 4 of attributes and 4 of seconds")
+    return struct.unpack("<II", data)
+
+
+def write(seconds):
+    attributes, _ = read()
+    # efivarfs makes its files immutable; one write of attributes and value
+    # replaces the variable.
+    fd = os.open(PATH, os.O_RDONLY)
+    try:
+        flags = array.array("i", [0])
+        fcntl.ioctl(fd, FS_IOC_GETFLAGS, flags, True)
+        if flags[0] & FS_IMMUTABLE_FL:
+            flags[0] &= ~FS_IMMUTABLE_FL
+            fcntl.ioctl(fd, FS_IOC_SETFLAGS, flags, True)
+    finally:
+        os.close(fd)
+    with open(PATH, "wb", buffering=0) as f:
+        f.write(struct.pack("<II", attributes, seconds))
+    if read()[1] != seconds:
+        raise OSError(f"{PATH}: reads {read()[1]} after writing {seconds}")
+
+
+def main(argv):
+    if not os.path.exists(PATH):
+        print("board-firmware-wait: this firmware has no BootAskTimeoutSecs; nothing to do")
+        return 0
+    if len(argv) == 1:
+        print(read()[1])
+        return 0
+    if len(argv) != 2 or not argv[1].isdigit() or int(argv[1]) > LIMIT:
+        print(f"usage: board-firmware-wait [SECONDS, 0 to {LIMIT}]", file=sys.stderr)
+        return 64
+    seconds = int(argv[1])
+    before = read()[1]
+    if before == seconds:
+        print(f"board-firmware-wait: the firmware waits {seconds} s for a key")
+        return 0
+    write(seconds)
+    print(f"board-firmware-wait: the firmware waits {seconds} s for a key from the next power-on (it waited {before} s)")
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv))
+    except OSError as error:
+        print(f"board-firmware-wait: {error}", file=sys.stderr)
+        sys.exit(1)

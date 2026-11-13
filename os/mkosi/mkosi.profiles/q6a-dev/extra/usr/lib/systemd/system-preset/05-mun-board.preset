@@ -5,6 +5,7 @@
 enable mun-board-diag.service
 enable mun-board-diag.timer
 enable mun-board-audio.service
+enable mun-board-firmware-wait.service
 enable systemd-networkd.service
 enable systemd-networkd.socket
 enable ssh.service

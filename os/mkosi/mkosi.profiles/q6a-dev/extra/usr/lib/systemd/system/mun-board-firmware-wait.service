@@ -1,0 +1,13 @@
+# Development image for a board (profile q6a-dev): the firmware waits 1 s
+# for a key at power-on instead of its 5 (/usr/lib/mun/board-firmware-wait),
+# written only when it is not 1 already.
+[Unit]
+Description=MUN board: the firmware's wait for a key at power-on, 1 s
+ConditionPathExists=/sys/firmware/efi/efivars
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/mun/board-firmware-wait 1
+
+[Install]
+WantedBy=multi-user.target

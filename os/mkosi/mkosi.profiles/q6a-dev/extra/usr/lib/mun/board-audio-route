@@ -1,17 +1,65 @@
 #!/bin/sh
 # Development image for a board (profile q6a-dev): route HDMI's output
 # (MultiMedia2 to DisplayPort RX 0, PCM 1 of the board's card) once the card
-# has loaded its topology from the audio DSP, which takes a few seconds after
-# the DSP starts; up to 20 s.
+# has loaded its topology from the audio DSP. The card comes some seconds
+# after the DSP starts: first the DSP's audio services reach Linux (on the
+# GPR bus, a fraction of a second after the DSP is up), then the kernel
+# waits 5 s for an answer from the DSP's audio manager that this board's
+# DSP never gives, then the card appears.
+#
+# On some boots (one in seven, 2026-11-13) the DSP starts and opens its
+# channels, but none of its services reach Linux: its QRTR link is up and
+# carries none of its announcements, so the GPR services, and the card,
+# never come. Resetting Linux's end of that link makes the DSP announce them
+# again, and the card follows. This script does it once, when the DSP has
+# run for `stall` seconds without its services. It waits 40 s in all.
+#
+# Every outcome goes to the journal with the time since the kernel started,
+# for /usr/lib/mun/board-report.
 card=QCS6490RadxaDra
+link=3700000.remoteproc:glink-edge.IPCRTR.-1.-1
+qrtr=/sys/bus/rpmsg/drivers/qcom_smd_qrtr
+services=/sys/bus/aprbus/devices/gprsvc:service:2:1
+stall=3
+steps=80   # of half a second
+
+since_boot() { cut -d' ' -f1 /proc/uptime; }
+
+dsp_running() {
+    for r in /sys/class/remoteproc/remoteproc*; do
+        [ "$(cat "$r/name" 2>/dev/null)" = adsp ] && [ "$(cat "$r/state" 2>/dev/null)" = running ] && return 0
+    done
+    return 1
+}
+
 i=0
-while [ "$i" -lt 40 ]; do
+alone=0     # half-seconds the DSP has run without its services
+reset=no
+while [ "$i" -lt "$steps" ]; do
     if amixer -q -c "$card" cset "name=DISPLAY_PORT_RX_0 Audio Mixer MultiMedia2" 1 2>/dev/null; then
-        echo "HDMI audio route set"
+        if [ "$reset" = yes ]; then
+            echo "HDMI audio route set at $(since_boot) s, after the DSP's link was reset"
+        else
+            echo "HDMI audio route set at $(since_boot) s"
+        fi
         exit 0
+    fi
+    if [ -e "$services" ]; then
+        alone=0
+    elif dsp_running; then
+        alone=$((alone + 1))
+        if [ "$reset" = no ] && [ "$alone" -ge $((stall * 2)) ]; then
+            reset=yes
+            echo "the audio DSP ran ${stall} s without its services: resetting Linux's end of its QRTR link at $(since_boot) s"
+            echo "$link" >"$qrtr/unbind" 2>/dev/null
+            sleep 0.5
+            # Unbinding closes the channel; the DSP opens it again and the
+            # driver takes it by itself. Bind only if it did not.
+            [ -e "/sys/bus/rpmsg/devices/$link/driver" ] || echo "$link" >"$qrtr/bind" 2>/dev/null
+        fi
     fi
     i=$((i + 1))
     sleep 0.5
 done
-echo "the card $card did not appear: no HDMI audio route" >&2
+echo "the card $card did not appear by $(since_boot) s: no HDMI audio route" >&2
 exit 1

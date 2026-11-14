@@ -1,6 +1,8 @@
 # Development image for a board (profile q6a-dev): the diagnostic dump of
 # the boot so far (/usr/lib/mun/board-diag), started by mun-board-diag.timer,
-# then this boot's line in the board's report (/usr/lib/mun/board-report).
+# then this boot's line in the board's report (/usr/lib/mun/board-report),
+# which fails the unit when its evidence is incomplete (a query that did
+# not answer), the line kept: the next report shows it among the failed.
 [Unit]
 Description=MUN board diagnostics: dump and report 90 s after boot
 RequiresMountsFor=/boot

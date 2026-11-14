@@ -18,11 +18,16 @@
 # that sound reaches no display.
 #
 # Every outcome goes to the journal with the time since the kernel started,
-# for /usr/lib/mun/board-report.
+# for /usr/lib/mun/board-report: when the card appeared, whether the route
+# was already set (the shell's unit starts this again at every shell start)
+# or set now. Once it is set, /run/mun-board-audio/route-set says so: a shell
+# started with MUN_SHELL_SOUND_READY naming it opens the device only then.
 card=QCS6490RadxaDra
 link=3700000.remoteproc:glink-edge.IPCRTR.-1.-1
 qrtr=/sys/bus/rpmsg/drivers/qcom_smd_qrtr
 services=/sys/bus/aprbus/devices/gprsvc:service:2:1
+control="name=DISPLAY_PORT_RX_0 Audio Mixer MultiMedia2"
+ready=/run/mun-board-audio/route-set
 stall=3
 steps=400  # of a tenth of a second
 
@@ -38,8 +43,19 @@ dsp_running() {
 i=0
 alone=0     # tenths of a second the DSP has run without its services
 reset=no
+seen=no
 while [ "$i" -lt "$steps" ]; do
-    if amixer -q -c "$card" cset "name=DISPLAY_PORT_RX_0 Audio Mixer MultiMedia2" 1 2>/dev/null; then
+    if [ "$seen" = no ] && [ -e "/proc/asound/$card" ]; then
+        seen=yes
+        echo "the card $card is there at $(since_boot) s"
+    fi
+    if [ "$seen" = yes ] && amixer -c "$card" cget "$control" 2>/dev/null | grep -q ': values=on'; then
+        mkdir -p "${ready%/*}" && : >"$ready"
+        echo "HDMI audio route already set at $(since_boot) s"
+        exit 0
+    fi
+    if amixer -q -c "$card" cset "$control" 1 2>/dev/null; then
+        mkdir -p "${ready%/*}" && : >"$ready"
         if [ "$reset" = yes ]; then
             echo "HDMI audio route set at $(since_boot) s, after the DSP's link was reset"
         else

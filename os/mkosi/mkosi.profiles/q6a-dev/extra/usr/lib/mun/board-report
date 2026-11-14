@@ -15,9 +15,11 @@ battery: without a time server it starts from an old time at every boot);
 the boot's number (board-diag's count) and id; systemd's times for the
 firmware, the loader, the kernel, the initrd and userspace; when the audio
 DSP came up, when its services reached Linux, when its link was reset (if
-it was), when the HDMI route was set or that it was not; when the shell
-started, how long its start-up waited for the sound device, when the
-start-up began and which clock its picture followed; the units that
+it was), when its sound card was there, when the HDMI route was set (or
+found set) or that it was not; when the shell started, when it opened the
+sound device and when the device first played at its rate, how long its
+start-up waited for the sound device, when the start-up began and which
+clock its picture followed; the units that
 failed; the wired address. Times are seconds since the kernel started.
 
 Every value comes from a query (systemd-analyze, journalctl, systemctl, ip)
@@ -52,10 +54,13 @@ EVENTS = [
     ("dsp_up", None, r"remote processor adsp is now up"),
     ("dsp_services", None, r"Adding APR/GPR dev: gprsvc:service:2:1"),
     ("dsp_link_reset", "mun-board-audio.service", r"resetting Linux's end of its QRTR link"),
-    ("audio_route", "mun-board-audio.service", r"HDMI audio route set"),
+    ("audio_card", "mun-board-audio.service", r"the card \S+ is there"),
+    ("audio_route", "mun-board-audio.service", r"HDMI audio route (already )?set"),
     ("audio_failed", "mun-board-audio.service", r"did not appear"),
     ("shell_started", "mun-shell.service", r"^Started mun-shell\.service"),
     ("sound_device", "mun-shell.service", r"the sound device came"),
+    ("sound_opened", "mun-shell.service", r"sound: the device opened at"),
+    ("sound_playing", "mun-shell.service", r"sound: the device plays at its rate"),
     ("startup_began", "mun-shell.service", r"start-up: the picture (follows the sound|runs on its own)"),
 ]
 
@@ -188,8 +193,9 @@ def show(count, raw):
         print("\n".join(lines))
         return
     columns = [("number", "boot"), ("firmware", "fw"), ("kernel", "kern"), ("initrd", "initrd"),
-               ("userspace", "user"), ("dsp_up", "dsp"), ("dsp_link_reset", "reset"), ("audio_route", "audio"),
-               ("shell_started", "shell"), ("startup_waited", "waited"), ("startup_began", "intro"),
+               ("userspace", "user"), ("dsp_up", "dsp"), ("dsp_link_reset", "reset"), ("audio_card", "card"),
+               ("audio_route", "audio"), ("shell_started", "shell"), ("sound_opened", "opened"),
+               ("sound_playing", "playing"), ("startup_waited", "waited"), ("startup_began", "intro"),
                ("startup_clock", "clock")]
     print(" ".join(f"{title:>7}" for _, title in columns) + "  failed / evidence")
     for text in lines:

@@ -6,15 +6,15 @@
       "translation": "CONTRIBUTING.es.md",
       "source": "CONTRIBUTING.md",
       "language": "es",
-      "reviewed": "2026-10-15",
-      "source_sha256": "65cffa97256c09fec0e78eedc82be7e3c7e7184bfbf18b6726c8633cb3a5e3b8"
+      "reviewed": "2026-11-14",
+      "source_sha256": "f69f9fe46cb6e4bd8555ef9d8ea1b2c1aebb8dc39c278bed410610f6181a30c5"
     },
     {
       "translation": "README.es.md",
       "source": "README.md",
       "language": "es",
-      "reviewed": "2026-10-15",
-      "source_sha256": "d09b62481674c1c642610f4f40cc60770843461ddefc60fc354635c77ae6af20"
+      "reviewed": "2026-11-14",
+      "source_sha256": "ed1a3d0f6e561c976e6daa0742532e8a3291131b27f0a9dba5910d0025a6d666"
     },
     {
       "translation": "SECURITY.es.md",
@@ -27,57 +27,57 @@
       "translation": "docs/es/README.md",
       "source": "docs/README.md",
       "language": "es",
-      "reviewed": "2026-10-15",
-      "source_sha256": "dbff473428a72e6830070edba05db864a17fd2ae83d6a3d6dd371bbc00cee998"
+      "reviewed": "2026-11-14",
+      "source_sha256": "4928302e95f98e9a0d22597c60bce6187373f6aa92d7fbb33a99ab24818f68f1"
     },
     {
       "translation": "docs/es/compatibility.md",
       "source": "docs/compatibility.md",
       "language": "es",
-      "reviewed": "2026-10-15",
-      "source_sha256": "8f98b74fc4515b46e13cc1911d723c0345088b5a8426d35d35f938a1e9d0f5b5"
+      "reviewed": "2026-11-14",
+      "source_sha256": "c61530fe25463a1ab6ee82717fb9612ee53ddbf102fa7a5000ff4f89d4cc32ec"
     },
     {
       "translation": "docs/es/getting-started.md",
       "source": "docs/getting-started.md",
       "language": "es",
-      "reviewed": "2026-11-12",
-      "source_sha256": "47a6e7032349bd12601016ebb1c36df8379dd5f44201947664a8bab3adbb72e8"
+      "reviewed": "2026-11-14",
+      "source_sha256": "44b05529d50486c445c3cea80a179bf60e4fca69358ce72f7cd2891d61f97d11"
     },
     {
       "translation": "docs/es/glossary.md",
       "source": "docs/glossary.md",
       "language": "es",
-      "reviewed": "2026-10-05",
-      "source_sha256": "1ea2e6adb0da994efb04712270d9108e9d1a040e71c0299d185e2dfa2c4c204a"
+      "reviewed": "2026-11-14",
+      "source_sha256": "4e7c8db563fa7ca808744feba77490096728f9a5a385d51c138d5b16d449b175"
     },
     {
       "translation": "docs/es/guides/create-game-card.md",
       "source": "docs/guides/create-game-card.md",
       "language": "es",
-      "reviewed": "2026-10-05",
-      "source_sha256": "340b450194e342b6c20b4c0e685b29d400ccd7c45e2ba08f00d8f4dd28851823"
+      "reviewed": "2026-11-14",
+      "source_sha256": "96845ee0187de35011300f41690426f4e70ab92403c77565bdfc20eb4b60f648"
     },
     {
       "translation": "docs/es/guides/port-a-game.md",
       "source": "docs/guides/port-a-game.md",
       "language": "es",
-      "reviewed": "2026-10-05",
-      "source_sha256": "f36a6f94a88bfb1cd2388c8eeba9ed40e0f8f391a54f15c0899c4a7696244cfd"
+      "reviewed": "2026-11-14",
+      "source_sha256": "8391c07d3a1ac7a2fbb1103c336db8e8da9860a53975e8e006838d1127aa051b"
     },
     {
       "translation": "docs/es/guides/see-shape-in-action.md",
       "source": "docs/guides/see-shape-in-action.md",
       "language": "es",
-      "reviewed": "2026-11-12",
-      "source_sha256": "93503cfabe51525675c2d22f6db9ffee8b6ac4435a4cedd9ad85d30ee3d0c5d5"
+      "reviewed": "2026-11-14",
+      "source_sha256": "9d39c7d60797a65d90c641f05cea0ff84dba60df20adfd6ca1c8e6aabbb2351c"
     },
     {
       "translation": "docs/es/guides/shape-your-game.md",
       "source": "docs/guides/shape-your-game.md",
       "language": "es",
-      "reviewed": "2026-10-15",
-      "source_sha256": "4ab0cda90b347731f7febf924364b8653fd8239b6030e6725a9653ecfbd56c95"
+      "reviewed": "2026-11-14",
+      "source_sha256": "51fe593759f4f17c34dc3ada99cd37c913280575e17ca3f51d7bcd8513d86cbe"
     },
     {
       "translation": "examples/README.es.md",
@@ -97,8 +97,8 @@
       "translation": "examples/shape/README.es.md",
       "source": "examples/shape/README.md",
       "language": "es",
-      "reviewed": "2026-11-12",
-      "source_sha256": "3030069c60fda6c13579c1bcf000220e2c01fd4ab59545f4f453441601c5440c"
+      "reviewed": "2026-11-14",
+      "source_sha256": "d312764a70efc1d4ec7752b2e6098dae318e5b3df70f1fd6660a69664a21a4fc"
     },
     {
       "translation": "docs/es/contributor-map.md",
@@ -111,8 +111,15 @@
       "translation": "examples/shape/reef-studio/README.es.md",
       "source": "examples/shape/reef-studio/README.md",
       "language": "es",
-      "reviewed": "2026-11-12",
-      "source_sha256": "d0e6e80be3dc55969a6c3b9a60ffa438fce96f99e5c9213a8c68d43f24ccca61"
+      "reviewed": "2026-11-14",
+      "source_sha256": "43d4905133054bf5def96e6396e329204e74062020041ec480e691f3c9993d1c"
+    },
+    {
+      "translation": "docs/es/mun-dev.md",
+      "source": "docs/mun-dev.md",
+      "language": "es",
+      "reviewed": "2026-11-14",
+      "source_sha256": "1c0c35c32b8b22f4eec0fce8b8dc610d8903107ccb7e64848c13e2c2074a09d6"
     }
   ]
 }

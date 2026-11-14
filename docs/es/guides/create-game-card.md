@@ -118,7 +118,8 @@ de forma atómica y conservando la copia anterior. **Esc** termina el juego;
 
 En el panel de la tarjeta elige **Retirar con seguridad**: la consola termina
 con la tarjeta, la desmonta y la tarjeta sale de la ranura («Puedes retirar
-la Game Card»). Después, **Apagar** (Arriba desde *Game Card*, Intro, Intro):
+la Game Card»). Después, **Apagar** (Arriba desde *MUN Disk*, la entrada de
+la tarjeta en la pantalla principal, Intro, Intro):
 la consola se apaga y la ventana se cierra.
 
 Arráncala otra vez, con la tarjeta:

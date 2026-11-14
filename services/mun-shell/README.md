@@ -867,8 +867,15 @@ results) and shows the service's own words only when it has nothing better.
 | Released | "Remove the card" | "Remove it"; "You can remove the Game Card" |
 | Another card waiting | — | The panel adds that another Game Card is waiting: it will be read when the current one is removed |
 
-My games lists the games the console has in front of it: today the Game
-Card in the slot. The console itself holds no games, and says so.
+The table gives the entry's words in the previous design (*Game Card*). In
+the orbital design the same entry is *MUN Disk*: with the slot empty it
+says "Insert a disk" and its panel "Insert a MUN Disk"; the other states
+keep the words above, which still say Game Card.
+
+Universe (My games in the previous design) lists the games the console has
+in front of it: today the Game Card in the slot. The console itself holds
+no games, and says so ("Nothing here yet. Your games travel on their MUN
+Disks.").
 
 ## Playing
 

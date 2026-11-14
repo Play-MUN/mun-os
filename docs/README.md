@@ -33,6 +33,8 @@
   environment, display, content during play, session results.
 - [MUN Shape](shape.md): the package with which a card dresses the console
   in its game's identity; its format, limits, contrast rules and checker.
+- [MUN Shape motion](shape-motion.md): an experimental draft; a scene that
+  moves behind the menus and answers them, declared as data.
 
 ## Building and reference
 
@@ -40,6 +42,8 @@
   build records, game recipes, reproducibility.
 - [Laboratory](../vm/README.md): builds and virtual consoles, Game Cards,
   input, logs.
+- [MUN Dev](mun-dev.md): the experimental profile for our development
+  board, what it does differently and what has been checked on it.
 - [Architecture](architecture.md): components, boundaries, what the hardware
   integration will own, what is not implemented.
 - [Where to change what](contributor-map.md): a short map for a first

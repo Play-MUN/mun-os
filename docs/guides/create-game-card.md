@@ -113,7 +113,8 @@ OK on "Session ended".
 
 On the card's panel choose **Eject safely**: the console finishes with the
 card, unmounts it and the card leaves the slot ("You can remove the Game
-Card"). Then **Turn off** (Up from Game Card, Enter, Enter): the console
+Card"). Then **Turn off** (Up from MUN Disk, Home's entry for the card,
+Enter, Enter): the console
 shuts down and the window closes.
 
 Start it again, with the card:

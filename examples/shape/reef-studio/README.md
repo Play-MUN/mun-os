@@ -7,7 +7,8 @@
 which are in development; names, limits and budgets may still change.
 Consoles that only read `mun-shape/1`, the previews up to v0.1.0-dev.4
 among them, show its v1 look: the still poster, the palette, the sounds and
-the window; only a console built from this source plays the motion
+the window; only v0.1.0-dev.5 or a console built from this source plays the
+motion
 ([trying it](../../../docs/shape-motion.md#trying-it)).
 
 Reef — MUN Shape example, the reef for short, is a sea scene built in code

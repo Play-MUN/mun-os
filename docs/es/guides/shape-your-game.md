@@ -22,7 +22,7 @@ cambia en *Settings* › *Language and time* › *Language*
 
 ## Antes de empezar
 
-- Las herramientas y una imagen que muestre MUN Shape: la v0.1.0-dev.4, como
+- Las herramientas y una imagen que muestre MUN Shape: la v0.1.0-dev.5, como
   en [primeros pasos](../getting-started.md) (secciones 1 a 3), o una
   construida desde tu copia del repositorio como en
   [construir la imagen tú mismo](../getting-started.md#construir-la-imagen-tú-mismo)
@@ -309,8 +309,8 @@ escribe un paquete defectuoso pequeño por caso, para verlos en la consola.
   luz, que son la mayor parte del coste de un mundo. Un mundo como el de
   `paper`, a 10 fotogramas por segundo y sin texturas de luz, cuesta más o
   menos lo que MUN solo ([medido](../../shape.md#measured), en inglés).
-  Todavía no se ha elegido el hardware de la consola: da a las texturas de luz
-  solo lo que valen.
+  El hardware de la consola todavía no ha ejecutado MUN OS: da a las
+  texturas de luz solo lo que valen.
 
 ## Para ir más allá
 

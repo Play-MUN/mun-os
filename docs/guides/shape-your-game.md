@@ -18,7 +18,7 @@ number, are the contract: [MUN Shape](../shape.md).
 
 ## Before you start
 
-- The tools and an image that shows MUN Shape: v0.1.0-dev.4, as in
+- The tools and an image that shows MUN Shape: v0.1.0-dev.5, as in
   [getting started](../getting-started.md) (sections 1 to 3), or one built
   from this checkout as in
   [build the image yourself](../getting-started.md#build-the-image-yourself)
@@ -290,8 +290,8 @@ one small defective package per case, to see them in the console.
   console is at the edge and may step down once, to the level without light
   textures, which are most of a world's cost. A world like `paper`'s, at 10
   frames per second without light textures, costs about what MUN costs
-  alone ([measured](../shape.md#measured)). No console hardware is chosen
-  yet: give light textures only what they are worth.
+  alone ([measured](../shape.md#measured)). The console's hardware has not
+  run MUN OS yet: give light textures only what they are worth.
 
 ## Going further
 

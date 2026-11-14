@@ -147,7 +147,8 @@ saving ([saves.md](saves.md)).
 - The game runs from a RAM copy; assets are not streamed from the card
   except through a `mount` card's read-only view, and direct execution from
   the medium is not supported.
-- No controller path yet: input is keyboard and pointer (USB HID in the
-  development environment).
+- No controller path for games yet: their input is keyboard and pointer
+  (USB HID in the development environment). MUN Shell's menus do take
+  controllers.
 - Both profiles are measured in QEMU guests only; the libraries, limits and
   performance of the official hardware are not qualified yet.

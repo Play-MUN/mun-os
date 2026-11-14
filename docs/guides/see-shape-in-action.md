@@ -10,7 +10,7 @@ the rules are in [MUN Shape](../shape.md).
 
 | MUN Collect, without a package | The same card with the `sea` sample |
 | --- | --- |
-| ![Home with the MUN Collect Game Card, in MUN's look with the colours read from its cover](../images/mun-shape-before.jpg) | ![The same Home with MUN Collect carrying the sea sample: a world under water, glass plates and the card object showing the sea](../images/mun-shape-after.jpg) |
+| ![Home with the MUN Collect Game Card, in MUN's own look](../images/home-collect.en.jpg) | ![The same Home with MUN Collect carrying the sea sample: a world under water, the menus in its colours and the card object showing the sea](../images/home-sea.en.jpg) |
 
 ## What a dressed card holds
 
@@ -63,7 +63,7 @@ cannot use is dropped block by block, and the card stays valid.
 ## The console must show MUN Shape
 
 An image records the MUN Shape its console reads in its `BUILD-INFO.json`
-(`"shape": {"format": "mun-shape/1"}`). v0.1.0-dev.3 and v0.1.0-dev.4
+(`"shape": {"format": "mun-shape/1"}`). The previews from v0.1.0-dev.3 on
 record it, as do images built from this checkout; earlier previews, v0.1.0-dev.2 and before,
 do not show MUN Shape. List what you have:
 
@@ -71,12 +71,13 @@ do not show MUN Shape. List what you have:
 ./mun dev list        # each build and guest: "shape mun-shape/1" or "shape not recorded"
 ```
 
-A build from this source also says that its shell plays the draft of
-Shape motion (`shape mun-shape/1 with motion (draft 1)`); the previews up
-to v0.1.0-dev.4 play none and show a package with motion in its v1 look
+v0.1.0-dev.5, and a build from this source, also say that their shell
+plays the draft of Shape motion (`shape mun-shape/1 with motion (draft
+1)`); the previews up to v0.1.0-dev.4 play none and show a package with
+motion in its v1 look
 ([MUN Shape motion](../shape-motion.md#trying-it)).
 
-If none records it, get v0.1.0-dev.4
+If none records it, get v0.1.0-dev.5
 ([getting started](../getting-started.md#3-the-image)) or build one with
 `./mun dev build`
 ([build the image yourself](../getting-started.md#build-the-image-yourself)).
@@ -105,13 +106,14 @@ If none records it, get v0.1.0-dev.4
    console starts: the console finds it there and is dressed at once, with
    no arrival and no cue, as a console switched on with its card in.
 
-3. **Play** (*Game Card* › *Play*). The game starts at once; nothing waits
+3. **Play** (*MUN Disk* › *Play*; MUN Disk is Home's entry for the card).
+   The game starts at once; nothing waits
    for an animation.
 
 4. **Come back.** When the game ends, the identity is already in place: a
    short fade, no arrival and no cue, even under the *Session ended* dialog.
 
-5. **Eject safely** (*Game Card* › *Eject safely*). The identity stays until
+5. **Eject safely** (*MUN Disk* › *Eject safely*). The identity stays until
    the console has released the card, then leaves with its out transition,
    and "You can remove the Game Card" appears; the window then takes the
    card out, as a hand would, and the slot is empty. To pull the card out

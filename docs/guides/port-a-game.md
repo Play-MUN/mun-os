@@ -101,7 +101,7 @@ saves already written are safe ([removal and failures](../saves.md#removal-and-f
 
 ## What is not there yet
 
-Controllers (keyboard only for now), updates to a card's content, other
-runtime profiles and physical hardware: see
+Controllers in games (keyboard only for now), updates to a card's content,
+other runtime profiles and the console's hardware: see
 [architecture](../architecture.md). The GL profile is provisional: its
 library list is a record of versions, not an ABI promise.

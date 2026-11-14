@@ -2,8 +2,8 @@
 
 **Status: experimental draft, in development.** This page describes the
 motion blocks of format `mun-shape/1.1` as the package checker reads them
-today. Consoles built from this source play them; the previews up to
-v0.1.0-dev.4 do not. Names, defaults, limits and budgets are provisional
+today. v0.1.0-dev.5 and consoles built from this source play them; the
+previews up to v0.1.0-dev.4 do not. Names, defaults, limits and budgets are provisional
 until the console's player is measured; any of them may change in a later
 version, which the draft's revision tells apart (below). [MUN Shape](shape.md)
 (v1, `mun-shape/1`) is the stable contract and is unchanged.
@@ -327,21 +327,22 @@ other:
 ./mun card shape init .local/my-shape --example reef     # a copy to change
 ```
 
-Only a console whose shell has the player draws the motion: an image built
+Only a console whose shell has the player draws the motion: v0.1.0-dev.5
+([getting started](getting-started.md#3-the-image)), or an image built
 from this source (`./mun dev build`,
 [build the image yourself](getting-started.md#build-the-image-yourself)).
 The previews up to v0.1.0-dev.4 read `mun-shape/1` and show such a
-package's v1 look: its still poster, palette, sounds and window. A bundle
-of a build with the player (`./mun dev bundle`) carries MUN Collect dressed
-in the reef, the card `collect-reef`, beside `collect-sea` (the `sea`
-sample, v1): `./mun play --card collect-reef` plays it without the card
-tools. In a guest of an image built from this source,
+package's v1 look: its still poster, palette, sounds and window. A release
+or a bundle of a build with the player (`./mun dev bundle`) carries MUN
+Collect dressed in the reef, the card `collect-reef`, beside `collect-sea`
+(the `sea` sample, v1): `./mun play --card collect-reef` plays it without
+the card tools. In a guest of such an image,
 `./mun dev shape examples/shape/reef --window` shows the motion behind Home
 ([see MUN Shape in action](guides/see-shape-in-action.md)).
 
 While it is a draft:
 
-- A build from this source records, beside the MUN Shape its console reads
+- v0.1.0-dev.5, and a build from this source, record, beside the MUN Shape its console reads
   (`"format": "mun-shape/1"`, what every tool reads), the revision of the
   motion draft its shell plays: `"minor": 1, "motion": {"draft": 1}` in
   `BUILD-INFO.json` (`./mun dev list`: `with motion (draft 1)`). The

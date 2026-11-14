@@ -10,7 +10,7 @@ las reglas están en [MUN Shape](../../shape.md), en inglés.
 
 | MUN Collect, sin paquete | La misma tarjeta con el ejemplo `sea` |
 | --- | --- |
-| ![La pantalla principal con la Game Card de MUN Collect, con el aspecto de MUN y los colores leídos de su portada](../../images/mun-shape-before.jpg) | ![La misma pantalla con MUN Collect llevando el ejemplo sea: un mundo bajo el agua, placas de cristal y el objeto de la tarjeta mostrando el mar](../../images/mun-shape-after.jpg) |
+| ![La pantalla principal con la Game Card de MUN Collect, con el aspecto propio de MUN](../../images/home-collect.es.jpg) | ![La misma pantalla con MUN Collect llevando el ejemplo sea: un mundo bajo el agua, los menús con sus colores y el objeto de la tarjeta mostrando el mar](../../images/home-sea.es.jpg) |
 
 Esta guía cita los menús de la consola en español; arranca en inglés y se
 cambia en *Settings* › *Language and time* › *Language*
@@ -70,9 +70,9 @@ válida.
 ## La consola tiene que mostrar MUN Shape
 
 Una imagen registra en su `BUILD-INFO.json` el MUN Shape que lee su consola
-(`"shape": {"format": "mun-shape/1"}`). La v0.1.0-dev.3 y la v0.1.0-dev.4
-lo registran, igual que las imágenes construidas desde tu copia del
-repositorio;
+(`"shape": {"format": "mun-shape/1"}`). Las versiones preliminares desde
+la v0.1.0-dev.3 lo registran, igual que las imágenes construidas desde tu
+copia del repositorio;
 las versiones preliminares anteriores, la v0.1.0-dev.2 y las de antes, no
 muestran MUN Shape. Mira lo que tienes:
 
@@ -80,13 +80,13 @@ muestran MUN Shape. Mira lo que tienes:
 ./mun dev list        # cada build e invitado: "shape mun-shape/1" o "shape not recorded"
 ```
 
-Una build de este código dice además que su shell reproduce el borrador
-del movimiento de Shape (`shape mun-shape/1 with motion (draft 1)`); las
-versiones preliminares hasta la v0.1.0-dev.4 no reproducen ninguno y
-muestran un paquete con movimiento con su aspecto v1
+La v0.1.0-dev.5, y una build de este código, dicen además que su shell
+reproduce el borrador del movimiento de Shape (`shape mun-shape/1 with
+motion (draft 1)`); las versiones preliminares hasta la v0.1.0-dev.4 no
+reproducen ninguno y muestran un paquete con movimiento con su aspecto v1
 ([MUN Shape motion](../../shape-motion.md#trying-it), en inglés).
 
-Si ninguna lo registra, descarga la v0.1.0-dev.4
+Si ninguna lo registra, descarga la v0.1.0-dev.5
 ([primeros pasos](../getting-started.md#3-la-imagen)) o construye una con
 `./mun dev build`
 ([construir la imagen tú mismo](../getting-started.md#construir-la-imagen-tú-mismo)).
@@ -116,14 +116,15 @@ Si ninguna lo registra, descarga la v0.1.0-dev.4
    la consola: la consola la encuentra ahí y se viste enseguida, sin llegada
    ni aviso, como una consola que se enciende con su tarjeta dentro.
 
-3. **Jugar** (*Game Card* › *Jugar*). El juego arranca enseguida; nada espera
+3. **Jugar** (*MUN Disk* › *Jugar*; MUN Disk es la entrada de la tarjeta en la
+   pantalla principal). El juego arranca enseguida; nada espera
    a una animación.
 
 4. **Volver.** Cuando el juego termina, la identidad ya está puesta: un
    fundido breve, sin llegada ni aviso, incluso bajo el diálogo *Sesión
    terminada*.
 
-5. **Retirar con seguridad** (*Game Card* › *Retirar con seguridad*). La
+5. **Retirar con seguridad** (*MUN Disk* › *Retirar con seguridad*). La
    identidad se queda hasta que la consola ha liberado la tarjeta; después se
    va con su transición de salida y aparece «Puedes retirar la Game Card»;
    entonces la ventana saca la tarjeta, como lo haría una mano, y la ranura

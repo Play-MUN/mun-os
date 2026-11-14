@@ -24,3 +24,11 @@ done
 # first start (ssh.service.d/50-mun-lab.conf).
 rm -f /etc/ssh/ssh_host_*_key /etc/ssh/ssh_host_*_key.pub
 echo "q6a-dev: SSH host keys removed; each installed system makes its own"
+
+# No saved mixer state is restored on this board (see
+# extra/etc/udev/rules.d/90-alsa-restore.rules): alsa-utils' units that
+# restore and store it are masked too.
+for unit in alsa-restore.service alsa-state.service; do
+    ln -sf /dev/null "/etc/systemd/system/$unit"
+done
+echo "q6a-dev: alsa-restore and alsa-state masked"

@@ -61,6 +61,17 @@ while [ "$i" -lt "$steps" ]; do
         else
             echo "HDMI audio route set at $(since_boot) s"
         fi
+        # It must stay set: anything that writes the card's mixer as it
+        # appears (a restore of saved state did) can turn it off again, and
+        # then every write to the device fails. Looked at twice; set again,
+        # and said, if it was turned off.
+        for wait in 0.3 1.2; do
+            sleep "$wait"
+            if ! amixer -c "$card" cget "$control" 2>/dev/null | grep -q ': values=on'; then
+                echo "the HDMI audio route was turned off by something else by $(since_boot) s; setting it again" >&2
+                amixer -q -c "$card" cset "$control" 1 2>/dev/null || true
+            fi
+        done
         exit 0
     fi
     if [ -e "$services" ]; then

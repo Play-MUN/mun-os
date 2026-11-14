@@ -8,15 +8,22 @@ count of seconds); it ships at 5.
     board-firmware-wait            prints the seconds
     board-firmware-wait SECONDS    sets them (0 to 10), from the next power-on
 
-mun-board-firmware-wait.service sets 1 at every boot where it is not 1
-already: the console's start shows as little of the board's firmware as
-possible, and a key pressed at power-on still reaches its menu. For a
-longer window on the next boot only, set more and reboot: that boot sets 1
-again. Masking the service keeps any value.
+This is a setting of the board's firmware, kept in its flash, not of the
+image: it stays when the image is replaced. mun-board-firmware-wait.service
+sets 1 at every boot where it is not 1 already, so the image imposes it
+again whatever was set before: the console's start shows as little of the
+board's firmware as possible, and a key held or pressed at power-on (F2,
+F12) still reaches its menus. For a longer wait on the next boot only, set
+more and reboot: that boot sets 1 again. To keep another wait, mask the
+service (systemctl mask mun-board-firmware-wait.service), then set it.
 
 The firmware cannot be asked from Linux to start its setup
-(OsIndicationsSupported is absent), so the window is not set to 0: a key
+(OsIndicationsSupported is absent), so the wait is not set to 0: a key
 at power-on might then not reach the menu at all (not tried).
+
+efivarfs makes the variable's file immutable; writing it lifts that flag for
+the one write and puts the file's original flags back afterwards, when the
+write fails too.
 """
 import array
 import fcntl
@@ -31,32 +38,47 @@ FS_IMMUTABLE_FL = 0x10
 LIMIT = 10
 
 
-def read():
+def read(path=PATH):
     """(attributes, seconds) as the variable holds them."""
-    with open(PATH, "rb") as f:
+    with open(path, "rb") as f:
         data = f.read()
     if len(data) != 8:
-        raise OSError(f"{PATH}: {len(data)} bytes, not 4 of attributes and 4 of seconds")
+        raise OSError(f"{path}: {len(data)} bytes, not 4 of attributes and 4 of seconds")
     return struct.unpack("<II", data)
 
 
-def write(seconds):
-    attributes, _ = read()
-    # efivarfs makes its files immutable; one write of attributes and value
-    # replaces the variable.
-    fd = os.open(PATH, os.O_RDONLY)
+def write(seconds, path=PATH, ioctl=fcntl.ioctl):
+    """Sets the variable to `seconds`, keeping its attributes, and reads it
+    back. The file's flags are what they were before, whatever happens:
+    `ioctl` is fcntl.ioctl, or a stand-in for tests."""
+    attributes, _ = read(path)
+    fd = os.open(path, os.O_RDONLY)
     try:
         flags = array.array("i", [0])
-        fcntl.ioctl(fd, FS_IOC_GETFLAGS, flags, True)
-        if flags[0] & FS_IMMUTABLE_FL:
-            flags[0] &= ~FS_IMMUTABLE_FL
-            fcntl.ioctl(fd, FS_IOC_SETFLAGS, flags, True)
+        ioctl(fd, FS_IOC_GETFLAGS, flags, True)
+        original = flags[0]
+        lifted = bool(original & FS_IMMUTABLE_FL)
+        if lifted:
+            ioctl(fd, FS_IOC_SETFLAGS, array.array("i", [original & ~FS_IMMUTABLE_FL]), True)
+        failure = None
+        try:
+            # One write of attributes and value replaces the variable.
+            with open(path, "wb", buffering=0) as f:
+                f.write(struct.pack("<II", attributes, seconds))
+        except OSError as error:
+            failure = error
+        if lifted:
+            try:
+                ioctl(fd, FS_IOC_SETFLAGS, array.array("i", [original]), True)
+            except OSError as error:
+                raise OSError(f"{path}: its immutable flag could not be put back ({error})"
+                              + (f" after the write failed ({failure})" if failure else "")) from error
+        if failure:
+            raise failure
     finally:
         os.close(fd)
-    with open(PATH, "wb", buffering=0) as f:
-        f.write(struct.pack("<II", attributes, seconds))
-    if read()[1] != seconds:
-        raise OSError(f"{PATH}: reads {read()[1]} after writing {seconds}")
+    if read(path)[1] != seconds:
+        raise OSError(f"{path}: reads {read(path)[1]} after writing {seconds}")
 
 
 def main(argv):

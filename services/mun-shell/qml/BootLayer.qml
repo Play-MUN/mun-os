@@ -54,9 +54,11 @@ Rectangle {
     // opens the device as the shell starts, so this is usually over before
     // the interface has loaded; otherwise the LED breathes in the dark.
     // Played well, not just open (SystemSounds.playingFor()). While a device
-    // is expected (SystemSounds.expecting()) the start-up waits for one that
-    // plays well; after that, without a device it does not wait, and for
-    // one that is open but does not play well, up to kWarmLimit.
+    // is expected (SystemSounds.expecting()) the start-up waits for it to
+    // come; once it has (opened at least once), for it to play well, up to
+    // kWarm + kWarmLimit from then. Without a device, and none expected, it
+    // does not wait; for one that is open but does not play well, up to
+    // kWarmLimit.
     readonly property int kWarm: 2000
     readonly property int kWarmLimit: 3000
     property bool warming: false
@@ -99,6 +101,9 @@ Rectangle {
     // The device has played well long enough, or there is none to wait for.
     function soundReady() {
         if (SystemSounds.playingFor() * 1000 >= kWarm)
+            return true
+        // It came and does not play well: the start-up goes on without it.
+        if (SystemSounds.sinceFirstOpen() * 1000 >= kWarm + kWarmLimit)
             return true
         if (SystemSounds.expecting())
             return false
@@ -171,7 +176,7 @@ Rectangle {
             console.info("mun-shell: start-up: waited " + ((Date.now() - root.warmFrom) / 1000).toFixed(2)
                          + " s for the sound device: "
                          + (playing >= 0 ? "it had played well for " + playing.toFixed(2) + " s"
-                            : SystemSounds.deviceOpen() ? "it was open but did not play well" : "none came"))
+                            : SystemSounds.sinceFirstOpen() >= 0 ? "it came but did not play well" : "none came"))
             root.warming = false
             root.begin()
         }

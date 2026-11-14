@@ -60,7 +60,11 @@
 // recovery's, a failed query of what it holds, and when it is let go.
 // recoveries() counts the times an open device failed (a write that needed
 // recovering, or the device opened afresh): the start-up stops following a
-// sound whose device keeps recovering (src/startupclock.h).
+// sound whose device keeps recovering (src/startupclock.h). A device that
+// opens and fails without playing anything, twice in a row (on a board: its
+// route to the display not set), is not opened without end: it is tried
+// again after kRetry (kExpectRetry while one is expected), and the journal
+// says so once and nothing more until it plays.
 //
 // stop() fades a sound out over kFadeFrames instead of cutting it.
 //
@@ -78,7 +82,8 @@
 // so, as it does for a sound asked for while the device is being retried.
 //
 // Thread contract: play(), stop(), useGameSounds(), playGame(), heard(),
-// playingFor(), deviceOpen(), recoveries() and expecting() on the GUI thread
+// playingFor(), deviceOpen(), sinceFirstOpen(), recoveries() and expecting() on
+// the GUI thread
 // (heard() reads what the worker wrote under a lock, the others atomics),
 // started() and dropped() delivered on it; expectDevice(), openAfter() and
 // setAwake() also on the thread that makes the instance before the
@@ -160,6 +165,9 @@ public:
     Q_INVOKABLE double playingFor() const;
     // The device is open (playing well or not).
     Q_INVOKABLE bool deviceOpen() const;
+    // Seconds since the device was first opened since the shell started,
+    // whatever became of it; below zero if it never was.
+    Q_INVOKABLE double sinceFirstOpen() const;
     // Times an open device failed since the shell started (see above).
     Q_INVOKABLE int recoveries() const;
     // Within expectDevice()'s wait: a device may still come, or recover.
@@ -251,6 +259,7 @@ private:
     std::atomic<double> m_healthySince{-1};
     std::atomic<double> m_lastAdvanceAt{-1};
     std::atomic<int> m_recoveries{0};
+    std::atomic<double> m_firstOpenedAt{-1};
     std::string m_readyFile;  // guarded by m_mutex: openAfter()'s
     std::thread m_worker;
 };

@@ -107,6 +107,14 @@ double SystemSounds::playingFor() const
     return now - since;
 }
 
+double SystemSounds::sinceFirstOpen() const
+{
+    const double first = m_firstOpenedAt.load();
+    if (first < 0)
+        return -1;
+    return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count() - first;
+}
+
 bool SystemSounds::deviceOpen() const
 {
     return m_openedAt.load() != 0;
@@ -336,7 +344,7 @@ void SystemSounds::run()
     Clock::time_point retryAt{}, lastSound{}, openedAt{}, lookedFrom{};
     bool reported = false;
     bool keepOpen = false;  // the worker's copy of m_keepOpen
-    int failures = 0;  // writes failed in a row
+    int failures = 0;  // failures since the device last played anything
     quint32 noise = 0x9E3779B9;  // xorshift state of the silence's noise
     static const bool timing = qEnvironmentVariableIsSet("MUN_SHELL_TIMING");
     snd_lib_error_set_handler(alsaMessage);
@@ -362,6 +370,11 @@ void SystemSounds::run()
     qint64 writtenSinceOpen = 0;
     bool advanceSaid = false, healthSaid = false;
     int problemLines = 0, writeLines = 0, delayLines = 0, problems = 0;
+    // Openings in a row that ended without the device having played
+    // anything: after two, the journal says no more about them until one
+    // plays, and the device is tried again only after a wait.
+    int deadOpens = 0;
+    const auto loud = [&] { return deadOpens < 2; };
     const auto publish = [&] {
         m_healthySince = health.healthySince();
         m_lastAdvanceAt = health.lastAdvanceAt();
@@ -372,15 +385,18 @@ void SystemSounds::run()
             // Said only for a device that was set up and played (not for one
             // closed again because it could not be set up).
             const bool wasOpen = m_openedAt.load() != 0;
+            const bool played = health.advancingSince() >= 0;
             snd_pcm_close(pcm);
             pcm = nullptr;
             m_openedAt = 0;
             health.closed();
             publish();
             const auto now = Clock::now();
-            if (wasOpen)
+            if (wasOpen && (played || loud()))
                 qInfo("mun-shell: sound: the device let go at %.2f s (%s) after %.2f s open, %d problem(s) seen",
                       seconds(now), why, std::chrono::duration<double>(now - openedAt).count(), problems);
+            if (wasOpen)
+                deadOpens = played ? 0 : deadOpens + 1;
         }
     };
     // Sounds that will not be heard: over for heard() (NaN once what was
@@ -424,7 +440,8 @@ void SystemSounds::run()
                 qInfo("mun-shell: sound: not yet at %.2f s: %s", seconds(now), lastFailure.c_str());
             }
         } else if (!reported) {
-            qWarning("mun-shell: interface sounds off at %.2f s: %s: %s", seconds(now), what, snd_strerror(error));
+            qWarning("mun-shell: interface sounds off at %.2f s: %s: %s%s", seconds(now), what, snd_strerror(error),
+                     opening ? "" : "; it is tried again, quietly, until it plays");
             reported = true;
         }
         closeDevice("failed");
@@ -522,7 +539,7 @@ void SystemSounds::run()
                 looked = false;
                 attempts = 0;
                 kinds.clear();
-            } else {
+            } else if (loud()) {
                 qInfo("mun-shell: sound: the device opened at %.2f s (%s)", seconds(opened), how.c_str());
             }
             if (timing)
@@ -530,6 +547,8 @@ void SystemSounds::run()
                       qlonglong(std::chrono::duration_cast<std::chrono::milliseconds>(opened - now).count()));
             openedAt = opened;
             m_openedAt = opened.time_since_epoch().count();
+            double never = -1;
+            m_firstOpenedAt.compare_exchange_strong(never, seconds(opened));
             lastSound = opened;
             health.opened(seconds(opened));
             publish();
@@ -593,7 +612,7 @@ void SystemSounds::run()
                 const int original = int(written);
                 written = snd_pcm_recover(pcm, original, 1);
                 ++m_recoveries;
-                if (writeLines < 5) {
+                if (writeLines < 5 && loud()) {
                     ++writeLines;
                     qWarning("mun-shell: sound: a write failed at %.2f s: %s; recovering it: %s", seconds(Clock::now()),
                              snd_strerror(original), written < 0 ? snd_strerror(int(written)) : "done");
@@ -602,8 +621,10 @@ void SystemSounds::run()
             if (written < 0) {
                 // A device that fails mid-stream is opened afresh at once,
                 // the sounds keeping their place; one that fails again
-                // right after opening means silence for kRetry (kExpectRetry
-                // while one is expected).
+                // without having played since means silence for kRetry
+                // (kExpectRetry while one is expected) before the next try:
+                // a device that takes a few periods and plays none (its
+                // route not set) would otherwise be opened without end.
                 if (++failures > 1)
                     giveUp("the sound device stopped", int(written), false);
                 else
@@ -615,8 +636,6 @@ void SystemSounds::run()
             writtenSinceOpen += written;
         }
         if (left == 0) {
-            failures = 0;
-            reported = false;
             // What the device still holds is not played yet: it says how far
             // it has got, for heard() and for its health.
             snd_pcm_sframes_t held = 0;
@@ -631,8 +650,16 @@ void SystemSounds::run()
             publish();
             if (!advanceSaid && health.advancingSince() >= 0) {
                 advanceSaid = true;
-                qInfo("mun-shell: sound: the device plays from %.2f s, %.0f ms after it opened", health.advancingSince(),
-                      (health.advancingSince() - health.openedAt()) * 1000);
+                // It plays: a failure from here is a new one, and said.
+                failures = 0;
+                reported = false;
+                if (deadOpens >= 2)
+                    qInfo("mun-shell: sound: the device plays from %.2f s, after %d opening(s) that played nothing",
+                          health.advancingSince(), deadOpens);
+                else
+                    qInfo("mun-shell: sound: the device plays from %.2f s, %.0f ms after it opened",
+                          health.advancingSince(), (health.advancingSince() - health.openedAt()) * 1000);
+                deadOpens = 0;
             }
             if (!healthSaid && health.healthySince() >= 0) {
                 healthSaid = true;

@@ -180,8 +180,13 @@ interface has loaded. Where the sound card comes up after the shell starts
 shell looks for the device every 0.25 s until then, and the start-up waits
 for one that plays well; `MUN_SHELL_SOUND_READY` may name a file the system
 writes once the device is ready (a board's route to HDMI), before which it
-is not opened. After the wait, without a device the start-up does not wait,
-and for a device that is open but does not play well, up to 3 s. The
+is not opened. Once the device has come, the start-up waits for it to play
+well up to 5 s from its first opening, then goes on without it; after the
+wait, without a device it does not wait, and for a device that is open but
+does not play well, up to 3 s. A device that opens and fails without
+playing anything twice in a row is tried again only after a wait (0.25 s
+while one is expected, then 5 s), and the journal says so once and no more
+until it plays. The
 journal says how long it waited, and follows the device: when it opened and
 after how many attempts, when it played and when at its rate, its problems,
 failed writes and their recovery, all with the time since boot. The picture

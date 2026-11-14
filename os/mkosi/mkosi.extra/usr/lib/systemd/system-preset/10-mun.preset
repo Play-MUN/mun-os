@@ -4,6 +4,8 @@ enable run-mun-launch.mount
 enable mun-cardd.service
 enable mun-launchd.service
 enable mun-shell.service
+# The shell's standby picture on the display while the console starts.
+enable mun-standby.service
 # Carries out a console reset at boot, only when one was asked for.
 enable mun-reset.service
 # The shell owns tty1: no login prompt there.

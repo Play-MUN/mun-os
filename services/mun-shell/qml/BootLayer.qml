@@ -24,6 +24,11 @@ import MUN.Shell
 // kReady after the start whatever it does. powerOff() brings the black back
 // while the system shuts down.
 //
+// Before the start-up begins, the console is in standby: its LED lit, as
+// the picture the system shows before the shell runs has it (that picture is
+// this layer's first frame, made at build time: deploy/standby-frame.py), so
+// nothing changes on screen when the shell takes the display over.
+//
 // Everything drawn (the parts, the waiting LED, the flash, the tube, the
 // hint) exists only while the layer is visible: once it has faded out, the
 // loader below lets it all go, images and textures with it, and powerOff()
@@ -50,6 +55,13 @@ Rectangle {
     readonly property int kWarm: 2000
     property bool warming: false
     property double warmFrom: 0
+    // Standby: the console on, before its start-up begins (the layer shown
+    // at the first start of a boot, until the sound or the picture starts).
+    // The LED is lit from the first frame, as the picture the system shows
+    // before the shell runs has it (deploy/mun-standby, made from this
+    // frame), held 0.4 s, then breathing; it fades as the start-up begins.
+    property bool before: true
+    readonly property bool standby: shown && before && !leaving
     property bool leaving: false
     property bool late: false
     readonly property bool ready: CardClient.readerAvailable && LaunchClient.available
@@ -79,6 +91,7 @@ Rectangle {
         t = -1
         ready_.restart()
         if (!ShellSettings.systemSounds) {
+            before = false
             running = true
             runAlone(0, "the interface sounds are off")
         } else if (soundReady()) {
@@ -95,6 +108,7 @@ Rectangle {
         return open * 1000 >= kWarm || (open < 0 && !SystemSounds.expecting())
     }
     function begin() {
+        before = false
         running = true
         audible = true
         SystemSounds.play("startup")
@@ -158,6 +172,7 @@ Rectangle {
     }
     function leave() {
         leaving = true
+        before = false
         waiting = false
         warming = false
         running = false
@@ -280,18 +295,29 @@ Rectangle {
                             }
                         }
                     }
-                    // The LED waiting for the sound device (before the
-                    // start-up) or for the system (after it), breathing.
+                    // The LED in standby (before the start-up: lit at once,
+                    // held, then breathing) or waiting for the system after
+                    // it (coming in from dark), breathing.
                     BootIntro {
                         id: waitingLed
+                        objectName: "standbyLed"
                         part: BootIntro.Led
-                        opacity: root.waiting || root.warming ? 1 : 0
+                        opacity: root.waiting || root.standby ? 1 : 0
                         visible: opacity > 0
                         Behavior on opacity { NumberAnimation { duration: 600 } }
-                        breath: -1
+                        breath: 1
                         x: area.x; y: area.y; width: area.width; height: area.height
                         SequentialAnimation on breath {
-                            running: root.waiting || root.warming
+                            running: root.standby
+                            PauseAnimation { duration: 400 }
+                            SequentialAnimation {
+                                loops: Animation.Infinite
+                                NumberAnimation { from: 1; to: 0; duration: 1200; easing.type: Easing.InOutSine }
+                                NumberAnimation { from: 0; to: 1; duration: 1200; easing.type: Easing.InOutSine }
+                            }
+                        }
+                        SequentialAnimation on breath {
+                            running: root.waiting
                             loops: Animation.Infinite
                             NumberAnimation { from: 0; to: 1; duration: 1200; easing.type: Easing.InOutSine }
                             NumberAnimation { from: 1; to: 0; duration: 1200; easing.type: Easing.InOutSine }

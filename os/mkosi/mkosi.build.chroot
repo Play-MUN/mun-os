@@ -22,6 +22,10 @@ rm -rf "$BUILDDIR/shell-behaviour"
 python3 "$MUN/services/mun-shell/tests/behaviour.py" "$BUILDDIR/mun-shell/mun-shell" --work "$BUILDDIR/shell-behaviour" \
     --timing record
 cp "$BUILDDIR/shell-behaviour/report.json" "$ART/shell-behaviour.json"
+# The standby picture the console shows while it starts: the shell's own
+# first frame, made by the binary just built (deploy/standby-frame.py).
+python3 "$MUN/services/mun-shell/deploy/standby-frame.py" "$BUILDDIR/mun-shell/mun-shell" \
+    "$BUILDDIR/mun-shell/standby-1920x1080.xrgb"
 sh "$MUN/services/mun-shell/deploy/stage.sh" "$MUN/services/mun-shell" "$BUILDDIR/mun-shell" "$DESTDIR"
 sh "$MUN/services/mun-cardd/deploy/stage.sh" "$MUN/services/mun-cardd" "$MUN/tools/mun-card/mun_card" "$DESTDIR"
 sh "$MUN/services/mun-launchd/deploy/stage.sh" "$MUN/services/mun-launchd" "$DESTDIR"

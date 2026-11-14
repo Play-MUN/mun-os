@@ -48,7 +48,9 @@ come from CardClient. The cases:
   neither, Home comes after its 20 s; with the interface sounds off its
   clock runs from the start; with a sound device expected
   (MUN_SHELL_SOUND_WAIT) that never comes, the LED breathes until the
-  wait is over, then the picture runs on its own and the journal says so.
+  wait is over, then the picture runs on its own and the journal says so;
+  every time, standby from the first frame (the LED lit at once, as the
+  system's standby picture has it) until the start-up begins.
 - home: the shell's own Main.qml (home.qml) against stand-ins for the card
   service and the launcher: an arrival, dialogs, a return, removal, Eject
   safely confirmed and refused, another card, the player's choices, a
@@ -2181,6 +2183,11 @@ def boot_cases(shell: Shell, checks: Checks):
                   early is not None and early["t"] >= 0.5, early)
     checks.expect("boot-ready", "none expected: the LED never waits for one before the start-up",
                   not any(s["warming"] for s in states) and not waits.get("boot-ready"), waits.get("boot-ready"))
+    checks.expect("boot-ready", "standby from the first frame: the LED lit at once, as the system's picture has it",
+                  states and states[0]["standby"] and states[0]["led"] == 1 and states[0]["t"] < 0, states[:1])
+    running = next((s for s in states if s["t"] >= 0.7), None)
+    checks.expect("boot-ready", "standby ends as the start-up begins: its LED faded within 0.7 s of the picture",
+                  running is not None and not running["standby"] and running["led"] == 0, running)
 
     checks.expect("boot-ready", "the journal says which clock the picture follows", bool(clocks.get("boot-ready")),
                   clocks.get("boot-ready"))
@@ -2216,6 +2223,8 @@ def boot_cases(shell: Shell, checks: Checks):
     early = next((s for s in states if s["at"] >= 1300), None)
     checks.expect("boot-silent", "without the sound, its clock runs from the start (no wait for a device)",
                   early is not None and early["t"] >= 0.8, early)
+    checks.expect("boot-silent", "standby still from the first frame, the sounds off",
+                  states and states[0]["standby"] and states[0]["led"] == 1, states[:1])
 
     # A sound device expected within 4 s of the shell's start (a board's
     # sound card comes up after the shell starts) that never comes: the LED
@@ -2225,7 +2234,8 @@ def boot_cases(shell: Shell, checks: Checks):
     begun = first(states, playing=True)
     held = [s for s in states if begun and begun["at"] <= s["at"] < min(begun["at"] + 1000, 2500)]
     checks.expect("boot-expected", "while the device is expected the start-up waits, the LED breathing",
-                  held and all(s["warming"] and s["t"] < 0 and s["playing"] for s in held), held[-2:])
+                  held and all(s["warming"] and s["standby"] and s["led"] == 1 and s["t"] < 0 and s["playing"]
+                               for s in held), held[-2:])
     late = next((s for s in states if s["at"] >= 6000), None)
     checks.expect("boot-expected", "once none is expected any more, the picture runs on its own",
                   late is not None and not late["warming"] and late["t"] >= 1.0, late)

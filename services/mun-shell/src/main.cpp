@@ -8,6 +8,7 @@
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <QQuickWindow>
 #include <QSettings>
 
 #include "displaymode.h"
@@ -19,7 +20,41 @@
 #include <algorithm>
 #include <chrono>
 
+#include <fcntl.h>
+#include <unistd.h>
+
 namespace {
+
+// The standby picture the system drew while the console started
+// (deploy/mun-standby) stays in the kernel's framebuffer, which the kernel
+// shows again whenever no program drives the display, as between the shell
+// and a game. Once the shell's own frame is on screen, the framebuffer goes
+// back to black, as it was before. The picture is drawn only into a
+// framebuffer of its size, 1920x1080 at 32 bits; not where Qt draws into
+// the framebuffer itself (linuxfb without DRM).
+void clearStandbyPicture()
+{
+    if (QGuiApplication::platformName() == QLatin1String("linuxfb") && !qEnvironmentVariableIsSet("QT_QPA_FB_DRM"))
+        return;
+    const int fd = ::open("/dev/fb0", O_WRONLY | O_CLOEXEC);
+    if (fd < 0) {
+        qWarning("mun-shell: the standby picture stays: cannot open the framebuffer");
+        return;
+    }
+    const std::vector<char> black(size_t(7680) * 1080, 0);
+    size_t done = 0;
+    while (done < black.size()) {
+        const ssize_t n = ::write(fd, black.data() + done, black.size() - done);
+        if (n <= 0)
+            break;
+        done += size_t(n);
+    }
+    ::close(fd);
+    if (done < black.size())
+        qWarning("mun-shell: the standby picture stays: the framebuffer took %zu of %zu bytes", done, black.size());
+    else
+        qInfo("mun-shell: the standby picture is cleared from the framebuffer");
+}
 
 // The exit status when the interface cannot be loaded (EX_SOFTWARE): a
 // failure the unit restarts and the journal shows. Not 1, which is how Qt's
@@ -127,6 +162,13 @@ int main(int argc, char *argv[])
     }
     if (engine.rootObjects().isEmpty())
         return kInterfaceFailedStatus;
+    // At every start while the system's standby picture may still be in the
+    // framebuffer: a start that ended before its first frame left it there.
+    if (QFile::exists(QStringLiteral("/run/mun-standby/shown"))) {
+        if (auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().constFirst()))
+            QObject::connect(window, &QQuickWindow::frameSwapped, &app, &clearStandbyPicture,
+                             Qt::ConnectionType(Qt::QueuedConnection | Qt::SingleShotConnection));
+    }
     // Gamepads drive the menus as the keyboard does (src/gamepads.h); one
     // that comes or goes sounds, with the interface sounds on.
     Gamepads gamepads(engine.singletonInstance<FrameWatch *>("MUN.Shell", "FrameWatch"));

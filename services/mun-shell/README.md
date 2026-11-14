@@ -58,6 +58,8 @@ draws the parts that depend on it accordingly (*How it is drawn*).
 | `deploy/packages`, `deploy/build-packages` | Debian packages at run time and for compiling; the image build mirrors them in `os/mkosi/mkosi.conf` |
 | `deploy/build.sh` | Compiles out of tree with a given build id; run by the image build |
 | `deploy/stage.sh` | Installs a compiled shell, the unit, the power helper, the sudoers rule and `deploy/sysusers.conf` under a root directory, the image's |
+| `deploy/standby-frame.py`, `deploy/standby.qml` | Make the standby picture from the shell just built: its own first frame at the first start of a boot, offscreen; run by the image build |
+| `deploy/mun-standby`, `deploy/mun-standby.service` | Show the standby picture on the kernel's framebuffer as soon as the image's root is mounted |
 
 Separation: the UI (QML) never touches the system; `SystemInfo` reads it;
 `PowerControl` asks a root helper through a sudoers rule that names one binary
@@ -148,7 +150,18 @@ service and the launcher have answered, "A Skip" shows at the bottom right
 and A (or Enter, or Space) ends the start-up; until then no key does
 anything. When the picture has faded (11.75 s), Home comes in if they have
 answered, while the sound rings on; if not, the LED waits, breathing, until
-they do, or 20 s after the start whatever they do. The sound's first notes
+they do, or 20 s after the start whatever they do. Before the start-up
+begins the console is in standby: the dark screen with its LED lit, from
+the shell's first frame, held 0.4 s, then breathing, fading as the
+start-up begins. The system shows the same picture earlier: the image
+build makes it from the shell just built, its own first frame grabbed
+offscreen (`deploy/standby-frame.py`), and `mun-standby.service` writes it
+to the kernel's framebuffer as soon as the image's root is mounted, when
+that framebuffer is 1920x1080 at 32 bits; so from there the console shows
+MUN instead of black, and nothing changes on screen when the shell takes
+the display over. The shell then clears the framebuffer to black, which
+the kernel shows again whenever no program drives the display (between
+the shell and a game). The sound's first notes
 are never the first thing the display hears: a display given a new stream
 plays it only a moment later (on a board's HDMI display, about two
 seconds), so the shell opens the sound device as it starts, before the

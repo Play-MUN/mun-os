@@ -127,7 +127,7 @@ class CompositionTests(unittest.TestCase):
         self.assertNotIn("Autologin", QEMU_DEV.read_text())
 
     def test_the_image_boots_quietly(self):
-        # Firmware, then a blank display, then the shell's splash.
+        # Firmware, then the shell's standby picture (deploy/mun-standby), then its start-up.
         cmdline = mkosi_list(QEMU_DEV, "KernelCommandLine")
         for parameter in ("quiet", "loglevel=3", "vt.global_cursor_default=0"):
             self.assertIn(parameter, cmdline)
@@ -136,7 +136,7 @@ class CompositionTests(unittest.TestCase):
     def test_the_console_services_are_enabled_and_tty1_left_to_the_shell(self):
         preset = (MKOSI / "mkosi.extra" / "usr" / "lib" / "systemd" / "system-preset" / "10-mun.preset").read_text()
         for unit in ("run-mun-launch.mount", "mun-cardd.service", "mun-launchd.service",
-                     "mun-shell.service", "mun-reset.service"):
+                     "mun-shell.service", "mun-standby.service", "mun-reset.service"):
             self.assertIn(f"enable {unit}", preset)
         self.assertIn("disable getty@.service", preset)
 

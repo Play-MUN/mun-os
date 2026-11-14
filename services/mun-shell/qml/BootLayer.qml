@@ -5,15 +5,18 @@ import MUN.Shell
 // in the dark (BootIntro draws it, part by part), over the start-up sound
 // (sounds/startup.wav, 13.05 s); and off.
 //
-// One clock, t, in seconds of the sound. While the sound plays, t is what
-// has been heard of it (SystemSounds.heard), read on every frame: the
-// picture follows what is heard, even when the device is slow to start or
-// falls behind while the system loads. The screen stays black while the
-// sound waits for its device (up to kStartWait), and the picture holds while
-// the sound stalls (up to kStallWait), then follows it again. With the
-// interface sounds off, the sound dropped (no device), or a wait past those
-// bounds, t runs on its own from where it was. Every change of clock is one
-// line in the journal.
+// One clock, t, in seconds of the sound (BootClock, src/startupclock.h). While
+// the sound plays and can be trusted, t is what has been heard of it
+// (SystemSounds.heard), read on every frame: the picture follows what is
+// heard, even when the device is slow to start or falls behind while the
+// system loads. The screen stays black while the sound waits for its device
+// (up to 3 s), and the picture holds while the sound stalls (up to 2 s), then
+// follows it again. A sound that does not start, does not advance from its
+// start, stalls longer, goes back, runs at a wrong speed or whose device
+// keeps recovering is no longer followed: t goes on alone, at real speed,
+// from where it was, never back and never again from the start. With the
+// interface sounds off or no device, t runs alone from the start. Every
+// change of clock is one line in the journal.
 //
 // The system loads meanwhile. Once the card service and the launcher have
 // answered (`ready`), "A Skip" shows at the bottom right, and A (or Enter,
@@ -50,9 +53,12 @@ Rectangle {
     // sound's first notes would be lost while the picture moved. main.cpp
     // opens the device as the shell starts, so this is usually over before
     // the interface has loaded; otherwise the LED breathes in the dark.
-    // Without a device, or none expected (SystemSounds.expecting()), the
-    // start-up does not wait.
+    // Played well, not just open (SystemSounds.playingFor()). While a device
+    // is expected (SystemSounds.expecting()) the start-up waits for one that
+    // plays well; after that, without a device it does not wait, and for
+    // one that is open but does not play well, up to kWarmLimit.
     readonly property int kWarm: 2000
+    readonly property int kWarmLimit: 3000
     property bool warming: false
     property double warmFrom: 0
     // Standby: the console on, before its start-up begins (the layer shown
@@ -69,31 +75,19 @@ Rectangle {
     signal finished()
 
     readonly property int kReady: 20000
-    // How long the black screen waits for the sound's first samples, and
-    // how long the picture holds while the sound stalls.
-    readonly property int kStartWait: 3000
-    readonly property int kStallWait: 2000
 
-    // The clock: following the sound, or on its own from `ownFrom` at
-    // `ownStart` (ms since the epoch).
-    property bool audible: false
-    property bool heardOnce: false
-    property real ownFrom: 0
-    property double ownStart: 0
-    property real lastHeard: -1
-    property double lastHeardAt: 0
+    BootClock { id: clock }
 
     function start() {
         late = false
         leaving = false
         waiting = false
-        heardOnce = false
         t = -1
         ready_.restart()
         if (!ShellSettings.systemSounds) {
             before = false
             running = true
-            runAlone(0, "the interface sounds are off")
+            clock.begin(false, 0)
         } else if (soundReady()) {
             begin()
         } else {
@@ -102,59 +96,24 @@ Rectangle {
             warm.start()
         }
     }
-    // The device has played long enough, or there is none to wait for.
+    // The device has played well long enough, or there is none to wait for.
     function soundReady() {
-        const open = SystemSounds.openFor()
-        return open * 1000 >= kWarm || (open < 0 && !SystemSounds.expecting())
+        if (SystemSounds.playingFor() * 1000 >= kWarm)
+            return true
+        if (SystemSounds.expecting())
+            return false
+        if (!SystemSounds.deviceOpen())
+            return true
+        return Date.now() - warmFrom >= kWarmLimit
     }
     function begin() {
         before = false
         running = true
-        audible = true
+        clock.begin(true, SystemSounds.recoveries())
         SystemSounds.play("startup")
-        noSound.restart()
-    }
-    function runAlone(from, why) {
-        console.info("mun-shell: start-up: the picture runs on its own from " + from.toFixed(2) + " s: " + why)
-        audible = false
-        noSound.stop()
-        ownFrom = from
-        ownStart = Date.now()
     }
     function tick() {
-        const now = Date.now()
-        if (audible) {
-            const heard = SystemSounds.heard("startup")
-            if (isNaN(heard)) {
-                // Not started yet (noSound waits for it), or over: played
-                // out or dropped (onDropped says which, first).
-                if (heardOnce)
-                    runAlone(t, "the sound is over (played out or dropped)")
-                return
-            }
-            if (!heardOnce) {
-                heardOnce = true
-                lastHeard = heard
-                lastHeardAt = now
-                noSound.stop()
-                console.info("mun-shell: start-up: the picture follows the sound")
-            }
-            if (heard !== lastHeard) {
-                if (now - lastHeardAt > 500)
-                    console.info("mun-shell: start-up: the sound plays again after " + (now - lastHeardAt) + " ms; the picture held")
-                lastHeard = heard
-                lastHeardAt = now
-            } else if (now - lastHeardAt > kStallWait && heard > 0) {
-                // Stalled past the wait: the picture goes on alone from here.
-                runAlone(heard, "the sound stalled for " + kStallWait + " ms")
-                return
-            }
-            // While the sound stalls, so does the picture: t stays where
-            // the sound is.
-            t = heard
-        } else {
-            t = ownFrom + (now - ownStart) / 1000
-        }
+        t = clock.tick(SystemSounds.heard("startup"), SystemSounds.recoveries())
         if (t >= times.faded && running && !waiting && !leaving) {
             if (ready || late)
                 leave()
@@ -177,7 +136,6 @@ Rectangle {
         warming = false
         running = false
         warm.stop()
-        noSound.stop()
         ready_.stop()
         shown = false
         finished()
@@ -188,7 +146,6 @@ Rectangle {
         warming = false
         leaving = false
         warm.stop()
-        noSound.stop()
         ready_.stop()
         t = -1
         shown = true
@@ -210,34 +167,27 @@ Rectangle {
             if (!root.soundReady())
                 return
             warm.stop()
-            const open = SystemSounds.openFor()
+            const playing = SystemSounds.playingFor()
             console.info("mun-shell: start-up: waited " + ((Date.now() - root.warmFrom) / 1000).toFixed(2)
                          + " s for the sound device: "
-                         + (open < 0 ? "none came" : "it had played for " + open.toFixed(2) + " s"))
+                         + (playing >= 0 ? "it had played well for " + playing.toFixed(2) + " s"
+                            : SystemSounds.deviceOpen() ? "it was open but did not play well" : "none came"))
             root.warming = false
             root.begin()
         }
     }
-    // No first samples after kStartWait: the picture goes on alone.
-    Timer {
-        id: noSound
-        interval: root.kStartWait
-        onTriggered: root.runAlone(Math.max(0, root.t), "no sound after " + root.kStartWait + " ms")
-    }
     Connections {
         target: SystemSounds
-        // The sound started after the picture had (a slow device): follow it
-        // again while the screen is still black (the LED lights at 0.3 s).
+        // The sound started after the picture had gone on alone (a slow
+        // device): followed again while the screen is still black.
         function onStarted(name) {
-            if (name === "startup" && root.running && !root.audible && root.t < 0.25) {
-                root.audible = true
-                console.info("mun-shell: start-up: the sound started late; the picture follows it again")
-            }
+            if (name === "startup" && root.running)
+                clock.started()
         }
         // No device: the picture does not wait for a sound that will not come.
         function onDropped(name) {
-            if (name === "startup" && root.running && root.audible)
-                root.runAlone(Math.max(0, root.t), "the sound was dropped (no device)")
+            if (name === "startup" && root.running)
+                clock.dropped()
         }
     }
     Timer {

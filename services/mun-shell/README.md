@@ -26,6 +26,8 @@ draws the parts that depend on it accordingly (*How it is drawn*).
 | `src/systeminfo.*` | Real system facts read from `/proc`, `/sys`, `/etc/os-release`, `/usr/lib/mun/release`, `statvfs` and `getifaddrs` (identity, hardware, display, time zone, network interfaces), raw so the interface words them in its language |
 | `src/shellsettings.*` | The player's settings, validated and kept in the service's state directory |
 | `src/systemsounds.*` | The menus' sounds (move, enter, back), mixed on a worker thread and played through ALSA |
+| `src/playbackhealth.h` | Whether the sound device plays what it is given at its rate (not just open), in standard C++, checked on the host |
+| `src/startupclock.h`, `src/bootclock.*` | The start-up's clock: following its sound while it can be trusted, alone at real speed once not; in standard C++, checked on the host, and given to QML on the monotonic clock |
 | `src/powercontrol.*` | The only privileged request: runs `mun-power` through `sudo -n`; reports failure to the UI |
 | `src/cardclient.*` | Mirror of the card service over its UNIX socket: snapshot, events, reconnection; exposes state, manifest, error, cover (data URL) and whether the active card arrived while the shell was watching to QML |
 | `src/shape.*`, `src/contrast.h`, `src/readpalette.*` | A Game Card's MUN Shape on the eligible surfaces: the export read and decoded off the GUI thread, its colours verified again with the contrast rule, the palette read from a cover, the phases of its coming in and leaving (*A Game Card's identity*) |
@@ -49,7 +51,7 @@ draws the parts that depend on it accordingly (*How it is drawn*).
 | `qml/OrbitalMenu.qml`, `OrbitalNode`, `OrbitalIcon`, `OrbitalFocus`, `src/orbitalcard.*` | The orbital design's menus: the entries as nodes on the orbit's ring with their pills, their icons (each part painted once and moved by a transform), and the entry in focus large at the orbit's centre, the card object among them |
 | `qml/ArcMenu.qml`, `ArcNode`, `DetailPanel`, `OptionRow`, `StatusBar`, `MoonPhase`, `ModalLayer`, `BootLayer`, `UiText`, `MarkText`, `Shadow`, `Material`, `Logo.js` | Components: the arcs and their entries, the panel and its options, the status line, dialogs, the start-up and power-off screen, text and shadows; the MUN logo |
 | `tests/behaviour.py`, `tests/scenes/` | Behaviour regressions run on the compiled binary: offscreen with the software renderer, Home also through OpenGL on Xvfb (*A Game Card's identity*), and the two drawing paths side by side (*On a graphics API*) |
-| `tests/displaydevice_test.cpp`, `tests/Makefile` | The display rules on fake sysfs trees and mode lists, compiled and run on the host by `make check` |
+| `tests/displaydevice_test.cpp`, `tests/startupclock_test.cpp`, `tests/playbackhealth_test.cpp`, `tests/Makefile` | The display rules on fake sysfs trees and mode lists, the start-up's clock against sounds that stall, crawl, race, go back or recover, and the device's health against devices that do; compiled and run on the host by `make check` |
 | `fonts/` | Archivo and Michroma, compiled in, with their licences |
 | `sounds/` | The interface's sounds, compiled in: the menus' `move.wav`, `enter.wav`, `back.wav`, the console's events' (`launch.wav`, `game_return.wav`, `shape_exit.wav`, `eject.wav`, `shutdown.wav`, `success.wav`, `warning.wav`, `error.wav`, `controller_connect.wav`, `controller_disconnect.wav`) and the start-up's `startup.wav` |
 | `deploy/mun-shell.service` | systemd unit on tty1 as user `mun-shell` with the display (DRM) and evdev environment and the state directory |
@@ -166,19 +168,30 @@ are never the first thing the display hears: a display given a new stream
 plays it only a moment later (on a board's HDMI display, about two
 seconds), so the shell opens the sound device as it starts, before the
 interface loads, feeding it silence, and the start-up begins only once the
-device has played for 2 s; meanwhile the LED breathes in the dark. That is
-usually over before the interface has loaded. Where the sound card comes
-up after the shell starts (a board's audio DSP), the unit sets
-`MUN_SHELL_SOUND_WAIT` (seconds): the shell looks for the device every
-0.25 s until then, and the start-up waits for it; without a device, or none
-expected, it does not wait. The journal says how long it waited. The
-picture keeps time
-with the sound: on every frame its clock is what has been heard of it, the
-samples written to the device less what the device still holds. The black
-screen waits up to 3 s for the sound's first samples, and the picture holds
-while the sound stalls, up to 2 s, then follows it again; with System sounds
-off, no device, or a longer wait, it plays on its own clock from where it
-was. The journal says each time the picture changes clock. *Reduce motion*
+device has played well for 2 s: not open, but playing at its rate, as what
+it says it has played shows after every write (`src/playbackhealth.h`);
+meanwhile the LED breathes in the dark. That is usually over before the
+interface has loaded. Where the sound card comes up after the shell starts
+(a board's audio DSP), the unit sets `MUN_SHELL_SOUND_WAIT` (seconds): the
+shell looks for the device every 0.25 s until then, and the start-up waits
+for one that plays well; `MUN_SHELL_SOUND_READY` may name a file the system
+writes once the device is ready (a board's route to HDMI), before which it
+is not opened. After the wait, without a device the start-up does not wait,
+and for a device that is open but does not play well, up to 3 s. The
+journal says how long it waited, and follows the device: when it opened and
+after how many attempts, when it played and when at its rate, its problems,
+failed writes and their recovery, all with the time since boot. The picture
+keeps time with the sound (`src/startupclock.h`): on every frame its clock
+is what has been heard of it, the samples written to the device less what
+the device still holds. The black screen waits up to 3 s for the sound's
+first samples, and the picture holds while the sound stalls, up to 2 s,
+then follows it again. A sound that does not advance from its start within
+3 s, stalls longer, goes back, runs slower than 0.8 or faster than 1.25
+times real time over a second, or whose device recovers twice, is not
+followed any more: the picture goes on alone, at real speed, from where it
+was, never back and never again from its start; with System sounds off or
+no device it plays alone from the start. The journal says each time the
+picture changes clock. *Reduce motion*
 takes out the shake, the tremor and the flicker; every time stays. Moving to another entry: the chosen bar
 turns light at once while its copper edge, glow and text colour settle in
 0.3 s and it slides 4 px out; the new object loads in 0.9 s, a radar-like

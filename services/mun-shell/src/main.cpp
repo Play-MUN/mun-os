@@ -118,6 +118,11 @@ int main(int argc, char *argv[])
     SystemSounds::provide(&sounds);
     if (firstStart && soundsOn) {
         sounds.expectDevice(expectedSoundWait());
+        // MUN_SHELL_SOUND_READY: a file the system writes once the expected
+        // device is ready (a board's route to HDMI set); until then, within
+        // the wait, the device is not opened. Unset: opened as soon as it is
+        // there.
+        sounds.openAfter(qEnvironmentVariable("MUN_SHELL_SOUND_READY"));
         sounds.setAwake(true);
     }
     QGuiApplication app(argc, argv);

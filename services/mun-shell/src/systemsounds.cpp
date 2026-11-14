@@ -1,5 +1,7 @@
 #include "systemsounds.h"
 
+#include "playbackhealth.h"
+
 #include <QFile>
 #include <QJSEngine>
 #include <QMetaObject>
@@ -82,16 +84,37 @@ void SystemSounds::expectDevice(std::chrono::milliseconds wait)
 bool SystemSounds::expecting() const
 {
     const auto until = m_expectUntil.load();
-    return until != 0 && m_openedAt.load() == 0 && std::chrono::steady_clock::now().time_since_epoch().count() < until;
+    return until != 0 && std::chrono::steady_clock::now().time_since_epoch().count() < until;
 }
 
-double SystemSounds::openFor() const
+void SystemSounds::openAfter(const QString &path)
 {
-    const auto opened = m_openedAt.load();
-    if (opened == 0)
+    {
+        std::lock_guard lock(m_mutex);
+        m_readyFile = path.toStdString();
+    }
+    m_wake.notify_one();
+}
+
+double SystemSounds::playingFor() const
+{
+    const double since = m_healthySince.load(), last = m_lastAdvanceAt.load();
+    const double now = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    // As PlaybackHealth::healthyFor: a device that stopped playing (its
+    // writes blocked, so the worker says nothing) is not playing well.
+    if (since < 0 || last < 0 || now - last > kHealthGap)
         return -1;
-    const auto now = std::chrono::steady_clock::now().time_since_epoch().count();
-    return std::chrono::duration<double>(std::chrono::steady_clock::duration(now - opened)).count();
+    return now - since;
+}
+
+bool SystemSounds::deviceOpen() const
+{
+    return m_openedAt.load() != 0;
+}
+
+int SystemSounds::recoveries() const
+{
+    return m_recoveries.load();
 }
 
 SystemSounds::SystemSounds(QObject *parent) : QObject(parent)
@@ -298,6 +321,7 @@ void SystemSounds::stop(const QString &name)
 
 void SystemSounds::run()
 {
+    using Clock = std::chrono::steady_clock;
     snd_pcm_t *pcm = nullptr;
     std::vector<Voice> voices;
     std::vector<int> mix(size_t(kPeriodFrames * kChannels));
@@ -309,28 +333,54 @@ void SystemSounds::run()
         bool done;
     };
     std::vector<Moved> moved;    // how far each sound in this period has gone
-    std::chrono::steady_clock::time_point retryAt{}, lastSound{}, openedAt{}, lookedFrom{};
+    Clock::time_point retryAt{}, lastSound{}, openedAt{}, lookedFrom{};
     bool reported = false;
-    bool looked = false;  // a device was expected and not there: lookedFrom says since when
     bool keepOpen = false;  // the worker's copy of m_keepOpen
     int failures = 0;  // writes failed in a row
     quint32 noise = 0x9E3779B9;  // xorshift state of the silence's noise
     static const bool timing = qEnvironmentVariableIsSet("MUN_SHELL_TIMING");
     snd_lib_error_set_handler(alsaMessage);
-    const auto expected = [this](std::chrono::steady_clock::time_point now) {
+
+    // Seconds since boot (the steady clock is the monotonic one): the
+    // journal's times line up with the kernel's and the other services'.
+    const auto seconds = [](Clock::time_point at) { return std::chrono::duration<double>(at.time_since_epoch()).count(); };
+    const auto expected = [this](Clock::time_point now) {
         const auto until = m_expectUntil.load();
         return until != 0 && now.time_since_epoch().count() < until;
     };
 
+    // Looking for a device that is expected: since when, how many attempts,
+    // the kinds of failure said so far (each once) and the last one.
+    bool looked = false;
+    int attempts = 0;
+    std::vector<std::string> kinds;
+    std::string lastFailure;
+    bool readySaid = false;
+    // The open device: what it played (PlaybackHealth), what was written to
+    // it, and how much the journal has said about it (bounded).
+    PlaybackHealth health(kRate, PlaybackHealth::Limits{0.5, 0.8, 1.25, kHealthGap});
+    qint64 writtenSinceOpen = 0;
+    bool advanceSaid = false, healthSaid = false;
+    int problemLines = 0, writeLines = 0, delayLines = 0, problems = 0;
+    const auto publish = [&] {
+        m_healthySince = health.healthySince();
+        m_lastAdvanceAt = health.lastAdvanceAt();
+    };
+
     const auto closeDevice = [&](const char *why) {
         if (pcm) {
+            // Said only for a device that was set up and played (not for one
+            // closed again because it could not be set up).
+            const bool wasOpen = m_openedAt.load() != 0;
             snd_pcm_close(pcm);
             pcm = nullptr;
             m_openedAt = 0;
-            if (timing)
-                qInfo("mun-shell: sound device let go (%s) after %lld s", why,
-                      qlonglong(std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - openedAt)
-                                    .count()));
+            health.closed();
+            publish();
+            const auto now = Clock::now();
+            if (wasOpen)
+                qInfo("mun-shell: sound: the device let go at %.2f s (%s) after %.2f s open, %d problem(s) seen",
+                      seconds(now), why, std::chrono::duration<double>(now - openedAt).count(), problems);
         }
     };
     // Sounds that will not be heard: over for heard() (NaN once what was
@@ -340,7 +390,7 @@ void SystemSounds::run()
             return;
         {
             std::lock_guard lock(m_progressMutex);
-            const auto now = std::chrono::steady_clock::now();
+            const auto now = Clock::now();
             for (const Voice &voice : voices) {
                 Progress &progress = m_progress[voice.sound->name];
                 const double since = std::chrono::duration<double>(now - progress.at).count();
@@ -354,35 +404,46 @@ void SystemSounds::run()
         }
         voices.clear();
     };
-    const auto giveUp = [&](const char *what, int error) {
-        const auto now = std::chrono::steady_clock::now();
-        // A device still expected is looked for again soon, and not
-        // reported: it is not there yet.
+    // `opening`: the device could not be opened or set up (it may not be
+    // there yet); otherwise it failed after it had opened.
+    const auto giveUp = [&](const char *what, int error, bool opening) {
+        const auto now = Clock::now();
         const bool coming = expected(now);
-        if (coming && !looked) {
-            looked = true;
-            lookedFrom = now;
-        }
-        if (!reported && !coming) {
-            qWarning("mun-shell: interface sounds off: %s: %s", what, snd_strerror(error));
+        if (coming && opening) {
+            // Not there yet: looked for again soon; each kind of failure
+            // said once, the rest counted.
+            ++attempts;
+            if (!looked) {
+                looked = true;
+                lookedFrom = now;
+                qInfo("mun-shell: sound: looking for the device from %.2f s", seconds(now));
+            }
+            lastFailure = std::string(what) + ": " + snd_strerror(error);
+            if (std::find(kinds.begin(), kinds.end(), lastFailure) == kinds.end() && kinds.size() < 5) {
+                kinds.push_back(lastFailure);
+                qInfo("mun-shell: sound: not yet at %.2f s: %s", seconds(now), lastFailure.c_str());
+            }
+        } else if (!reported) {
+            qWarning("mun-shell: interface sounds off at %.2f s: %s: %s", seconds(now), what, snd_strerror(error));
             reported = true;
         }
         closeDevice("failed");
         drop();
         failures = 0;
-        retryAt = now + (coming ? std::chrono::steady_clock::duration(kExpectRetry) : std::chrono::steady_clock::duration(kRetry));
+        retryAt = now + (coming ? Clock::duration(kExpectRetry) : Clock::duration(kRetry));
     };
 
     for (;;) {
+        std::string readyFile;
         {
             std::unique_lock lock(m_mutex);
             if (!pcm && voices.empty()) {
                 // Closed: wait for a sound, or, awake, for the device to be
                 // opened (at once, or once a failed one may be tried again).
                 const auto ready = [this, &retryAt] {
-                    return m_stop || !m_requests.empty() || (m_keepOpen && std::chrono::steady_clock::now() >= retryAt);
+                    return m_stop || !m_requests.empty() || (m_keepOpen && Clock::now() >= retryAt);
                 };
-                if (m_keepOpen && std::chrono::steady_clock::now() < retryAt)
+                if (m_keepOpen && Clock::now() < retryAt)
                     m_wake.wait_until(lock, retryAt, ready);
                 else
                     m_wake.wait(lock, ready);
@@ -390,6 +451,7 @@ void SystemSounds::run()
             if (m_stop)
                 break;
             keepOpen = m_keepOpen;
+            readyFile = m_readyFile;
             while (!m_requests.empty()) {
                 if (voices.size() == kVoices)
                     voices.erase(voices.begin());  // the oldest makes room
@@ -404,7 +466,7 @@ void SystemSounds::run()
             }
         }
 
-        const auto now = std::chrono::steady_clock::now();
+        const auto now = Clock::now();
         if (!voices.empty()) {
             lastSound = now;
         } else if (pcm && !keepOpen && now - lastSound >= kIdle) {
@@ -420,33 +482,60 @@ void SystemSounds::run()
                 drop();
                 continue;
             }
+            // While a device is expected, not before the system says it is
+            // ready (openAfter()).
+            if (!readyFile.empty() && expected(now)) {
+                if (!QFile::exists(QString::fromStdString(readyFile))) {
+                    if (!readySaid) {
+                        readySaid = true;
+                        qInfo("mun-shell: sound: waiting for %s before opening the device, from %.2f s",
+                              readyFile.c_str(), seconds(now));
+                    }
+                    drop();
+                    retryAt = now + kExpectRetry;
+                    continue;
+                }
+            }
             alsaQuiet = expected(now);
             int error = snd_pcm_open(&pcm, "default", SND_PCM_STREAM_PLAYBACK, 0);
             if (error < 0) {
                 pcm = nullptr;
-                giveUp("no sound device", error);
+                giveUp("no sound device", error, true);
                 continue;
             }
             error = snd_pcm_set_params(pcm, SND_PCM_FORMAT_S16_LE, SND_PCM_ACCESS_RW_INTERLEAVED, kChannels, kRate,
                                        1, kLatencyMicroseconds);
             if (error < 0) {
-                giveUp("the sound device refuses 16-bit 48 kHz stereo", error);
+                giveUp("the sound device refuses 16-bit 48 kHz stereo", error, true);
                 continue;
             }
             alsaQuiet = false;
-            const auto opened = std::chrono::steady_clock::now();
-            if (timing)
-                qInfo("mun-shell: sound device opened in %lld ms (%s)",
-                      qlonglong(std::chrono::duration_cast<std::chrono::milliseconds>(opened - now).count()),
-                      voices.empty() ? "awake" : "a sound");
+            const auto opened = Clock::now();
+            std::string how = voices.empty() ? "awake" : "for a sound";
+            if (!readyFile.empty() && readySaid)
+                how += ", " + readyFile + " there";
             if (looked) {
-                qInfo("mun-shell: the sound device came %.2f s after the shell first looked for it",
-                      std::chrono::duration<double>(opened - lookedFrom).count());
+                qInfo("mun-shell: sound: the device opened at %.2f s (%s); the sound device came %.2f s after the shell "
+                      "first looked for it, %d attempt(s) before, the last: %s",
+                      seconds(opened), how.c_str(), std::chrono::duration<double>(opened - lookedFrom).count(), attempts,
+                      lastFailure.c_str());
                 looked = false;
+                attempts = 0;
+                kinds.clear();
+            } else {
+                qInfo("mun-shell: sound: the device opened at %.2f s (%s)", seconds(opened), how.c_str());
             }
+            if (timing)
+                qInfo("mun-shell: sound device opened in %lld ms",
+                      qlonglong(std::chrono::duration_cast<std::chrono::milliseconds>(opened - now).count()));
             openedAt = opened;
             m_openedAt = opened.time_since_epoch().count();
             lastSound = opened;
+            health.opened(seconds(opened));
+            publish();
+            writtenSinceOpen = 0;
+            advanceSaid = healthSaid = false;
+            problemLines = writeLines = delayLines = problems = 0;
         }
 
         // One period of everything sounding, mixed and limited; silence when
@@ -498,33 +587,75 @@ void SystemSounds::run()
         snd_pcm_uframes_t left = kPeriodFrames;
         while (left > 0) {
             snd_pcm_sframes_t written = snd_pcm_writei(pcm, next, left);
-            if (written < 0)
-                written = snd_pcm_recover(pcm, int(written), 1);
+            if (written < 0) {
+                // A failed write: recovered where ALSA can (an underrun, a
+                // suspend); both errors said, a few times per opening.
+                const int original = int(written);
+                written = snd_pcm_recover(pcm, original, 1);
+                ++m_recoveries;
+                if (writeLines < 5) {
+                    ++writeLines;
+                    qWarning("mun-shell: sound: a write failed at %.2f s: %s; recovering it: %s", seconds(Clock::now()),
+                             snd_strerror(original), written < 0 ? snd_strerror(int(written)) : "done");
+                }
+            }
             if (written < 0) {
                 // A device that fails mid-stream is opened afresh at once,
                 // the sounds keeping their place; one that fails again
-                // right after opening means silence for kRetry.
+                // right after opening means silence for kRetry (kExpectRetry
+                // while one is expected).
                 if (++failures > 1)
-                    giveUp("the sound device stopped", int(written));
+                    giveUp("the sound device stopped", int(written), false);
                 else
                     closeDevice("stopped");
                 break;
             }
             next += written * kChannels;
             left -= snd_pcm_uframes_t(written);
+            writtenSinceOpen += written;
         }
         if (left == 0) {
             failures = 0;
             reported = false;
+            // What the device still holds is not played yet: it says how far
+            // it has got, for heard() and for its health.
+            snd_pcm_sframes_t held = 0;
+            const int delayError = snd_pcm_delay(pcm, &held);
+            const auto at = Clock::now();
+            if (delayError < 0 && delayLines < 3) {
+                ++delayLines;
+                qWarning("mun-shell: sound: the device could not say what it holds at %.2f s: %s", seconds(at),
+                         snd_strerror(delayError));
+            }
+            const auto problem = health.wrote(seconds(at), writtenSinceOpen, delayError < 0 ? -1 : qint64(held));
+            publish();
+            if (!advanceSaid && health.advancingSince() >= 0) {
+                advanceSaid = true;
+                qInfo("mun-shell: sound: the device plays from %.2f s, %.0f ms after it opened", health.advancingSince(),
+                      (health.advancingSince() - health.openedAt()) * 1000);
+            }
+            if (!healthSaid && health.healthySince() >= 0) {
+                healthSaid = true;
+                qInfo("mun-shell: sound: the device plays at its rate from %.2f s (%.2f times it)", health.healthySince(),
+                      health.lastRate());
+            }
+            if (problem != PlaybackHealth::Problem::None) {
+                ++problems;
+                if (problemLines < 8) {
+                    ++problemLines;
+                    static const char *const names[] = {"", "stalled", "slow", "fast", "going back",
+                                                         "unable to say what it holds"};
+                    qWarning("mun-shell: sound: the device is %s at %.2f s (%.2f times its rate over the last window)",
+                             names[int(problem)], seconds(at), health.lastRate());
+                    healthSaid = false;  // said again when it plays at its rate again
+                }
+            }
             if (!moved.empty()) {
-                // What the device still holds is not heard yet.
-                snd_pcm_sframes_t held = 0;
-                if (snd_pcm_delay(pcm, &held) < 0 || held < 0)
+                if (delayError < 0 || held < 0)
                     held = snd_pcm_sframes_t(qint64(kLatencyMicroseconds) * kRate / 1000000);
-                const auto now = std::chrono::steady_clock::now();
                 std::lock_guard lock(m_progressMutex);
                 for (const Moved &m : moved)
-                    m_progress[m.name] = {m.written, m.written - qint64(held), now, m.done};
+                    m_progress[m.name] = {m.written, m.written - qint64(held), at, m.done};
             }
             for (const QString &name : begun)
                 QMetaObject::invokeMethod(this, [this, name] { emit started(name); }, Qt::QueuedConnection);

@@ -44,6 +44,7 @@ qt_add_executable(mun-shell
     src/shellsettings.h
     src/systemsounds.cpp
     src/systemsounds.h
+    src/playbackhealth.h
     src/gamepadmap.cpp
     src/gamepadmap.h
     src/gamepads.cpp
@@ -57,6 +58,9 @@ qt_add_executable(mun-shell
     src/bootintro.cpp
     src/bootintro.h
     src/bootintroshapes.h
+    src/bootclock.cpp
+    src/bootclock.h
+    src/startupclock.h
     src/hairline.cpp
     src/hairline.h
     src/cssbox.cpp

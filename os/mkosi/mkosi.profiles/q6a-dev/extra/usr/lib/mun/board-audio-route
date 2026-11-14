@@ -12,7 +12,10 @@
 # carries none of its announcements, so the GPR services, and the card,
 # never come. Resetting Linux's end of that link makes the DSP announce them
 # again, and the card follows. This script does it once, when the DSP has
-# run for `stall` seconds without its services. It waits 40 s in all.
+# run for `stall` seconds without its services. It waits 40 s in all,
+# looking every tenth of a second: the shell's start-up counts the time the
+# sound device has played from when it opens it, and until the route is set
+# that sound reaches no display.
 #
 # Every outcome goes to the journal with the time since the kernel started,
 # for /usr/lib/mun/board-report.
@@ -21,7 +24,7 @@ link=3700000.remoteproc:glink-edge.IPCRTR.-1.-1
 qrtr=/sys/bus/rpmsg/drivers/qcom_smd_qrtr
 services=/sys/bus/aprbus/devices/gprsvc:service:2:1
 stall=3
-steps=80   # of half a second
+steps=400  # of a tenth of a second
 
 since_boot() { cut -d' ' -f1 /proc/uptime; }
 
@@ -33,7 +36,7 @@ dsp_running() {
 }
 
 i=0
-alone=0     # half-seconds the DSP has run without its services
+alone=0     # tenths of a second the DSP has run without its services
 reset=no
 while [ "$i" -lt "$steps" ]; do
     if amixer -q -c "$card" cset "name=DISPLAY_PORT_RX_0 Audio Mixer MultiMedia2" 1 2>/dev/null; then
@@ -48,7 +51,7 @@ while [ "$i" -lt "$steps" ]; do
         alone=0
     elif dsp_running; then
         alone=$((alone + 1))
-        if [ "$reset" = no ] && [ "$alone" -ge $((stall * 2)) ]; then
+        if [ "$reset" = no ] && [ "$alone" -ge $((stall * 10)) ]; then
             reset=yes
             echo "the audio DSP ran ${stall} s without its services: resetting Linux's end of its QRTR link at $(since_boot) s"
             echo "$link" >"$qrtr/unbind" 2>/dev/null
@@ -59,7 +62,7 @@ while [ "$i" -lt "$steps" ]; do
         fi
     fi
     i=$((i + 1))
-    sleep 0.5
+    sleep 0.1
 done
 echo "the card $card did not appear by $(since_boot) s: no HDMI audio route" >&2
 exit 1

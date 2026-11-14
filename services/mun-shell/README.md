@@ -161,7 +161,11 @@ offscreen (`deploy/standby-frame.py`), and `mun-standby.service` writes it
 to the kernel's framebuffer as soon as the image's root is mounted, when
 that framebuffer is 1920x1080 at 32 bits; so from there the console shows
 MUN instead of black, and nothing changes on screen when the shell takes
-the display over. The shell then clears the framebuffer to black, which
+the display over. Where the unit's environment caps the display link's
+bits per channel (`MUN_DISPLAY_MAX_BPC`, a board's), the service sets the
+cap first (`mun-shell --cap-display`): setting it reconfigures the link and
+a display goes dark for a moment, which left to the shell's start came
+with the picture already shown. The shell then clears the framebuffer to black, which
 the kernel shows again whenever no program drives the display (between
 the shell and a game). The sound's first notes
 are never the first thing the display hears: a display given a new stream

@@ -8,12 +8,24 @@
 # kernel shows it again whenever no program drives the display, as between
 # the shell and a game.
 #
+# Before the picture, a board's cap on the display link is set (below), so
+# that the link is not reconfigured again once the picture shows.
+#
 # Only a framebuffer of exactly the frame's size and format (1920x1080,
 # 32 bits a pixel, 7680 bytes a row) gets it; any other leaves the screen as
 # it is. /run/mun-standby/shown tells the shell it was drawn. Never fails
 # the boot.
 frame=/opt/mun/shell/standby-1920x1080.xrgb
 fb=/sys/class/graphics/fb0
+shell=/opt/mun/shell/bin/mun-shell
+
+# First, where the unit's environment caps the display link's bits per
+# channel (MUN_DISPLAY_MAX_BPC, a board's): the cap, now. Setting it
+# reconfigures the link and the display goes dark for a moment; left to the
+# shell's start, that moment came with this picture already on screen.
+if [ -n "${MUN_DISPLAY_MAX_BPC:-}" ] && [ -x "$shell" ]; then
+    "$shell" --cap-display || true
+fi
 
 [ -r "$frame" ] || { echo "mun-standby: no standby picture in this image"; exit 0; }
 [ -w /dev/fb0 ] || { echo "mun-standby: no framebuffer"; exit 0; }

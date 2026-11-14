@@ -97,6 +97,10 @@ int main(int argc, char *argv[])
     // Before the application exists: they name the settings file outside
     // systemd, and the display mode must be chosen before Qt opens the
     // display (displaymode.h), with the canvas scaled to it.
+    // `mun-shell --cap-display`: only the display link's cap, for the system
+    // to set before anything is shown (displaymode.h, deploy/mun-standby).
+    if (argc == 2 && qstrcmp(argv[1], "--cap-display") == 0)
+        return display::capLink();
     QCoreApplication::setApplicationName(QStringLiteral("mun-shell"));
     QCoreApplication::setOrganizationName(QStringLiteral("MUN"));
     // A display driver can come up after the unit starts; without a display

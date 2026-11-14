@@ -27,24 +27,39 @@ HERE = Path(__file__).resolve().parent
 
 
 def read_ppm(path):
-    """(width, height, RGB bytes) of a binary PPM (P6, 8 bits a channel)."""
+    """(width, height, RGB bytes) of a binary PPM (P6, 8 bits a channel).
+    ValueError for anything else: an empty file, a header that ends early
+    (inside a field or a comment), fields that are not the format's, or
+    pixels short of or past width x height. Every step moves forward through
+    the file, so it ends however the file is cut."""
     data = path.read_bytes()
     fields, at = [], 0
     while len(fields) < 4:
-        while data[at:at + 1].isspace():
+        while at < len(data) and data[at:at + 1].isspace():
             at += 1
+        if at >= len(data):
+            raise ValueError(f"{path}: the PPM header ends after {len(fields)} of its 4 fields")
         if data[at:at + 1] == b"#":
-            at = data.index(b"\n", at) + 1
+            end = data.find(b"\n", at)
+            if end < 0:
+                raise ValueError(f"{path}: the PPM header ends inside a comment")
+            at = end + 1
             continue
         end = at
-        while not data[end:end + 1].isspace():
+        while end < len(data) and not data[end:end + 1].isspace():
             end += 1
+        if end >= len(data):
+            raise ValueError(f"{path}: the PPM header ends inside a field")
         fields.append(data[at:end])
         at = end
-    if fields[0] != b"P6" or fields[3] != b"255":
+    magic, width, height, depth = fields
+    if magic != b"P6" or depth != b"255":
         raise ValueError(f"{path}: not an 8-bit binary PPM")
-    width, height = int(fields[1]), int(fields[2])
-    pixels = data[at + 1:at + 1 + width * height * 3]
+    if not (width.isdigit() and height.isdigit()) or int(width) < 1 or int(height) < 1:
+        raise ValueError(f"{path}: a size of {width!r} by {height!r}")
+    width, height = int(width), int(height)
+    # One whitespace byte after the depth, then exactly the pixels.
+    pixels = data[at + 1:]
     if len(pixels) != width * height * 3:
         raise ValueError(f"{path}: {len(pixels)} bytes of pixels for {width}x{height}")
     return width, height, pixels
@@ -85,7 +100,11 @@ def main(argv):
         if "STANDBY-SAVED" not in output or not grabbed.exists():
             print("standby-frame.py: the shell made no standby frame\n" + output[-2000:], file=sys.stderr)
             return 1
-        width, height, rgb = read_ppm(grabbed)
+        try:
+            width, height, rgb = read_ppm(grabbed)
+        except ValueError as error:
+            print(f"standby-frame.py: {error}", file=sys.stderr)
+            return 1
     if (width, height) != (WIDTH, HEIGHT):
         print(f"standby-frame.py: the frame is {width}x{height}, not {WIDTH}x{HEIGHT}", file=sys.stderr)
         return 1

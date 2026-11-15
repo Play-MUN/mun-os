@@ -48,7 +48,11 @@ directory of the user alone when that path is too long. On Windows they are
 always in the user's own `%LOCALAPPDATA%\mun\sockets\`, closed to other users
 by default, whatever folder the checkout is in: Windows has AF_UNIX since
 Windows 10 version 1803, QEMU listens on it there, and the tools connect to it
-through Winsock, since Python's own socket module has none there.
+through Winsock, since Python's own socket module has none there. QEMU reads
+its command line in the system's code page and the tools address the socket
+in UTF-8, so the path must be plain ASCII: a profile folder outside ASCII
+(`C:\Users\Iván`) is reached by its short 8.3 name, and where the volume
+keeps none the tools say so and stop.
 
 A path of a guest's or a builder's files that contains a comma is refused
 before QEMU is started: QEMU's options are comma-separated fields and would

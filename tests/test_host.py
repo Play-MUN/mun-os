@@ -345,6 +345,22 @@ class CommandLineTests(Fixture):
                 self.assertEqual(vm.control_address(self.paths["qmp"]), self.paths["qmp"])
                 self.paths["qmp"].unlink()
 
+    def test_a_windows_profile_folder_outside_ascii_is_reached_by_its_short_name(self):
+        # QEMU takes its command line in the system's ANSI code page and the
+        # tools address the socket in UTF-8: past ASCII the two would name
+        # different files. The folder's short (8.3) name is plain ASCII.
+        local = self.temporary() / "Iván" / "AppData" / "Local"
+        local.mkdir(parents=True)
+        short = self.temporary() / "IVN~1"
+        with patch.dict(os.environ, {"LOCALAPPDATA": str(local)}), patch.object(vm, "HOST", WINDOWS), \
+                patch.object(vm.host, "short_path", return_value=str(short)):
+            path = vm.socket_path(self.temporary(), "qmp.sock")
+        self.assertTrue(str(path).isascii(), path)
+        self.assertTrue(str(path).startswith(str(short)))
+        with patch.dict(os.environ, {"LOCALAPPDATA": str(local)}), patch.object(vm, "HOST", WINDOWS), \
+                patch.object(vm.host, "short_path", return_value=str(local)), self.assertRaises(vm.LabError):
+            vm.socket_path(self.temporary(), "qmp.sock")      # no short name on that volume
+
     def test_without_af_unix_in_python_the_connection_goes_through_winsock(self):
         # CPython has no socket.AF_UNIX on Windows; host.connect then uses Winsock.
         with patch.object(host, "socket") as module, \

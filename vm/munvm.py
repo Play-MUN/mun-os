@@ -102,6 +102,16 @@ def socket_path(root: Path, name: str) -> Path:
         base = os.environ.get("LOCALAPPDATA")
         if not base:
             raise LabError("LOCALAPPDATA is not set, and QEMU's control sockets go in this user's own folder there")
+        # QEMU reads its command line in the system's ANSI code page and the
+        # tools address the socket in UTF-8: a path outside ASCII would name
+        # two different files. A profile folder such as C:\Users\Iván is
+        # reached by its short (8.3) name, which is plain ASCII.
+        if not base.isascii():
+            base = host.short_path(base)
+            if not base.isascii():
+                raise LabError(f"{os.environ['LOCALAPPDATA']} has no name in plain ASCII (its volume keeps no short "
+                               "names), and QEMU's control sockets must be addressed by one; set LOCALAPPDATA to a "
+                               "folder of this user's whose path is ASCII")
         short = Path(base) / "mun" / "sockets" / hashlib.sha1(str(root).encode()).hexdigest()[:12]
         short.mkdir(parents=True, exist_ok=True)
         return short / name

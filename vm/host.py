@@ -375,6 +375,22 @@ def connect(address: Address, timeout: float) -> socket.socket:
     return sock
 
 
+def short_path(path: str) -> str:
+    """`path`'s short (8.3) form on Windows, which is ASCII where the volume
+    keeps short names; `path` itself elsewhere or when there is none."""
+    if sys.platform != "win32":
+        return path
+    import ctypes
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.GetShortPathNameW.argtypes = (ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint32)
+    kernel32.GetShortPathNameW.restype = ctypes.c_uint32
+    size = kernel32.GetShortPathNameW(path, None, 0)
+    if size == 0:
+        return path
+    buffer = ctypes.create_unicode_buffer(size)
+    return buffer.value if kernel32.GetShortPathNameW(path, buffer, size) else path
+
+
 def _windows_unix_connect(path: Path, timeout: float) -> socket.socket:
     """A stream connection to the AF_UNIX socket `path` on Windows. CPython's
     socket module has no AF_UNIX there, so the connection is made through

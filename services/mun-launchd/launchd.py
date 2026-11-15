@@ -99,6 +99,14 @@ POLL_INTERVAL = 0.5
 # it serializes (a 1 MiB cover as base64 plus metadata). A longer unfinished
 # line means the peer is not speaking the protocol; the feed is reconnected.
 MAX_FRAME_BYTES = 2 * 1024 * 1024
+# Largest line accepted from a client of the launcher's own socket (the shell):
+# its requests are a few short fields.
+CLIENT_LINE_MAX = 64 * 1024
+# Deepest nesting of arrays and objects accepted in JSON the launcher did not
+# write (a game's request, the shell's, a card's save envelope). The parser
+# recurses once per level, and so does everything that later walks the value,
+# here and in the card service; nothing the console exchanges comes near this.
+JSON_MAX_DEPTH = 64
 # A game's save payload (docs/saves.md); the request line may carry it plus a little framing.
 SAVE_MAX_BYTES = 64 * 1024
 SAVE_LINE_MAX = SAVE_MAX_BYTES + 4096
@@ -694,8 +702,53 @@ class FrameTooLarge(Exception):
     """An unfinished line exceeded MAX_FRAME_BYTES."""
 
 
+_JSON_BRACES = bytes.maketrans(b"{}", b"[]")
+_JSON_NOT_STRUCTURE = bytes(byte for byte in range(256) if byte not in b'[]{}"')
+
+
+def json_too_deep(raw: bytes, limit: int = JSON_MAX_DEPTH) -> bool:
+    """Whether UTF-8 `raw` nests arrays and objects deeper than `limit`,
+    decided without parsing it, in time and memory linear in its size. For
+    text that is not JSON the answer covers the part a parser would read
+    before refusing it."""
+    if raw.count(b"[") + raw.count(b"{") <= limit:
+        return False
+    # Without escaped backslashes and then escaped quotes, every quote left
+    # delimits a string; then only quotes and brackets (as one kind) are kept.
+    marks = raw.replace(b"\\\\", b"").replace(b'\\"', b"").translate(_JSON_BRACES, _JSON_NOT_STRUCTURE)
+    if b'"' in marks:
+        # Drop what is inside strings, a bounded piece at a time: a line made
+        # of quotes alone must not become a list as long as the line.
+        outside, inside = [], False
+        for start in range(0, len(marks), 1 << 20):
+            pieces = marks[start:start + (1 << 20)].split(b'"')
+            outside.append(b"".join(pieces[inside::2]))
+            inside ^= not len(pieces) % 2
+        marks = b"".join(outside)
+    if b"[" * (limit + 1) in marks:
+        return True
+    # Each pass removes the innermost level of every group, so whatever is
+    # left after `limit` passes is nested deeper, or never closes.
+    for _ in range(limit):
+        if not marks:
+            return False
+        marks = marks.replace(b"[]", b"")
+    return bool(marks)
+
+
+def parse_json(raw: bytes):
+    """json.loads for bytes the launcher did not write: UTF-8 only, and
+    nesting beyond JSON_MAX_DEPTH is a ValueError like any other malformed
+    text instead of a RecursionError somewhere inside the parser."""
+    if json_too_deep(raw):
+        raise ValueError(f"nested deeper than {JSON_MAX_DEPTH} levels")
+    return json.loads(raw.decode("utf-8-sig"))
+
+
 class LineReader:
-    """Newline-delimited JSON from a stream, fed in whatever fragments arrive."""
+    """Newline-delimited JSON from a stream, fed in whatever fragments arrive.
+    A line that is not a JSON object within JSON_MAX_DEPTH is skipped; a line
+    longer than `limit`, finished or not, is a protocol break."""
 
     def __init__(self, limit: int = MAX_FRAME_BYTES):
         self.buffer = bytearray()
@@ -708,10 +761,13 @@ class LineReader:
             newline = self.buffer.find(b"\n")
             if newline < 0:
                 break
+            if newline > self.limit:
+                self.buffer.clear()
+                raise FrameTooLarge(f"line over {self.limit} bytes")
             line = bytes(self.buffer[:newline])
             del self.buffer[:newline + 1]
             try:
-                message = json.loads(line)
+                message = parse_json(line)
             except ValueError:
                 continue   # a malformed line is skipped, the stream stays in sync
             if isinstance(message, dict):
@@ -1075,7 +1131,7 @@ class DirectorySync:
     def _check_envelope(self, raw: bytes) -> "tuple[Optional[str], Dict[str, bytes], dict]":
         """Refuse the whole envelope for any flaw; nothing is unpacked outside the directory."""
         try:
-            document = json.loads(raw)
+            document = parse_json(raw)
         except ValueError:
             return "no es JSON", {}, {}
         if not isinstance(document, dict) or document.get("format") not in SAVE_FORMATS.values():
@@ -1851,7 +1907,7 @@ class Server:
     def __init__(self, path: Path, manager: SessionManager):
         self.path = path
         self.manager = manager
-        self.clients: Dict[socket.socket, bytes] = {}
+        self.clients: Dict[socket.socket, LineReader] = {}
         self.listener: Optional[socket.socket] = None
         self.selector: Optional[selectors.BaseSelector] = None
 
@@ -1885,25 +1941,22 @@ class Server:
     def accept(self) -> Optional[socket.socket]:
         conn, _ = self.listener.accept()
         conn.setblocking(False)
-        self.clients[conn] = b""
+        self.clients[conn] = LineReader(limit=CLIENT_LINE_MAX)
         self._send(conn, self.manager.snapshot())
         return conn if conn in self.clients else None
 
     def handle(self, conn: socket.socket) -> bool:
         try:
             data = conn.recv(65536)
-        except OSError:
-            data = b""
+            requests = self.clients[conn].feed(data) if data else []
+        except (OSError, FrameTooLarge):
+            data = b""           # a line with no end is not the shell's protocol
         if not data:
             self.drop(conn)
             return False
-        self.clients[conn] += data
-        while b"\n" in self.clients.get(conn, b""):
-            line, _, self.clients[conn] = self.clients[conn].partition(b"\n")
-            try:
-                request = json.loads(line)
-            except ValueError:
-                continue
+        for request in requests:
+            if conn not in self.clients:
+                return False     # dropped while an earlier request was answered
             if request.get("type") == "launch":
                 result = self.manager.launch(request)
                 if not result.get("accepted"):

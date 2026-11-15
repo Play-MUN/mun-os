@@ -86,6 +86,8 @@ services/mun-shell/tests/gamepadmap_test
 services/mun-shell/tests/motionclock_test
 services/mun-shell/tests/startupclock_test
 services/mun-shell/tests/playbackhealth_test
+services/mun-shell/tests/pngchunks_test
+services/mun-shell/tests/decodingmarker_test
 examples/mun-gl-probe/mun-gl-probe
 
 # Commercial game installers stay out of the repository

@@ -39,6 +39,24 @@ class SoundDeviceTests(unittest.TestCase):
         self.assertIn("snd_lib_error_set_handler(alsaMessage);", player)
 
 
+class SettingsTests(unittest.TestCase):
+    def test_a_failed_write_does_not_fail_every_write_after_it(self):
+        # QSettings reports the first error it met for as long as the object
+        # lives. Each write must be judged by its own outcome: an object that
+        # has reported an error is replaced, on the same file, before the
+        # next write, and the new one is made before the old one goes, so the
+        # values not written yet (Qt keeps them per file) always have one.
+        settings = source("src/shellsettings.cpp")
+        sync = settings.split("void ShellSettings::sync()\n{", 1)[1].split("\n}\n", 1)[0]
+        fresh = re.search(r"if \(m_file->status\(\) != QSettings::NoError\)\s+"
+                          r"m_file = std::make_unique<QSettings>\(m_file->fileName\(\), QSettings::IniFormat\);", sync)
+        self.assertIsNotNone(fresh, "an object that reported an error is replaced")
+        self.assertLess(fresh.end(), sync.index("m_file->sync();"), "before the write it judges")
+        self.assertLess(sync.index("m_file->sync();"), sync.index("m_file->status() == QSettings::AccessError"),
+                        "and the write's outcome is read after it")
+        self.assertIn("std::unique_ptr<QSettings> m_file;", source("src/shellsettings.h"))
+
+
 class UnitTests(unittest.TestCase):
     def test_the_shell_has_a_memory_ceiling_far_above_what_it_may_hold(self):
         # Without one, a fault that keeps allocating takes the console's

@@ -266,9 +266,18 @@ void ShellSettings::store(const QString &key, const QVariant &value)
 
 void ShellSettings::sync()
 {
+    // status() keeps the first error for as long as the object lives, and
+    // nothing clears it: after one failed write every later one would look
+    // failed, and a choice that needs a restart would be refused until the
+    // shell started again. An object that has reported an error is replaced
+    // by a new one on the same file, which reports this write's own outcome.
+    // The values not written yet are Qt's per file, not per object, and the
+    // new object is made before the old one goes, so none is lost.
+    if (m_file->status() != QSettings::NoError)
+        m_file = std::make_unique<QSettings>(m_file->fileName(), QSettings::IniFormat);
     m_file->sync();
-    // status() keeps the first error; a format error found when reading is
-    // repaired by this write, so only a failure to write counts now.
+    // A format error found when reading is repaired by this write, so only
+    // a failure to write counts now.
     const QString error = m_file->status() == QSettings::AccessError
                               ? QStringLiteral("could not write %1; the choice lasts until the shell restarts").arg(path())
                               : QString();

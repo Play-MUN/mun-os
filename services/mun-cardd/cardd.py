@@ -390,7 +390,15 @@ class CardManager:
                 outcome = {"ok": False, "error": {"code": "write_failed", "message": "No se pudo escribir la partida",
                                                   "detail": f"fallo interno ({type(exc).__name__})"}}
             self.schedule(lambda: self._saved(card, request, outcome, reply))
-        threading.Thread(target=work, name=f"save-{card.slot}", daemon=True).start()
+        try:
+            threading.Thread(target=work, name=f"save-{card.slot}", daemon=True).start()
+        except RuntimeError as exc:
+            # The system refused a new thread: the save fails here, as one
+            # that fails in its worker would, and the card is not left saving.
+            log(f"the save on {card.slot} could not start its worker: {exc}")
+            self._saved(card, request, {"ok": False, "error": {"code": "write_failed",
+                                                               "message": "No se pudo escribir la partida",
+                                                               "detail": str(exc)}}, reply)
 
     def _saved(self, card: Card, request: dict, outcome: dict, reply: Callable[[dict], None]) -> None:
         card.saving = False

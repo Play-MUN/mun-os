@@ -1259,3 +1259,27 @@ class ReaderSlotTests(unittest.TestCase):
         out = subprocess.run([sys.executable, "-c", script, str(ROOT / "services" / "mun-cardd")],
                              capture_output=True, text=True, env=dict(os.environ, PYTHONPATH=str(ROOT / "tools" / "mun-card")))
         self.assertEqual(out.stdout.strip(), "('devices/platform/soc@0/8804000.mmc', 'x')", out.stderr)
+
+
+class SaveThreadStartTests(unittest.TestCase):
+    """A save that cannot even start its worker (the system refuses a new
+    thread) fails at once and leaves the card free, as a save that fails."""
+
+    def test_a_save_whose_worker_cannot_start_fails_and_frees_the_card(self):
+        import tempfile
+        root = Path(tempfile.mkdtemp())
+        info = game_info(naming="mun")
+        h = Harness(mounter=RealDirMounter(root), validator=lambda mount, info=info: dict(info))
+        h.manager.device_added("vdc", "NPT-game", "/dev/vdc"); h.pump()
+        card = h.manager.snapshot()["cards"][0]
+        request = {"type": "save", "slot": "c1", "insertion": card["insertion"], "serial": "NPT-game",
+                   "version": "0.1.0", "game": "mun.collect", "session": "s1", "schema": 1, "payload": {"x": 1}}
+        replies = []
+        with patch.object(cardd.threading.Thread, "start", side_effect=RuntimeError("can't start new thread")):
+            h.manager.save(dict(request), replies.append)
+        h.pump()
+        self.assertEqual((replies[-1]["ok"], replies[-1]["error"]["code"]), (False, "write_failed"))
+        self.assertFalse(h.manager.cards["vdc"].saving, "the card is not left saving")
+        h.manager.save(dict(request), replies.append)      # and the next save goes through
+        h.pump()
+        self.assertTrue(replies[-1]["ok"], replies[-1])

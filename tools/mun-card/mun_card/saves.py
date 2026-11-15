@@ -107,8 +107,12 @@ def inflate_limit(max_bytes: int) -> int:
 INFLATE_TOTAL_FACTOR = 4
 
 
+INFLATING_CHECKS = ("zlib", "zlib-xml")
+
+
 def inflate_share(limit: int, units: int) -> int:
-    """How far each of `units` units checked together may inflate."""
+    """How far each of `units` units checked together by inflating them
+    (INFLATING_CHECKS; the others take no share) may inflate."""
     return min(limit, INFLATE_TOTAL_FACTOR * limit // max(units, 1))
 
 
@@ -207,7 +211,10 @@ def envelope_problem(document: object, info, wanted_format: str) -> Optional[str
         if problem:
             return problem
         patterns = list(zip(_field(info, "saves_units") or [], _field(info, "saves_checks") or []))
-        share = inflate_share(inflate_limit(max_bytes), len(document["payload"]["files"]))
+        share = inflate_share(inflate_limit(max_bytes), sum(
+            1 for entry in document["payload"]["files"]
+            if next((c for pattern, c in patterns if fnmatch.fnmatchcase(entry["path"], pattern)), None)
+            in INFLATING_CHECKS))
         for entry in document["payload"]["files"]:
             name = entry["path"]
             check = next((c for pattern, c in patterns if fnmatch.fnmatchcase(name, pattern)), None)

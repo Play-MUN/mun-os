@@ -174,7 +174,11 @@ truncated in-place write fails `zlib` and `zlib-xml` by construction.
 
 How far a unit may inflate is bounded: to 64 times the card's
 `saves.max_bytes` and never beyond 64 MiB, and a `zlib-xml` unit to 16 MiB.
-A unit that would inflate further fails its check. `mun-card` judges a unit
+The units checked together (one save on the card, or one copy of the
+directory) also share a budget of four times that bound: when more than four
+`zlib` or `zlib-xml` units are checked at once, each may inflate to its share
+of it (with 64 of them, a sixteenth of the bound each). Units checked `any`
+or `xml` take no share. A unit that would inflate further fails its check. `mun-card` judges a unit
 by the same rule, bounds and encodings included, when it decides whether a
 card's save is one the console would restore.
 

@@ -1000,8 +1000,12 @@ _XML_SPACE = re.compile(rb"[ \t\n\r\x0b\x0c]*")
 INFLATE_TOTAL_FACTOR = 4
 
 
+INFLATING_CHECKS = ("zlib", "zlib-xml")
+
+
 def inflate_share(limit: int, units: int) -> int:
-    """How far each of `units` units checked together may inflate."""
+    """How far each of `units` units checked together by inflating them
+    (INFLATING_CHECKS; the others take no share) may inflate."""
     return min(limit, INFLATE_TOTAL_FACTOR * limit // max(units, 1))
 
 
@@ -1288,7 +1292,10 @@ class DirectorySync:
             return "partida sin lista de archivos válida", {}
         files: Dict[str, bytes] = {}
         total = 0
-        share = inflate_share(self.inflate_limit, len(payload["files"]))
+        share = inflate_share(self.inflate_limit, sum(
+            1 for entry in payload["files"]
+            if isinstance(entry, dict) and isinstance(entry.get("path"), str)
+            and self.unit_pattern(entry["path"]) in INFLATING_CHECKS))
         for entry in payload["files"]:
             name = entry.get("path") if isinstance(entry, dict) else None
             if not isinstance(name, str) or not _SEGMENT.fullmatch(name) or name in (".", "..") or name in files:
@@ -1451,7 +1458,7 @@ class DirectorySync:
         previous = self.last_synced
         snapshot: Dict[str, bytes] = {}
         carried, omitted = [], []
-        share = inflate_share(self.inflate_limit, len(found))
+        share = inflate_share(self.inflate_limit, sum(1 for name in found if self.unit_pattern(name) in INFLATING_CHECKS))
         for name, data in found.items():
             check = self.unit_pattern(name) or "any"
             problem = "no es un archivo normal" if data is None else unit_check(check, data, share)

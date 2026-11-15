@@ -342,6 +342,16 @@ class EnvelopeCostTests(directory_saves.SyncCase):
         self.assertEqual(launchd.inflate_share(self.sync.inflate_limit, 64), self.sync.inflate_limit * 4 // 64)
         self.assertEqual(launchd.inflate_share(self.sync.inflate_limit, 2), self.sync.inflate_limit)
 
+    def test_units_that_do_not_inflate_take_no_share_of_the_budget(self):
+        # Only units checked by inflating them share it: 32 units the card
+        # declares "any" leave one zlib unit its whole limit.
+        self.sync.patterns = [("*.sav", "zlib-xml"), ("screen-*.zsc", "zlib"), ("*.dat", "any")]
+        big = zlib.compress(b"\0" * (self.sync.inflate_limit // 4), 9)
+        files = {"screen-0000.zsc": big}
+        files.update({f"slot{n:02d}.dat": b"raw" for n in range(40)})
+        self.prepare(card_save=directory_saves.envelope(files))
+        self.assertEqual(self.sync.restore, {"state": "restored", "units": 41})
+
 
 class ForwardedSaveTests(unittest.TestCase):
     """A save the launcher accepts (at most 64 KiB as compact UTF-8) must

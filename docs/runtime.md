@@ -39,9 +39,10 @@ stay inserted during play: removing it ends the session.
     in RAM and gone with the session;
   - a private `/tmp` (in RAM) and `/var/tmp` (on the system disk), which
     systemd creates for the unit (`PrivateTmp`) and removes when it stops;
-  - the system's shared-memory file systems, `/dev/shm` and `/dev/mqueue`,
-    which are not private to the session and are emptied only when the
-    console restarts.
+  - a `/dev/shm` of its own, in RAM: 128 MiB for `linux-arm64-v0` and
+    512 MiB for `linux-arm64-gl-v0`, counted against the session's memory
+    and gone with the session, like its own `/dev/mqueue` and System V IPC
+    (`PrivateIPC`). Nothing a game leaves there reaches the next session.
 
   None of them is on the card: only saves reach it ([saves.md](saves.md)).
 - **Devices.** Only those of its runtime profile (below).
@@ -60,10 +61,14 @@ else is common.
 | | `linux-arm64-v0` | `linux-arm64-gl-v0` |
 | --- | --- | --- |
 | For | a game that draws to the framebuffer and reads evdev | a game built on SDL2, OpenGL and OpenAL |
-| Devices | `/dev/fb0`, input devices | DRM (card and render nodes), ALSA, input devices |
+| Devices | `/dev/fb0`, input devices (read only) | DRM (card and render nodes), ALSA, input devices (read only) |
 | Groups | `video`, `input` | `video`, `render`, `audio`, `input` |
 | Memory / tasks | 512 MiB / 32 | 2 GiB / 64 |
 | Environment | — | `SDL_VIDEODRIVER=kmsdrm`, `SDL_AUDIODRIVER=alsa`, `ALSOFT_DRIVERS=alsa` |
+
+The game has the groups of its profile and no other. Input devices can be
+read and grabbed, never written: a game gets no force feedback and cannot
+set keyboard LEDs, and it must open them read-only.
 
 **`linux-arm64-v0`.** An AArch64 Linux ELF, static or linked only against
 the system's own libraries, that draws to `/dev/fb0` (32 bpp, queried, never
@@ -122,8 +127,10 @@ session. With `"mount"`, the game also sees the card's file system read-only
 at `/run/mun/card`, and `MUN_CONTENT_DIR` points at `content.root` there.
 
 - The mount exists only inside the game unit's own mount namespace, with
-  `ro,nosuid,nodev,noexec`: writing fails and nothing there can be executed.
-  It disappears with the unit.
+  `ro,nosuid,nodev,noexec,errors=remount-ro`: writing fails, nothing there
+  can be executed, and what happens when the kernel finds the card damaged
+  is the console's decision, not the card's
+  ([game-cards.md](game-cards.md#image)). It disappears with the unit.
 - The raw card device stays unreadable to the game.
 - The entry still runs from the copy, never from the card.
 - `/run/neptune/card` leads to the same place, for engines of earlier-generation

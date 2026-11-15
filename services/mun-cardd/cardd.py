@@ -296,7 +296,13 @@ class CardManager:
                 outcome = {"ok": False, "error": {"code": "stage_failed", "message": "No se pudo copiar el ejecutable",
                                                   "detail": f"fallo interno ({type(exc).__name__})"}}
             self.schedule(lambda: reply({"type": "staged", "session": request.get("session"), **outcome}))
-        threading.Thread(target=work, name=f"stage-{slot}", daemon=True).start()
+        try:
+            threading.Thread(target=work, name=f"stage-{slot}", daemon=True).start()
+        except RuntimeError as exc:
+            # Answered now: otherwise the launcher would wait out its timeout.
+            log(f"staging from {slot} could not start its worker: {exc}")
+            reply({"type": "staged", "session": request.get("session"), "ok": False,
+                   "error": {"code": "stage_failed", "message": "No se pudo copiar el ejecutable", "detail": str(exc)}})
 
     def save(self, request: dict, reply: Callable[[dict], None]) -> None:
         """Write a game's save to the active card, on the launcher's authority (docs/saves.md).
@@ -576,7 +582,14 @@ class CardManager:
                 error = {"code": "internal_error", "message": "Fallo interno al leer la tarjeta", "detail": repr(exc)}
             # Bind results now; `exc` does not survive past its except block.
             self.schedule(lambda: self._finish(card, generation, info, error))
-        threading.Thread(target=work, name=f"validate-{card.slot}", daemon=True).start()
+        try:
+            threading.Thread(target=work, name=f"validate-{card.slot}", daemon=True).start()
+        except RuntimeError as exc:
+            # The system refused a new thread: the card is refused now, as a
+            # validation that fails would refuse it, and not left reading.
+            log(f"the validation of {card.slot} could not start its worker: {exc}")
+            self._finish(card, generation, None, {"code": "internal_error",
+                                                  "message": "Fallo interno al leer la tarjeta", "detail": str(exc)})
 
     def _finish(self, card: Card, generation: int, info: Optional[dict], error: Optional[dict]) -> None:
         if card.generation != generation or self.cards.get(card.device) is not card:

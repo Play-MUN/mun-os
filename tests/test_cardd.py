@@ -1294,3 +1294,27 @@ class SaveThreadStartTests(unittest.TestCase):
         h.manager.save(dict(request), replies.append)      # and the next save goes through
         h.pump()
         self.assertTrue(replies[-1]["ok"], replies[-1])
+
+    def test_a_card_whose_validation_cannot_start_is_refused_not_left_reading(self):
+        h = Harness()
+        with patch.object(cardd.threading.Thread, "start", side_effect=RuntimeError("can't start new thread")):
+            h.manager.device_added("vdc", "NPT-game", "/dev/vdc")
+            h.pump(timeout=0.2)
+        card = h.manager.snapshot()["cards"][0]
+        self.assertEqual((card["state"], card["error"]["code"]), ("invalid", "internal_error"))
+        self.assertNotIn("c1", h.mounter.mounted, "and not left mounted")
+
+    def test_a_stage_whose_worker_cannot_start_is_answered_at_once(self):
+        import tempfile
+        root = Path(tempfile.mkdtemp())
+        info = game_info(naming="mun")
+        h = Harness(mounter=RealDirMounter(root), validator=lambda mount, info=info: dict(info))
+        h.manager.device_added("vdc", "NPT-game", "/dev/vdc"); h.pump()
+        card = h.manager.snapshot()["cards"][0]
+        replies = []
+        with patch.object(cardd, "LAUNCH_ROOT_PREFIX", str(root) + "/"), \
+                patch.object(cardd.threading.Thread, "start", side_effect=RuntimeError("can't start new thread")):
+            h.manager.stage({"type": "stage", "slot": "c1", "insertion": card["insertion"], "serial": "NPT-game",
+                             "version": "0.1.0", "session": "s1", "dest": str(root / "launch" / "s1")},
+                            replies.append)
+        self.assertEqual((replies[-1]["ok"], replies[-1]["error"]["code"]), (False, "stage_failed"))

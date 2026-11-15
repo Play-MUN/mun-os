@@ -945,6 +945,17 @@ def shell_plays_motion(timeout: float) -> str:
     return said.split("motion: ", 1)[-1]
 
 
+def bundled_card_digest(source: str, card: str) -> Optional[str]:
+    """The SHA-256 of card `card` as the bundle at `source` carries it
+    (unpacked), from its manifest; None if the bundle has no such card or
+    its manifest cannot be read."""
+    try:
+        manifest = bundle.Source(source).manifest()
+    except (bundle.BundleError, OSError):
+        return None
+    return next((entry["image_sha256"] for entry in manifest["files"] if entry.get("card") == card), None)
+
+
 def cmd_smoke(args: argparse.Namespace) -> int:
     """Boot a build (a bundle installed first, if given) and play its MUN
     Collect card: start, card, game, exit, clean power-off. The check each
@@ -959,11 +970,15 @@ def cmd_smoke(args: argparse.Namespace) -> int:
     if args.bundle:
         # Installing a bundle never replaces a card that exists (it may hold
         # saves), so the card played below may be an earlier one.
-        card_was_there = os.path.lexists(vm.CARD_ROOT / f"{args.card}.img")
+        existing = vm.CARD_ROOT / f"{args.card}.img"
+        card_was_there = os.path.lexists(existing)
         build: Optional[str] = install(args.bundle).name
-        if card_was_there:
-            log(f"smoke: card {args.card} was already in {vm.CARD_ROOT} and was kept: this check plays the card "
-                "that was there, which is the bundle's only if an earlier run of this bundle put it there "
+        # Byte for byte the bundle's card (an earlier check of this bundle
+        # unpacked it and nothing has saved on it): nothing to remark.
+        if card_was_there and not (existing.is_file()
+                                   and sha256_file(existing) == bundled_card_digest(args.bundle, args.card)):
+            log(f"smoke: card {args.card} was already in {vm.CARD_ROOT}, is not the bundle's own byte for byte "
+                "(another card, or one with saves on it) and was kept: this check plays the card that was there "
                 "(docs/releasing.md checks a bundle from a fresh copy of the tools)")
     else:
         runnable = [b for b in builds() if runs_in_guest(b)]

@@ -454,6 +454,8 @@ class SmokeCardTests(Fixture):
     """`./mun dev smoke --bundle`: installing a bundle never replaces a card
     that exists, so the check may play a card that is not the bundle's."""
 
+    BUNDLED = b"the bundle's card"
+
     def smoke(self, install):
         self.build("b1")
         said = io.StringIO()
@@ -461,25 +463,49 @@ class SmokeCardTests(Fixture):
                                        guest="smoke", motion=False, wait=1, card_timeout=1, play=0)
         # The check itself needs a guest: it is stopped where it would make one.
         with patch.object(vm, "CARD_ROOT", self.root / "cards"), patch.object(mundev, "install", side_effect=install), \
+                patch.object(mundev, "bundled_card_digest", return_value=hashlib.sha256(self.BUNDLED).hexdigest()), \
                 patch.object(mundev, "create_guest", side_effect=vm.LabError("no guest in host tests")), \
                 contextlib.redirect_stdout(said), self.assertRaises(vm.LabError) as stopped:
             mundev.cmd_smoke(arguments)
         self.assertIn("no guest in host tests", str(stopped.exception))
         return said.getvalue()
 
-    def test_a_card_that_was_already_there_is_said_to_be_the_one_played(self):
-        (self.root / "cards").mkdir()
-        (self.root / "cards" / "collect.img").write_bytes(b"an earlier card")
+    def card(self, data):
+        (self.root / "cards").mkdir(exist_ok=True)
+        (self.root / "cards" / "collect.img").write_bytes(data)
+
+    def test_a_card_that_was_there_and_is_not_the_bundles_is_said_to_be_the_one_played(self):
+        self.card(b"an earlier card, or the bundle's with saves on it")
         said = self.smoke(lambda source: self.root / "builds" / "b1")
         self.assertIn("card collect was already", said)
         self.assertIn("plays the card that was there", said)
 
+    def test_a_card_that_was_there_and_is_the_bundles_byte_for_byte_is_not_remarked(self):
+        # The second check of a release (the card dressed in Reef) runs after
+        # the first has unpacked every card of the same bundle.
+        self.card(self.BUNDLED)
+        self.assertNotIn("already", self.smoke(lambda source: self.root / "builds" / "b1"))
+
     def test_a_card_the_bundle_brought_is_not_remarked(self):
         def install(source):
-            (self.root / "cards").mkdir()
-            (self.root / "cards" / "collect.img").write_bytes(b"the bundle's card")
+            self.card(self.BUNDLED)
             return self.root / "builds" / "b1"
         self.assertNotIn("already", self.smoke(install))
+
+    def test_the_bundles_card_digest_comes_from_its_manifest(self):
+        made = self.root / "bundle"
+        made.mkdir()
+        digest = hashlib.sha256(self.BUNDLED).hexdigest()
+        image = {"name": "m.qcow2", "kind": "image", "size": 1, "sha256": "0" * 64}
+        record = {"name": "BUILD-INFO.json", "kind": "build-info", "size": 1, "sha256": "0" * 64}
+        card = {"name": "card-collect.img.xz", "kind": "card", "card": "collect", "size": 1, "sha256": "0" * 64,
+                "image_size": len(self.BUNDLED), "image_sha256": digest}
+        (made / "release.json").write_text(json.dumps({
+            "format": "mun-bundle/1", "name": "MUN OS", "version": "0", "environment": "qemu-arm64", "release": False,
+            "build_id": "20260929T123647Z-aee686f3d1fd", "files": [image, record, card]}))
+        self.assertEqual(mundev.bundled_card_digest(str(made), "collect"), digest)
+        self.assertIsNone(mundev.bundled_card_digest(str(made), "demo"), "a card the bundle does not carry")
+        self.assertIsNone(mundev.bundled_card_digest(str(self.root / "nowhere"), "collect"), "a bundle that is not there")
 
 
 class SmokeMotionTests(unittest.TestCase):

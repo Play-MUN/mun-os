@@ -186,6 +186,9 @@ class CardManager:
         self.publish = publish
         self.schedule = schedule      # runs a callable on the manager thread later
         self.cards: Dict[str, Card] = {}   # keyed by device name
+        # Cards refused or gone whose unmount could not even start, by slot
+        # (_unmount_or_owe); a gone card is kept here alone.
+        self.unmounts_owed: Dict[str, Card] = {}
         self._slot_counter = 0
         # MUN Shape export, off unless a root is given (main() gives SHAPE_ROOT).
         # `later(seconds, fn)` runs fn on the manager thread after a delay;
@@ -234,7 +237,7 @@ class CardManager:
             card.release_timer += 1
             reply({"type": "released", "ok": False, "slot": card.slot, "serial": card.serial,
                    "error": {"code": "card_removed", "message": "Se retiró la tarjeta antes de terminar la expulsión segura"}})
-        self.mounter.unmount(card)
+        self._unmount_or_owe(card)
         self.publish({"type": "removed", "slot": card.slot, "insertion": card.insertion, "device": device, "serial": card.serial})
         if card.active:
             self._promote_waiting()
@@ -601,14 +604,42 @@ class CardManager:
             # whoever reads the journal must find which device and why.
             log(f"{card.slot} ({card.device}, {card.serial}) refused: {error.get('code')}: {error.get('message')}"
                 + (f" ({error['detail']})" if error.get("detail") else ""))
-            self.mounter.unmount(card)
-        else:
-            card.state, card.info, card.error = "valid", info, None
+            # Said before the unmount, which may not even start: the shell
+            # hears the refusal whatever becomes of it.
+            self._emit(card)
+            self._unmount_or_owe(card)
+            return
+        card.state, card.info, card.error = "valid", info, None
         self._emit(card)
-        if error is None:
-            # Only now, with the card's state published: nothing about Shape
-            # delays `valid`, Play or Eject safely.
-            self._start_shape(card)
+        # Only now, with the card's state published: nothing about Shape
+        # delays `valid`, Play or Eject safely.
+        self._start_shape(card)
+
+    def _unmount_or_owe(self, card: Card) -> None:
+        """Unmount a card nobody may use: refused, or gone. If not even a
+        command can be started, the mount is still there and card.mount
+        still names it: the unmount is owed, tried again every
+        READ_ONLY_RETRY seconds whether the card is still in or not, and a
+        safe release meanwhile is refused, not reported as done."""
+        if self.mounter.unmount(card) is not False:
+            self.unmounts_owed.pop(card.slot, None)
+            return
+        if card.slot not in self.unmounts_owed:
+            self.unmounts_owed[card.slot] = card
+            log(f"{card.slot} ({card.serial}) is still mounted; its unmount is tried again every {READ_ONLY_RETRY:g} s")
+        self.later(READ_ONLY_RETRY, lambda: self._unmount_due(card))
+
+    def _unmount_due(self, card: Card) -> None:
+        if self.unmounts_owed.get(card.slot) is not card:
+            return
+        if not card.mount:                       # a safe release unmounted it meanwhile
+            self.unmounts_owed.pop(card.slot, None)
+            return
+        if self.mounter.unmount(card) is False:
+            self.later(READ_ONLY_RETRY, lambda: self._unmount_due(card))
+            return
+        self.unmounts_owed.pop(card.slot, None)
+        log(f"{card.slot} ({card.serial}) unmounted at last")
 
     def _promote_waiting(self) -> None:
         for card in self.cards.values():
@@ -1517,7 +1548,12 @@ class Mounter:
         with self.stalled_lock:
             if target in self.stalled:
                 raise CardError(code, message, f"{self.stalled[target][0]} sigue en curso en {target}")
-        proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        except OSError as exc:
+            # No process to be had (the service's task limit, memory): the
+            # operation fails as itself, and nothing changed on the card.
+            raise CardError(code, message, f"{kind} no pudo empezar: {exc}") from exc
         try:
             out, err = proc.communicate(timeout=MOUNT_TIMEOUT)
         except subprocess.TimeoutExpired:
@@ -1547,17 +1583,19 @@ class Mounter:
             raise CardError("sync_failed" if not rw else "write_failed",
                             "No se pudo cambiar el modo de la tarjeta", detail)
 
-    def unmount(self, card: Card, strict: bool = False) -> None:
+    def unmount(self, card: Card, strict: bool = False) -> bool:
         """Unmount the card.
 
         `strict` is the safe-removal path: a plain umount must succeed, or a
         CardError("unmount_failed") is raised and the mount stays tracked so the
-        caller can report and retry. Without `strict` (the device is already
-        gone) a failed umount falls back to a lazy detach and the mount is
-        forgotten regardless: there is nothing left to be careful with.
+        caller can report and retry. Without `strict` (a card refused, or
+        already gone) a failed umount falls back to a lazy detach, and the
+        mount is forgotten once one of them ran. True then. False when
+        neither could even start (no process to be had): the mount is still
+        there, card.mount still names it, and the caller tries again later.
         """
         if not card.mount:
-            return
+            return True
         target = card.mount
         self.reap()
         # An earlier umount that ran past its bound may have finished since.
@@ -1565,27 +1603,30 @@ class Mounter:
             pending = target in self.stalled
         if not pending and not self.mounted(target):
             card.mount = None
-            return
+            return True
         try:
             code, detail = self._run("umount", ["umount", target], target, "unmount_failed",
                                      "No se pudo desmontar la tarjeta de forma segura")
-        except CardError:
+        except CardError as exc:
             if strict:
                 raise
-            code, detail = 1, ""
+            code, detail = 1, exc.detail
         if code != 0:
             if strict:
                 raise CardError("unmount_failed", "No se pudo desmontar la tarjeta de forma segura",
                                 detail or f"umount exit {code}")
-            # The device is gone: a lazy detach does not wait on it.
+            # A lazy detach does not wait on the device.
             detach = self._start_detach(target)
-            if detach is not None:
-                self._finish_detach(target, detach)
+            if detach is None:
+                log(f"{target} stays mounted: neither umount nor a lazy detach could start ({detail})")
+                return False
+            self._finish_detach(target, detach)
         card.mount = None
         try:
             Path(target).rmdir()
         except OSError:
             pass
+        return True
 
 
 def validate_mount(mount: Path) -> dict:
@@ -2060,7 +2101,7 @@ def main(argv=None) -> int:
             guarded("ending stalled mount commands", manager.mounter.reap)
 
     manager.stop_shape()
-    for card in list(manager.cards.values()):
+    for card in [*manager.cards.values(), *manager.unmounts_owed.values()]:
         manager.mounter.unmount(card)
     clear_shape_root(SHAPE_ROOT)
     selector.close()

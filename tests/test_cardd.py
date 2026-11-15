@@ -1272,6 +1272,114 @@ class ReaderSlotTests(unittest.TestCase):
         self.assertEqual(out.stdout.strip(), "('devices/platform/soc@0/8804000.mmc', 'x')", out.stderr)
 
 
+class UnmountWithoutProcessesTests(unittest.TestCase):
+    """A card refused, or gone, whose unmount cannot even start: no process
+    to be had, as when the card service has reached its task limit. The
+    shell still hears the refusal; the mount is kept as it really is, never
+    forgotten while it stands; a safe release meanwhile is refused, not
+    reported as done; and once processes can start again the unmount it
+    owes goes through at its next try."""
+
+    TARGET = "/run/mun/cards/c1"
+
+    def setUp(self):
+        self.mounted = set()
+        self.processes = True
+        self.failures = []
+        self.laters = []
+        mounted = self.mounted
+
+        class Mounter(cardd.Mounter):
+            def mount(self, card, path):
+                target = f"/run/mun/cards/{card.slot}"
+                mounted.add(target)
+                return target
+
+            def mounted(self, target):
+                return target in mounted
+
+        def run(argv, **kwargs):
+            if not self.processes:
+                raise BlockingIOError(11, "Resource temporarily unavailable")
+            if argv[0] == "umount":
+                mounted.discard(argv[-1])
+            return Mock(returncode=0, stdout="", stderr="")
+
+        def refuse(mount):
+            raise CardError("image_has_errors", "El sistema de archivos está marcado con errores")
+
+        for p in (patch.object(cardd.subprocess, "Popen", popen_from(run)),
+                  patch.object(Path, "rmdir", lambda self: None)):
+            p.start()
+            self.addCleanup(p.stop)
+        self.h = Harness(mounter=Mounter(Path("/run/mun/cards")), validator=refuse)
+        self.h.manager.later = lambda seconds, fn: self.laters.append(fn)
+
+    def pump(self):
+        # As the service runs its callbacks: one that fails is logged and the
+        # loop goes on (main's guard), so a failure shows here as a missing effect.
+        for _ in range(500):
+            if self.h.pending:
+                break
+            threading.Event().wait(0.01)
+        while self.h.pending:
+            try:
+                self.h.pending.pop(0)()
+            except Exception as exc:  # noqa: BLE001
+                self.failures.append(exc)
+
+    def retry(self):
+        laters, self.laters = self.laters, []
+        for fn in laters:
+            fn()
+
+    def states(self):
+        return [event["card"]["state"] for event in self.h.events if event.get("type") == "card"]
+
+    def test_the_refusal_is_said_and_the_mount_kept_until_it_can_go(self):
+        self.h.manager.device_added("vdc", "NPT-bad", "/dev/vdc")
+        self.processes = False                  # validation refuses; no umount can start
+        self.pump()
+        card = self.h.manager.cards["vdc"]
+        self.assertEqual(self.states()[-1], "invalid", "the shell must hear the refusal")
+        self.assertEqual(card.mount, self.TARGET, "a mount that stands is not forgotten")
+        self.assertIn(self.TARGET, self.mounted)
+        self.assertEqual(self.failures, [])
+        replies = []
+        self.h.manager.release({"type": "release", "serial": "NPT-bad"}, replies.append)
+        self.assertFalse(replies[-1]["ok"], "not safe to remove while it is mounted")
+        self.assertNotIn("released", self.states())
+        self.retry()                            # still no process: still owed
+        self.assertEqual(card.mount, self.TARGET)
+        self.processes = True
+        self.retry()
+        self.assertIsNone(card.mount)
+        self.assertNotIn(self.TARGET, self.mounted)
+        self.h.manager.release({"type": "release", "serial": "NPT-bad"}, replies.append)
+        self.assertTrue(replies[-1]["ok"], replies[-1])
+        self.assertEqual(self.states()[-1], "released")
+        self.assertEqual(self.laters, [], "nothing is tried again once it is unmounted")
+
+    def test_a_card_gone_while_its_unmount_cannot_start_is_unmounted_later(self):
+        self.h.manager.device_added("vdc", "NPT-bad", "/dev/vdc")
+        self.pump()
+        self.mounted.add(self.TARGET)           # refused and unmounted; mounted again for this case
+        card = next(iter(self.h.manager.cards.values()))
+        card.mount = self.TARGET
+        self.processes = False
+        try:                                    # as main's guard runs it
+            self.h.manager.device_removed("vdc")
+        except Exception as exc:  # noqa: BLE001
+            self.failures.append(exc)
+        self.assertIn("removed", [event.get("type") for event in self.h.events], "the shell must hear the removal")
+        self.assertIn(self.TARGET, self.mounted, "the mount stands")
+        self.assertIn("c1", self.h.manager.unmounts_owed)
+        self.processes = True
+        self.retry()
+        self.assertNotIn(self.TARGET, self.mounted)
+        self.assertEqual(self.h.manager.unmounts_owed, {})
+
+
 class SaveThreadStartTests(unittest.TestCase):
     """A save that cannot even start its worker (the system refuses a new
     thread) fails at once and leaves the card free, as a save that fails."""

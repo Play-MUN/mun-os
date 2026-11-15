@@ -25,13 +25,19 @@ stages a game's entry and writes saves. Card format:
   with the journal loaded (see *Saves*), under `/run/mun/cards/<slot>`;
   `<slot>` is `c1`, `c2`… chosen by the service.
 - Validation runs in a worker thread; results for a card removed meanwhile are
-  discarded (generation counter). Invalid cards are unmounted immediately,
-  and the journal names each one once per insertion: slot, device, serial,
-  code and reason (`c1 (vdc, NPT-card01) refused: image_has_errors: …`).
+  discarded (generation counter). Invalid cards are published as such and
+  then unmounted, and the journal names each one once per insertion: slot,
+  device, serial, code and reason (`c1 (vdc, NPT-card01) refused:
+  image_has_errors: …`).
 - One active card. A second card waits unmounted with reason
   `another_card_active`; when the active card is removed the waiting one is
   evaluated automatically. Nothing is launched, ever.
 - Removal: unmount (lazy if busy), `removed` event, promotion of a waiting card.
+- An unmount that cannot even start (no process to be had: the service's
+  task limit, memory) leaves the mount as it is and recorded: the card is
+  still published as refused or removed, its unmount is tried again every
+  5 seconds, and a safe release meanwhile is answered `unmount_failed`,
+  never `released`.
 - For a valid card, its MUN Shape package is copied to RAM for the shell
   ([MUN Shape export](#mun-shape-export)).
 

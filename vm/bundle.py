@@ -194,6 +194,26 @@ def check_manifest(data: Any) -> Dict[str, Any]:
     return data
 
 
+class Redirects(urllib.request.HTTPRedirectHandler):
+    """Follow a redirect only to an address as protected as the one asked
+    for: from https to https, and never to anything but http or https.
+
+    A bundle's manifest is not signed: https is what makes it the
+    publisher's. A redirect from https to http would hand the rest of the
+    download to whoever sits on the path, without a word."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):   # urllib's signature
+        asked = urllib.parse.urlparse(req.full_url).scheme.lower()
+        target = urllib.parse.urlparse(newurl).scheme.lower()
+        if target not in ("http", "https") or (asked == "https" and target != "https"):
+            raise BundleError(f"{req.full_url} redirects to {newurl}: a redirect is not followed from https to an "
+                              "unprotected address, nor to anything but http or https")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+OPENER = urllib.request.build_opener(Redirects)
+
+
 class Source:
     """Where a bundle's files come from: a local directory (or its
     release.json) or a web location (http or https)."""
@@ -225,7 +245,7 @@ class Source:
         request = urllib.request.Request(self.url(name))
         if offset:
             request.add_header("Range", f"bytes={offset}-")
-        response = urllib.request.urlopen(request, timeout=60)
+        response = OPENER.open(request, timeout=60)
         return response, (offset if offset and response.status == 206 else 0)
 
     def manifest(self) -> Dict[str, Any]:

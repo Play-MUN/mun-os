@@ -406,6 +406,22 @@ class RangeHandler(http.server.SimpleHTTPRequestHandler):
         return handle
 
 
+class RedirectHandler(http.server.SimpleHTTPRequestHandler):
+    """Sends every request under /moved/ elsewhere: to the same file at the
+    server's root, or to `elsewhere` when it is set."""
+    elsewhere = None
+
+    def log_message(self, *args):
+        pass
+
+    def do_GET(self):
+        if not self.path.startswith("/moved/"):
+            return super().do_GET()
+        self.send_response(302)
+        self.send_header("Location", RedirectHandler.elsewhere or self.path[len("/moved"):])
+        self.end_headers()
+
+
 class HttpTests(Fixture):
     def serve(self, directory, handler=RangeHandler):
         factory = lambda *args, **kwargs: handler(*args, directory=str(directory), **kwargs)  # noqa: E731
@@ -458,6 +474,30 @@ class HttpTests(Fixture):
         (staging / (IMAGE + ".part")).write_bytes(b"!" * len(whole))
         build, _ = self.get(url)
         self.assertEqual((build / IMAGE).read_bytes(), whole)
+
+    def test_a_redirect_is_followed_only_to_an_address_as_protected(self):
+        import urllib.request
+        follow = bundle.Redirects().redirect_request
+        secure = urllib.request.Request("https://downloads.example.invalid/v0/release.json")
+        for target in ("http://downloads.example.invalid/v0/release.json", "HTTP://other.example.invalid/release.json",
+                       "ftp://downloads.example.invalid/release.json"):
+            with self.subTest(target=target), self.assertRaises(bundle.BundleError) as refused:
+                follow(secure, None, 302, "Found", {}, target)
+            self.assertIn("redirect", str(refused.exception))
+        moved = follow(secure, None, 302, "Found", {}, "https://objects.example.invalid/release.json")
+        self.assertEqual(moved.full_url, "https://objects.example.invalid/release.json", "https to https is followed")
+        # The same rule is the one a download goes through: over plain http
+        # (a local test) a redirect to http is followed, one to ftp is not.
+        url = self.serve(self.bundle(), handler=RedirectHandler)
+        RedirectHandler.elsewhere = None
+        build, cards = self.get(url + "/moved/release.json")
+        self.assertTrue((build / IMAGE).is_file())
+        self.assertEqual(len(cards), 2)
+        RedirectHandler.elsewhere = "ftp://127.0.0.1:1/release.json"
+        self.addCleanup(setattr, RedirectHandler, "elsewhere", None)
+        with self.assertRaises(bundle.BundleError) as refused:
+            self.get(url + "/moved/release.json", name="other")
+        self.assertIn("redirect", str(refused.exception))
 
     def test_a_server_without_ranges_sends_the_whole_file_and_it_still_verifies(self):
         source = self.bundle()

@@ -39,6 +39,31 @@ class SoundDeviceTests(unittest.TestCase):
         self.assertIn("snd_lib_error_set_handler(alsaMessage);", player)
 
 
+class BoardSoundTests(unittest.TestCase):
+    BOARD = ROOT / "os/mkosi/mkosi.profiles/q6a-dev/extra/usr/lib"
+
+    def test_the_board_shell_opens_its_sound_device_once_the_route_is_set(self):
+        # On the board the sound card appears before its route to HDMI is
+        # set, and a device opened in between plays to nothing and fails. The
+        # route's script says when it is set by writing a file; the shell
+        # waits for the file its unit names. The two must name the same one.
+        script = (self.BOARD / "mun/board-audio-route").read_text(encoding="utf-8")
+        written = re.search(r"(?m)^ready=(\S+)$", script).group(1)
+        self.assertEqual(script.count(': >"$ready"'), 2, "written where the route is found set and where it is set")
+        drop_in = (self.BOARD / "systemd/system/mun-shell.service.d/70-board-audio.conf").read_text(encoding="utf-8")
+        named = re.findall(r"(?m)^Environment=MUN_SHELL_SOUND_READY=(\S+)$", drop_in)
+        self.assertEqual(named, [written], "the shell's unit names the file the script writes")
+        # The file is only waited for while a device is expected, so the wait
+        # is bounded by the same unit, and the script runs with the shell.
+        self.assertRegex(drop_in, r"(?m)^Environment=MUN_SHELL_SOUND_WAIT=\d+$")
+        self.assertRegex(drop_in, r"(?m)^Wants=mun-board-audio\.service$")
+        main = source("src/main.cpp")
+        self.assertIn('sounds.openAfter(qEnvironmentVariable("MUN_SHELL_SOUND_READY"));', main)
+        # /run is the only place the shell's unit lets it see that the system
+        # wrote something after boot; the file is read there, never written.
+        self.assertTrue(written.startswith("/run/"))
+
+
 class SettingsTests(unittest.TestCase):
     def test_a_failed_write_does_not_fail_every_write_after_it(self):
         # QSettings reports the first error it met for as long as the object

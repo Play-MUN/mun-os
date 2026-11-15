@@ -4,6 +4,12 @@ Layout facts come from the kernel's ext4 documentation. The superblock sits at
 byte 1024; we read magic, state, feature flags and label. A card that needs
 journal recovery or is flagged with errors is rejected before `mount` because a
 read-only mount with `noload` will not repair it and we never write to cards.
+
+The superblock also names what the kernel should do when it finds the
+filesystem damaged (`s_errors`). It is reported, not judged: the console
+mounts every card with its own policy, which overrides the card's, so a card
+that asks for a kernel panic is as harmless there as any other. A tool can
+show it, since another system that mounts the card may honour it.
 """
 
 import struct
@@ -17,6 +23,8 @@ EXT4_MAGIC = 0xEF53
 STATE_CLEAN = 0x0001
 STATE_ERRORS = 0x0002
 INCOMPAT_RECOVER = 0x0004
+ERRORS_CONTINUE = 1
+ERRORS_PANIC = 3
 
 
 def read_superblock(image: Path) -> Dict[str, object]:
@@ -28,6 +36,7 @@ def read_superblock(image: Path) -> Dict[str, object]:
         raise CardError("image_not_ext4", "La imagen es demasiado pequeña para contener ext4")
     magic = struct.unpack_from("<H", sb, 0x38)[0]
     state = struct.unpack_from("<H", sb, 0x3A)[0]
+    errors = struct.unpack_from("<H", sb, 0x3C)[0]
     log_block_size = struct.unpack_from("<I", sb, 0x18)[0]
     feature_incompat = struct.unpack_from("<I", sb, 0x60)[0]
     feature_ro_compat = struct.unpack_from("<I", sb, 0x64)[0]
@@ -38,6 +47,8 @@ def read_superblock(image: Path) -> Dict[str, object]:
         "clean": bool(state & STATE_CLEAN),
         "errors": bool(state & STATE_ERRORS),
         "needs_recovery": bool(feature_incompat & INCOMPAT_RECOVER),
+        # As the kernel reads it: any value but these two is remount-ro.
+        "errors_policy": {ERRORS_CONTINUE: "continue", ERRORS_PANIC: "panic"}.get(errors, "remount-ro"),
         "block_size": 1024 << log_block_size,
         "feature_incompat": feature_incompat,
         "feature_ro_compat": feature_ro_compat,

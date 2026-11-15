@@ -69,7 +69,18 @@ STAGE_MAX_BYTES = 64 * 1024 * 1024
 # a card that needs recovery is rejected before mounting, so nothing is ever
 # replayed implicitly. For one save the card is remounted rw and back; a mount
 # with `noload` cannot do that with journaling, which is why it is gone.
-MOUNT_OPTIONS = "ro,nosuid,nodev,noexec"
+#
+# The error policy is the console's, never the card's: without `errors=` ext4
+# takes it from the card's superblock, where `panic` stops the kernel at the
+# first damaged inode it reads, read-only mounts included. `remount-ro` and
+# not `continue`: read-only, the two act alike (the read fails and the card is
+# reported invalid); in a save's read-write window `remount-ro` stops every
+# write at the first inconsistency, so the save fails and says so, where
+# `continue` would go on writing to, and could confirm a save on, a filesystem
+# the kernel has just found damaged. Every mount and remount names it, so what
+# holds never depends on which options a remount keeps.
+MOUNT_FLAGS = "nosuid,nodev,noexec,errors=remount-ro"
+MOUNT_OPTIONS = "ro," + MOUNT_FLAGS
 LAUNCH_ROOT_PREFIX = "/run/mun/launch/"   # the only place a staged copy or save may go
 PAYLOAD_OWNER_UID = 0                          # a directory-save payload file is the launcher's (root)
 # Directory saves (docs/saves.md): the card declares the bound on the raw files;
@@ -1221,7 +1232,7 @@ class Mounter:
     def remount(self, card: Card, rw: bool) -> None:
         if not card.mount:
             raise CardError("card_removed", "La tarjeta ya no está montada")
-        result = subprocess.run(["mount", "-o", "remount," + ("rw" if rw else "ro"), card.mount],
+        result = subprocess.run(["mount", "-o", f"remount,{'rw' if rw else 'ro'},{MOUNT_FLAGS}", card.mount],
                                 capture_output=True, text=True, check=False)
         if result.returncode != 0:
             raise CardError("sync_failed" if not rw else "write_failed",

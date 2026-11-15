@@ -823,7 +823,9 @@ class SaveRequestTests(unittest.TestCase):
         self.assertEqual(replies[-1]["content"], {"device": self.mounter.device_path(card.device), "root": "content"})
 
     def test_mount_options_load_the_journal_read_only(self):
-        self.assertEqual(cardd.MOUNT_OPTIONS, "ro,nosuid,nodev,noexec", "no noload: a later rw remount must be journaled")
+        options = cardd.MOUNT_OPTIONS.split(",")
+        self.assertEqual(options[:4], ["ro", "nosuid", "nodev", "noexec"])
+        self.assertNotIn("noload", options, "no noload: a later rw remount must be journaled")
 
 
 if __name__ == "__main__":

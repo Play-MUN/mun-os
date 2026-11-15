@@ -94,7 +94,9 @@ class RunningService:
             data = b""
             while not data.endswith(b"\n"):
                 data += sock.recv(1 << 16)
-        cards = [c for c in json.loads(data.decode("utf-8"))["cards"] if c["state"] == "valid"]
+        # The first line is the snapshot a new client is told; an event may
+        # follow it in the same read.
+        cards = [c for c in json.loads(data.split(b"\n", 1)[0].decode("utf-8"))["cards"] if c["state"] == "valid"]
         return cards[0] if cards else None
 
     def connect(self):

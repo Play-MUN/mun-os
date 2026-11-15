@@ -739,6 +739,13 @@ class SaveWriteTests(unittest.TestCase):
 class ReleaseUnmountTests(unittest.TestCase):
     """R3: safe release confirms only a strict unmount; removed-device cleanup stays best effort."""
 
+    def setUp(self):
+        # The card is mounted, as far as the kernel's table says: this host's
+        # own table (Linux) knows nothing of /run/mun/cards.
+        stand_in = patch.object(cardd.Mounter, "mounted", lambda self, target: True)
+        stand_in.start()
+        self.addCleanup(stand_in.stop)
+
     def card(self):
         return cardd.Card(slot="c1", device="vdc", serial="NPT-game", state="valid", active=True, info=game_info(), mount="/run/mun/cards/c1")
 

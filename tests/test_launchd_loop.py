@@ -157,7 +157,10 @@ class RunningLauncher:
 
     def save(self, path: Path, line: bytes) -> dict:
         conn = self.connect(path)
-        conn.sendall(line)
+        try:
+            conn.sendall(line)
+        except (BrokenPipeError, ConnectionResetError):
+            pass                             # answered and closed before the whole line was taken
         return next(_lines(conn))
 
 
@@ -292,6 +295,19 @@ class ConnectionBoundTests(unittest.TestCase):
             except OSError:
                 pass
             self.assertEqual(list(answers), [])
+
+    def test_a_save_is_judged_by_its_size_however_its_line_spells_it(self):
+        with RunningLauncher(self) as launcher:
+            gate = launcher.open_gate("s1")
+            text = {"text": "漢" * (20 * 1024)}                       # 60 KiB as the card stores it
+            escaped = json.dumps({"type": "save", "schema": 1, "data": text}).encode("ascii") + b"\n"
+            self.assertGreater(len(escaped), 120 * 1024, "twice that with every character escaped")
+            self.assertEqual(launcher.save(gate, escaped)["error"]["code"], "no_session",
+                             "read as a request (there is no session in this fixture)")
+            endless = b'{"type":"save","schema":1,"data":{"t":"' + b"a" * (launchd.SAVE_LINE_MAX + 4096)
+            answer = launcher.save(gate, endless)
+            self.assertEqual((answer["type"], answer["ok"], answer["error"]["code"]), ("saved", False, "save_too_large"),
+                             "a line no save can need is answered, not only closed")
 
     def test_clients_of_the_shell_socket_are_bounded_and_the_first_ones_stay(self):
         with RunningLauncher(self) as launcher:

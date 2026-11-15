@@ -108,9 +108,12 @@ CLIENT_LINE_MAX = 64 * 1024
 # recurses once per level, and so does everything that later walks the value,
 # here and in the card service; nothing the console exchanges comes near this.
 JSON_MAX_DEPTH = 64
-# A game's save payload (docs/saves.md); the request line may carry it plus a little framing.
+# A game's save payload (docs/saves.md), measured as compact UTF-8. The request
+# line may spell it less compactly: a character escaped as \uXXXX takes up to
+# six times its bytes, so the line's limit leaves room for that and a little
+# framing, and the payload's own size is what a save is refused for.
 SAVE_MAX_BYTES = 64 * 1024
-SAVE_LINE_MAX = SAVE_MAX_BYTES + 4096
+SAVE_LINE_MAX = 6 * SAVE_MAX_BYTES + 4096
 SAVE_TIMEOUT = 20.0                   # the card service must answer a save within this
 # A session's save socket takes one request per connection. A connection has
 # this long to send its line, and only so many are held at once: connections
@@ -2461,7 +2464,12 @@ def main(argv=None) -> int:
             data = conn.recv(65536)
             # Anything after the request line is read and dropped.
             requests = client["reader"].feed(data) if (data and client and not client["asked"]) else []
-        except (OSError, FrameTooLarge):
+        except FrameTooLarge:
+            # No save needs a line that long; the game is told, then dropped.
+            gate_send(conn, {"type": "saved", "ok": False, "error": {
+                "code": "save_too_large", "message": "La partida supera el tamaño permitido"}})
+            return
+        except OSError:
             data = b""
             requests = []
         if not data:

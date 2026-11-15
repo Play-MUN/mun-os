@@ -244,6 +244,16 @@ class ShellTests(unittest.TestCase):
                 self.assertEqual([(Path(runtime) / name).exists() for name in names], [kept, kept], result)
                 self.assertTrue((Path(runtime) / "started").exists(), "nothing else is removed")
 
+    def test_the_shell_reaches_only_local_and_kernel_sockets(self):
+        # Its service sockets and D-Bus are local (AF_UNIX); the network
+        # panel's addresses and udev's device events come over netlink. No
+        # Internet socket: content from a card is read here, and a shell made
+        # to misbehave by one must not reach a network. Measured in a guest
+        # with this restriction: turning off and the console reset (both
+        # through sudo), the network panel and the sounds all work.
+        unit = (self.SHELL / "deploy" / "mun-shell.service").read_text()
+        self.assertRegex(unit, r"(?m)^RestrictAddressFamilies=AF_UNIX AF_NETLINK$")
+
     def test_the_shell_waits_for_its_display_and_failures_restart_it(self):
         # A display driver can come up after the unit: no condition may skip
         # the unit (a skipped unit is never retried), the shell waits itself

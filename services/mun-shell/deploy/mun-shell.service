@@ -99,6 +99,12 @@ MemoryMax=2G
 OOMPolicy=stop
 
 # Hardening that does not interfere with fb/evdev access.
+# Sockets: local ones (its services, D-Bus) and netlink (the network panel's
+# addresses, udev's device events); no Internet socket, though the shell reads
+# what cards bring. Applied before the service user is taken, so it does not
+# imply no-new-privileges: sudo, which turning off and the reset go through,
+# still works (measured).
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
 NoNewPrivileges=no
 ProtectSystem=strict
 ProtectHome=yes

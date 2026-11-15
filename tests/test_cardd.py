@@ -638,6 +638,15 @@ class SaveWriteTests(unittest.TestCase):
         outcome, copy = self.handout()
         self.assertTrue(outcome["copied"]); self.assertTrue(b'"n": 2' in copy.read_bytes() or b'"n": 1' in copy.read_bytes())
 
+    def test_an_unforeseen_failure_leaves_no_temporary_and_the_card_read_only(self):
+        self.write(self.envelope(1))
+        with patch.object(cardd, "_is_envelope", side_effect=RuntimeError("not a failure the protocol expects")):
+            with self.assertRaises(RuntimeError):
+                self.write(self.envelope(2))
+        self.assertEqual(self.names(), ["save.json"]); self.assertIn(b'"n": 1', self.target.read_bytes())
+        self.assertEqual(self.mounter.log[-1], ("remount", "c1", "ro"), "never left writable")
+        self.assert_loadable_old_save()
+
     def test_stale_temporary_from_an_earlier_crash_is_replaced(self):
         self.write(self.envelope(1))
         (self.game_dir / "save.json.tmp").write_bytes(b"half written")

@@ -33,6 +33,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
@@ -108,6 +109,24 @@ def log(message: str) -> None:
     # that UTF-8 cannot carry (a lone surrogate): it is written as "?", so
     # that saying what happened never raises.
     print(message.encode("utf-8", "replace").decode("utf-8"), flush=True)
+
+
+def guarded(what: str, work: Callable[[], object]) -> bool:
+    """Run one piece of the event loop's work: a scheduled callback, one
+    connection's event, a rescan.
+
+    Cards, requests and the platform are not under the service's control,
+    and the service holds what a running game needs: its card's insertion
+    and its saves. Whatever one piece of work raises is therefore that
+    piece's failure, logged once with its traceback, and never the loop's:
+    a restarted service would give the card a new insertion and the session
+    in course could no longer save. Returns False if the work raised."""
+    try:
+        work()
+        return True
+    except Exception:  # noqa: BLE001 - the point: nothing unforeseen ends the service
+        log(f"internal error in {what}; the service goes on\n{traceback.format_exc().rstrip()}")
+        return False
 
 
 # ------------------------------------------------------------------ state model
@@ -262,6 +281,11 @@ class CardManager:
                 outcome = {"ok": False, "error": exc.to_dict()}
             except OSError as exc:
                 outcome = {"ok": False, "error": {"code": "stage_failed", "message": "No se pudo copiar el ejecutable", "detail": str(exc)}}
+            except Exception as exc:  # noqa: BLE001 - a thread that dies answers nobody: the launcher would wait out its timeout
+                log(f"internal error staging from {slot}; the request fails and the service goes on\n"
+                    f"{traceback.format_exc().rstrip()}")
+                outcome = {"ok": False, "error": {"code": "stage_failed", "message": "No se pudo copiar el ejecutable",
+                                                  "detail": f"fallo interno ({type(exc).__name__})"}}
             self.schedule(lambda: reply({"type": "staged", "session": request.get("session"), **outcome}))
         threading.Thread(target=work, name=f"stage-{slot}", daemon=True).start()
 
@@ -343,6 +367,12 @@ class CardManager:
                 outcome = {"ok": False, "error": exc.to_dict()}
             except OSError as exc:
                 outcome = {"ok": False, "error": {"code": "write_failed", "message": "No se pudo escribir la partida", "detail": str(exc)}}
+            except Exception as exc:  # noqa: BLE001 - a thread that dies would leave the card "saving" for good:
+                # no further save, and a safe release that waits for ever.
+                log(f"internal error saving to {card.slot}; the save fails and the service goes on\n"
+                    f"{traceback.format_exc().rstrip()}")
+                outcome = {"ok": False, "error": {"code": "write_failed", "message": "No se pudo escribir la partida",
+                                                  "detail": f"fallo interno ({type(exc).__name__})"}}
             self.schedule(lambda: self._saved(card, request, outcome, reply))
         threading.Thread(target=work, name=f"save-{card.slot}", daemon=True).start()
 
@@ -936,15 +966,14 @@ def _write_save(mounter: "Mounter", card: "Card", info: dict, data: bytes, gener
                 os.replace("save.json", keep_as, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
         os.replace("save.json.tmp", "save.json", src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
         os.fsync(dir_fd)
-    except CardError:
+    except Exception as exc:
+        # Whatever failed, foreseen or not: no temporary is left behind and
+        # the card does not stay writable.
         if dir_fd >= 0:
             _unlink_quiet(dir_fd, "save.json.tmp")
         back_to_read_only()
-        raise
-    except OSError as exc:
-        if dir_fd >= 0:
-            _unlink_quiet(dir_fd, "save.json.tmp")
-        back_to_read_only()
+        if not isinstance(exc, OSError):
+            raise
         if exc.errno == errno.ENOSPC:
             raise CardError("no_space", "No hay espacio en la Game Card para guardar la partida", str(exc))
         if exc.errno == errno.EIO:
@@ -1534,6 +1563,8 @@ class Server:
 class ControlServer:
     """Root-only request socket (mode 0600). One JSON request per line, one reply."""
 
+    REPLIES = {"stage": "staged", "save": "saved", "release": "released"}
+
     def __init__(self, path: Path, manager: CardManager):
         self.path = path
         self.manager = manager
@@ -1602,22 +1633,34 @@ class ControlServer:
             self._reply(conn, {"type": "error", "error": {"code": "bad_request", "message": "Petición demasiado grande"}})
             self.drop(conn)
             return False
-        while b"\n" in self.buffers[conn]:
+        # A reply that cannot be sent drops the connection, its buffer with it.
+        while b"\n" in self.buffers.get(conn, b""):
             line, _, self.buffers[conn] = self.buffers[conn].partition(b"\n")
             try:
                 request = json.loads(line)
-            except ValueError:
+            except (ValueError, RecursionError):     # RecursionError: nested deeper than the parser goes
                 self._reply(conn, {"type": "error", "error": {"code": "bad_request", "message": "JSON inválido"}})
                 continue
-            if request.get("type") == "stage":
-                self.manager.stage(request, lambda message, c=conn: self._reply(c, message))
-            elif request.get("type") == "save":
-                self.manager.save(request, lambda message, c=conn: self._reply(c, message))
-            elif request.get("type") == "release":
-                self.manager.release(request, lambda message, c=conn: self._reply(c, message))
-            else:
-                self._reply(conn, {"type": "error", "error": {"code": "bad_request", "message": "Petición desconocida"}})
-        return True
+            if not isinstance(request, dict):
+                self._reply(conn, {"type": "error", "error": {"code": "bad_request", "message": "La petición no es un objeto JSON"}})
+                continue
+            kind = request.get("type")
+            try:
+                if kind == "stage":
+                    self.manager.stage(request, lambda message, c=conn: self._reply(c, message))
+                elif kind == "save":
+                    self.manager.save(request, lambda message, c=conn: self._reply(c, message))
+                elif kind == "release":
+                    self.manager.release(request, lambda message, c=conn: self._reply(c, message))
+                else:
+                    self._reply(conn, {"type": "error", "error": {"code": "bad_request", "message": "Petición desconocida"}})
+            except Exception as exc:  # noqa: BLE001 - this request's failure, said to who asked; not the service's
+                log(f"internal error handling a {kind} request; it fails and the service goes on\n"
+                    f"{traceback.format_exc().rstrip()}")
+                self._reply(conn, {"type": self.REPLIES.get(str(kind), "error"), "session": request.get("session"), "ok": False,
+                                   "error": {"code": "internal_error", "message": "Fallo interno del servicio de tarjetas",
+                                             "detail": type(exc).__name__}})
+        return conn in self.buffers
 
     def _reply(self, conn: socket.socket, message: dict) -> None:
         if conn not in self.buffers:
@@ -1698,7 +1741,7 @@ def main(argv=None) -> int:
         for name in list(manager.cards):
             if name not in present:
                 manager.device_removed(name)
-    rescan()  # cards already inserted when the service starts
+    guarded("the first device scan", rescan)  # cards already inserted when the service starts
 
     stop = {"flag": False}
     signal.signal(signal.SIGTERM, lambda *_: stop.__setitem__("flag", True))
@@ -1720,23 +1763,32 @@ def main(argv=None) -> int:
             elif key.data == "control-accept":
                 selector.register(control.accept(), selectors.EVENT_READ, "control")
             elif key.data == "control":
-                control.on_event(key.fileobj, mask)   # drop() unregisters on close
+                # drop() unregisters on close. A connection whose event could
+                # not be handled is closed: left registered, the selector
+                # would hand the same event back at once, without end.
+                if not guarded("a control connection", lambda: control.on_event(key.fileobj, mask)):
+                    control.drop(key.fileobj)
             elif key.data == "wake":
                 wake_r.recv(4096)
                 with queue_lock:
                     pending, queue[:] = queue[:], []
                 for fn in pending:
-                    fn()
-            else:
-                server.on_event(key.fileobj, mask)
+                    # Results of worker threads, timers and device events:
+                    # one that raises does not take the others with it.
+                    guarded("a scheduled callback", fn)
+            elif not guarded("a client connection", lambda: server.on_event(key.fileobj, mask)):
+                server.drop(key.fileobj)
         if args.rescan and time.monotonic() - last_rescan >= args.rescan:
-            rescan()
+            guarded("a device rescan", rescan)
             last_rescan = time.monotonic()
 
     manager.stop_shape()
     for card in list(manager.cards.values()):
         manager.mounter.unmount(card)
     clear_shape_root(SHAPE_ROOT)
+    selector.close()
+    for sock in (listener, control_listener, wake_r, wake_w, *server.clients, *control.buffers):
+        sock.close()
     for path in (Path(args.socket), CONTROL_SOCKET_PATH):
         try:
             path.unlink()

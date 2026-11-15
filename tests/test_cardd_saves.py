@@ -130,5 +130,169 @@ class HostileSaveFileTests(unittest.TestCase):
                 self.assertEqual(replies[-1]["save"].get("present"), current is not None)
 
 
+def compact(payload):
+    return len(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+
+
+class SaveSizeTests(unittest.TestCase):
+    """docs/saves.md: a game's object of at most 64 KiB is saved, and what is
+    saved is what the next launch reads. The bound a save is accepted under
+    and the bound it is read back with are one."""
+
+    # A plausible save: a map of single-digit tiles. Few bytes per separator,
+    # so the envelope, which is written with a space after each, is half as
+    # large again as the object the game sent.
+    TILES = {"level": 3, "tiles": [i % 10 for i in range(30000)]}
+    # The largest object the contract allows, of the shape that grows most.
+    LARGEST = {"t": [0] * 32761, "p": ""}
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(__import__("shutil").rmtree, self.tmp, True)
+        self.mounter = RealDirMounter(self.tmp)
+        self.h = Harness(mounter=self.mounter, validator=lambda mount: game_info())
+        silenced = redirect_stdout(io.StringIO()); silenced.__enter__(); self.addCleanup(silenced.__exit__, None, None, None)
+        self.h.manager.device_added("vdc", "NPT-game", "/dev/vdc"); self.h.pump()
+        self.card = self.h.manager.snapshot()["cards"][0]
+        self.game_dir = self.tmp / "c1" / "saves" / "mun.collect"
+        self.replies = []
+
+    def save(self, payload, **over):
+        request = {"type": "save", "slot": "c1", "insertion": self.card["insertion"], "serial": "NPT-game",
+                   "version": "0.1.0", "game": "mun.collect", "session": "s1", "schema": 1, "payload": payload}
+        request.update(over)
+        before = len(self.replies)
+        self.h.manager.save(request, self.replies.append)
+        if len(self.replies) == before:
+            self.h.pump()
+        return self.replies[-1]
+
+    def next_launch(self):
+        """What the next launch hands the game as its save file."""
+        work = Path(tempfile.mkdtemp(dir=self.tmp))
+        out = cardd._copy_save_out(self.tmp / "c1", game_info(), work / "save.json")
+        return out, (work / "save.json").read_bytes() if out.get("copied") else None
+
+    def names(self):
+        return sorted(p.name for p in self.game_dir.iterdir()) if self.game_dir.exists() else []
+
+    def assert_round_trip(self, payload, follow):
+        reply = self.save(payload)
+        self.assertTrue(reply["ok"], reply)
+        on_card = (self.game_dir / "save.json").read_bytes()
+        self.assertEqual(reply["bytes"], len(on_card))
+        out, handed = self.next_launch()
+        self.assertEqual((out["present"], out["copied"], out["recovered"]), (True, True, False))
+        self.assertEqual(handed, on_card, "the game is handed the whole envelope")
+        self.assertEqual(json.loads(handed)["payload"], payload)
+        # The following save keeps it as the previous copy; nothing is set aside as damaged.
+        self.assertTrue(self.save(follow)["ok"])
+        self.assertEqual(self.names(), ["save.json", "save.json.prev"])
+        self.assertEqual((self.game_dir / "save.json.prev").read_bytes(), on_card)
+        self.assertEqual(json.loads(self.next_launch()[1])["payload"], follow)
+        (self.game_dir / "save.json").unlink()            # and that previous copy is a recovery source
+        out, handed = self.next_launch()
+        self.assertEqual(out["recovered"], True); self.assertEqual(json.loads(handed)["payload"], payload)
+
+    def test_a_60021_byte_save_is_read_back_at_the_next_launch(self):
+        self.assertEqual(compact(self.TILES), 60021)
+        self.assert_round_trip(self.TILES, dict(self.TILES, level=4))
+
+    def test_the_largest_save_the_contract_allows_is_read_back(self):
+        self.assertEqual(compact(self.LARGEST), cardd.SAVE_MAX_BYTES)
+        self.assert_round_trip(self.LARGEST, {"t": [1] + [0] * 32760, "p": ""})
+
+    def test_an_ordinary_small_save_is_read_back(self):
+        self.assert_round_trip({"level": 1, "name": "ñ 収集", "taken": [0, 1, 2]}, {"level": 2, "taken": []})
+
+    def test_a_save_over_the_limit_is_refused_before_anything_is_written(self):
+        over = {"t": [0] * 32761, "p": "x"}
+        self.assertEqual(compact(over), cardd.SAVE_MAX_BYTES + 1)
+        reply = self.save(over)
+        self.assertEqual((reply["ok"], reply["error"]["code"]), (False, "save_too_large"))
+        self.assertEqual(self.names(), []); self.assertFalse(self.game_dir.exists())
+        self.assertNotIn(("remount", "c1", "rw"), self.mounter.log)
+
+    def test_an_envelope_the_next_launch_would_not_read_is_never_written(self):
+        # Whatever makes the envelope large, here the session's name: the
+        # bytes to be written are measured against the bound they are read with.
+        payload_max, file_max = cardd.save_bounds(game_info())
+        reply = self.save(self.LARGEST, session="s" * (file_max - payload_max * 3 // 2))
+        self.assertEqual((reply["ok"], reply["error"]["code"]), (False, "save_too_large"))
+        self.assertEqual(self.names(), [])
+        self.assertNotIn(("remount", "c1", "rw"), self.mounter.log)
+        self.assertTrue(self.save(self.LARGEST)["ok"], "the same payload under an ordinary session is saved")
+
+    def test_no_accepted_payload_can_outgrow_the_bound_it_is_read_with(self):
+        payload_max, file_max = cardd.save_bounds(game_info())
+        self.assertEqual(payload_max, cardd.SAVE_MAX_BYTES)
+        shapes = ([0] * 32761, [[]] * 21000, [{"a": 0}] * 8000, {str(i): 0 for i in range(7000)},
+                  [True, None, 1.5, "ñ, : 収"] * 2000, "x" * 60000, [[[[0, 0], [0, 0]], [[0, 0], [0, 0]]]] * 1500)
+        for shape in shapes:
+            # Each lengthened by a string to exactly the largest size accepted.
+            payload = {"t": shape, "p": "x" * (payload_max - compact({"t": shape, "p": ""}))}
+            size = compact(payload)
+            self.assertEqual(size, payload_max)
+            written = len(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+            self.assertLessEqual(written, size * 3 // 2, "a space per separator: at most half as much again")
+            self.assertLessEqual(written + 4096, file_max, "with room for the envelope's own fields")
+
+    def test_a_card_with_an_envelope_written_before_the_bounds_agreed_is_restored(self):
+        # As the published version left it: a confirmed 90 KiB envelope it could
+        # not read back, and a copy set aside as damaged by each later save.
+        envelope = (json.dumps({"format": "neptune-save/1", "game": "mun.collect", "content_version": "0.1.0",
+                                "schema": 1, "saved_at": "2026-11-14T10:00:00Z", "session": "s0",
+                                "insertion": "0123456789abcdef", "payload": self.TILES}, ensure_ascii=False) + "\n").encode()
+        self.assertGreater(len(envelope), 90000)
+        self.game_dir.mkdir()
+        (self.game_dir / "save.json").write_bytes(envelope)
+        for stamp in ("20261114T100100Z", "20261114T100200Z"):
+            (self.game_dir / f"save.json.damaged-{stamp}").write_bytes(envelope)
+        out, handed = self.next_launch()
+        self.assertEqual((out["copied"], out["recovered"], out["bytes"]), (True, False, len(envelope)))
+        self.assertEqual(json.loads(handed)["payload"], self.TILES, "loadable again")
+        self.assertTrue(self.save(dict(self.TILES, level=4))["ok"])
+        self.assertEqual(self.names(), ["save.json", "save.json.damaged-20261114T100100Z",
+                                        "save.json.damaged-20261114T100200Z", "save.json.prev"],
+                         "kept as the previous copy: no further damaged copy")
+        self.assertEqual((self.game_dir / "save.json.prev").read_bytes(), envelope)
+        self.assertTrue(self.save(dict(self.TILES, level=5))["ok"])
+        self.assertEqual(len([n for n in self.names() if ".damaged-" in n]), 2)
+
+    def test_the_card_tool_judges_such_an_envelope_as_the_console_does(self):
+        from mun_card import convert, saves
+        from mun_card.source import DirectorySource
+        self.assertEqual(saves.save_bounds(game_info()), cardd.save_bounds(game_info()))
+        self.assertTrue(self.save(self.LARGEST)["ok"])
+        self.assertTrue(self.save({"t": [1] + [0] * 32760, "p": ""})["ok"])       # save.json and save.json.prev
+        documents = convert._card_saves(DirectorySource(self.tmp / "c1"), game_info(), "saves/mun.collect")
+        self.assertEqual(sorted(documents), ["save.json", "save.json.prev"])
+        self.assertEqual(documents["save.json.prev"]["payload"], self.LARGEST)
+
+    def test_a_request_as_large_as_the_contract_allows_may_arrive_in_pieces(self):
+        # The launcher's line for the largest save, read in two parts as a socket may deliver it.
+        import socket
+        request = {"type": "save", "slot": "c1", "insertion": self.card["insertion"], "serial": "NPT-game",
+                   "version": "0.1.0", "game": "mun.collect", "session": "s1", "schema": 1, "payload": self.LARGEST}
+        line = (json.dumps(request) + "\n").encode("utf-8")
+        control = cardd.ControlServer(self.tmp / "unused.sock", self.h.manager)
+        ours, theirs = socket.socketpair()
+        self.addCleanup(ours.close); self.addCleanup(theirs.close)
+        for sock in (ours, theirs):
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 1 << 20)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1 << 20)
+        ours.setblocking(False); theirs.settimeout(5)
+        control.buffers[ours] = b""
+        theirs.sendall(line[:60000]); self.assertTrue(control.handle(ours))
+        theirs.sendall(line[60000:90000]); self.assertTrue(control.handle(ours), "not refused for its size")
+        theirs.sendall(line[90000:])
+        while ours in control.buffers and b"\n" not in control.buffers[ours] and control.handle(ours):
+            if not control.buffers.get(ours):
+                break
+        self.h.pump()
+        reply = json.loads(theirs.recv(65536))
+        self.assertEqual((reply["type"], reply.get("ok")), ("saved", True), reply)
+
+
 if __name__ == "__main__":
     unittest.main()

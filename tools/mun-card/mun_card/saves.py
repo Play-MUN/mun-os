@@ -14,8 +14,16 @@ import zlib
 from typing import Optional
 from xml.etree import ElementTree
 
-SAVE_MAX_BYTES = 64 * 1024            # a game's payload
-SAVE_FILE_MAX_BYTES = 80 * 1024       # the envelope on the card, and what staging copies back
+SAVE_MAX_BYTES = 64 * 1024            # a game's payload, measured as compact JSON
+# The envelope on the card, and what staging copies back to the game. The
+# console writes the envelope with a space after each `,` and `:` that
+# separates values, and compact JSON has at most one of those per two bytes
+# (`[0,0,0]`), so the payload takes at most half as much again on the card;
+# the rest is room for the envelope's own fields. The service that writes
+# measures the bytes it is about to write against this same bound, so a save
+# it confirms is one it reads back whole; an envelope over the bound is a
+# damaged save for the console and for the card tool alike.
+SAVE_FILE_MAX_BYTES = SAVE_MAX_BYTES * 3 // 2 + 16 * 1024
 # Directory saves (docs/saves.md): the card declares the bound on the raw files;
 # the envelope carries them in base64 (4/3) plus names and hashes.
 FILES_PAYLOAD_MAX_FILES = 64

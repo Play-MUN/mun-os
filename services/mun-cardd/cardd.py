@@ -320,7 +320,7 @@ class CardManager:
         if request.get("insertion") != card.insertion or request.get("serial") != card.serial \
                 or request.get("version") != info.get("version") or request.get("game") != info.get("id"):
             return fail("card_mismatch", "La tarjeta activa no es la de la sesión")
-        payload_max, _ = save_bounds(info)
+        payload_max, file_max = save_bounds(info)
         kind = request.get("payload_kind")
         if kind == "files":
             # Directory saves (docs/saves.md): the payload arrives as a root-owned file
@@ -365,6 +365,13 @@ class CardManager:
             data = _save_bytes(envelope) + b"\n"
         except CardError as exc:       # a directory save's payload, or the session's name
             return fail(exc.code, exc.message, exc.detail)
+        if len(data) > file_max:
+            # The bound the next launch reads with (_copy_save_out), on the
+            # bytes as they would be written: what is confirmed is read back
+            # whole. Sized so that no payload within its own limit meets it
+            # (mun_card.saves); refused here, before anything is written.
+            return fail("save_too_large", "La partida supera el tamaño permitido",
+                        f"ocuparía {len(data)} bytes en la tarjeta; máximo {file_max}")
         generation = card.generation
         card.saving = True
 
@@ -1712,7 +1719,9 @@ class ControlServer:
             self.drop(conn)
             return False
         self.buffers[conn] += data
-        if len(self.buffers[conn]) > SAVE_MAX_BYTES + 8192 and b"\n" not in self.buffers[conn]:
+        # A save's line carries the payload with a space after each separator,
+        # as the envelope does: the same bound admits every save within its limit.
+        if len(self.buffers[conn]) > SAVE_FILE_MAX_BYTES and b"\n" not in self.buffers[conn]:
             self._reply(conn, {"type": "error", "error": {"code": "bad_request", "message": "Petición demasiado grande"}})
             self.drop(conn)
             return False

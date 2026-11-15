@@ -339,6 +339,25 @@ class MotionTests(unittest.TestCase):
         self.assertIn(f"kDocumentMaxBytes = {shape.EXPORT_MAX_BYTES // 1024} * 1024", shell)
         self.assertIn(f"kAllocationLimitMiB = {motion.DECODE_MAX_BYTES // 1048576};", shell)
 
+    def test_the_shell_reads_a_motions_images_as_every_other_image_of_a_package(self):
+        # As PNG and nothing else, and from the header first: the sides
+        # within a motion image's and the pixels within what the motion has
+        # left to decode, before anything is decoded.
+        source = (ROOT / "services" / "mun-shell" / "src" / "motionscene.cpp").read_text(encoding="utf-8")
+        sides = {shape.SIDE_LIMITS[role] for role in ("sheet", "plane", "light")}
+        self.assertEqual(len(sides), 1)
+        self.assertIn(f"kMotionMaxSide = {sides.pop()};", source)
+        loader = source[source.index("m_loader = std::thread("):]
+        loader = loader[:loader.index("QMetaObject::invokeMethod(")]
+        self.assertIn('QImageReader reader(&file, "png");', loader)
+        self.assertNotIn("QImageReader reader(path", loader)
+        header, pixels = loader.index("reader.size()"), loader.index("reader.read()")
+        self.assertLess(header, pixels)
+        checked = loader[header:pixels]
+        self.assertIn("> kMotionMaxSide", checked)
+        self.assertIn("> kMotionDecodedMaxBytes", checked)
+        self.assertEqual(checked.count("break;"), 2, "a header over either limit ends the load before decoding")
+
     def test_unknown_keys_drop_the_motion(self):
         note = self.dropped(self.read(self.edited(actors__hero__speed=3)))
         self.assertEqual((note.code, note.where), ("shape_motion_field", "actors.hero"))

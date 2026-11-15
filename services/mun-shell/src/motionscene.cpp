@@ -43,6 +43,9 @@ constexpr qreal kHomeSpeed = 120;      // canvas pixels a second, going back to 
 // The motion's images decoded, together: the checker's budget
 // (mun_card.motion.MOTION_MAX_DECODED), held here as well.
 constexpr qint64 kMotionDecodedMaxBytes = 64 * 1024 * 1024;
+// The largest side of any image a motion draws (a sheet, a plane, a light):
+// the checker's (mun_card.shape.SIDE_LIMITS).
+constexpr int kMotionMaxSide = 2048;
 // The things one frame lists, at most: a package the checker accepts lists
 // some 4,300 at the very most (160 figures in 24 bands, 320 particles,
 // planes and lights repeated across the screen); past this, the nearest
@@ -559,7 +562,22 @@ void MotionScene::reload()
                                          "console accepts)").arg(name);
                 break;
             }
-            QImageReader reader(&file);
+            // As PNG and nothing else, and its header before its pixels, as
+            // every other image of a package: its sides within a motion
+            // image's, its pixels within what the motion may still decode.
+            QImageReader reader(&file, "png");
+            const QSize size = reader.size();
+            if (!size.isValid() || size.width() < 1 || size.height() < 1 || size.width() > kMotionMaxSide
+                || size.height() > kMotionMaxSide) {
+                failure = QStringLiteral("%1 could not be decoded (not a PNG within %2x%2)")
+                              .arg(name)
+                              .arg(kMotionMaxSide);
+                break;
+            }
+            if (bytes + qint64(size.width()) * size.height() * 4 > kMotionDecodedMaxBytes) {
+                failure = QStringLiteral("its images decode to more than %1 bytes").arg(kMotionDecodedMaxBytes);
+                break;
+            }
             QImage image = reader.read();
             if (image.isNull()) {
                 failure = QStringLiteral("%1 could not be decoded (%2)").arg(name, reader.errorString());

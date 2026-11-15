@@ -93,7 +93,7 @@ con nombres nuevos que indiques en `shape.json`.
 
 | Tipo | Formato | Límites |
 | --- | --- | --- |
-| Imágenes | PNG (cualquier profundidad de bits y tipo de color que admita PNG) | 4 MiB cada una; el lado mayor, 2048 para un fondo, una capa o una textura de luz, 1024 para la ventana de la tarjeta, 256 para un sprite |
+| Imágenes | PNG (cualquier profundidad de bits y tipo de color que admita PNG) | 4 MiB cada una; el lado mayor, 2048 para un fondo, una capa o una textura de luz, 1024 para la ventana de la tarjeta, 256 para un sprite; 16 MiB una vez decodificada; poco además de los píxeles: 32 KiB de texto (el XMP y el historial de un programa de diseño suelen pasar de ahí: exporta sin metadatos) y un perfil de color |
 | Sonidos | WAV, PCM, 48 kHz, 16 bits, estéreo, solo con `fmt ` y `data` | 1 MiB cada uno; `move`, `enter` y `back`, 1 s como máximo, e `insert`, 3 s como máximo; picos de −1 dBFS o menos |
 | El paquete | los archivos que nombra `shape.json` | 32 MiB en total |
 

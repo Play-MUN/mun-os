@@ -855,8 +855,9 @@ def clone_image(source: Path, destination: Path) -> None:
 
 def _debugfs_argument(text: str) -> str:
     """`text` as one argument of a debugfs command: double-quoted, which keeps
-    spaces in it. debugfs has no escape for a double quote or a line break
-    inside one, so a name holding either is refused."""
+    spaces in it. A name holding a double quote or a line break is refused
+    rather than escaped: refusing is safe on a disposable copy, and the read
+    back afterwards (replace_package) catches a name debugfs listed escaped."""
     if any(c in text for c in '"\n\r\0'):
         from .errors import CardError
         raise CardError("shape_write_failed", "Un nombre no se puede escribir en la copia de la tarjeta", repr(text))

@@ -87,7 +87,7 @@ Replace the sample's files with yours, at the same names or new ones named in
 
 | Kind | Format | Limits |
 | --- | --- | --- |
-| Images | PNG (any bit depth and colour type PNG allows) | 4 MiB each; the largest side 2048 for a backdrop, layer or light texture, 1024 for the card window, 256 for a sprite |
+| Images | PNG (any bit depth and colour type PNG allows) | 4 MiB each; the largest side 2048 for a backdrop, layer or light texture, 1024 for the card window, 256 for a sprite; 16 MiB once decoded; little besides the pixels: 32 KiB of text (a design program's XMP and history often exceed it: export without metadata) and one colour profile |
 | Sounds | WAV, PCM, 48 kHz, 16-bit, stereo, nothing but `fmt ` and `data` | 1 MiB each; `move`, `enter`, `back` at most 1 s, `insert` at most 3 s; peaks at or under −1 dBFS |
 | The package | the files `shape.json` names | 32 MiB in all |
 

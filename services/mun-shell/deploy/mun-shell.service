@@ -73,10 +73,12 @@ ExecStart=/opt/mun/shell/bin/mun-shell
 ExecStopPost=/bin/sh -c 'if [ "$$SERVICE_RESULT" = success ]; then rm -f -- "$$XDG_RUNTIME_DIR/shape-decoding" "$$XDG_RUNTIME_DIR/shape-decoding-motion"; fi'
 Restart=on-failure
 # A new resolution is a restart (75, below), black until the shell is back:
-# one second, not more. It does not make a failing shell spin: without a
-# display the shell waits for one itself (MUN_DISPLAY_WAIT_SECONDS) before it
-# exits, and a crash while decoding a card's images is not repeated (the
-# decoding markers).
+# one second, not more. Without a display the shell waits for one itself
+# (MUN_DISPLAY_WAIT_SECONDS) before it exits, and a crash while decoding a
+# card's images is not repeated (the decoding markers); any other failure to
+# start (an interface that does not load, a library missing) is tried again
+# every second without end, five times as often as before: the console has
+# no interface then either way, and the journal is bounded.
 RestartSec=1
 # Qt's framebuffer VT handler exits with status 1 after SIGTERM; that is a clean stop.
 # 75 is the shell asking to start again: Qt opens the display once, so a new

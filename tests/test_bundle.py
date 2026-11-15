@@ -260,6 +260,47 @@ class GetTests(Fixture):
                 self.assertFalse((self.root / "installed" / "d0929-123647").exists())
                 self.assertFalse((self.root / "cards").exists())
 
+    def test_sizes_no_bundle_has_are_refused_when_the_manifest_is_read(self):
+        image = lambda manifest: next(e for e in manifest["files"] if e["kind"] == "image")  # noqa: E731
+        card = lambda manifest: next(e for e in manifest["files"] if e["kind"] == "card")  # noqa: E731
+        cases = {
+            "a file of 2^62 bytes": lambda manifest: image(manifest).update(size=1 << 62),
+            "a card that unpacks to 2^62 bytes": lambda manifest: card(manifest).update(image_size=1 << 62),
+            "a card of negative size": lambda manifest: card(manifest).update(image_size=-1),
+        }
+        for what, change in cases.items():
+            with self.subTest(what):
+                shutil.rmtree(self.root)
+                self.root.mkdir()
+                source = self.bundle()
+                self.rewrite(source, change)
+                with self.assertRaises(bundle.BundleError) as refused:
+                    self.get(source)
+                self.assertIn("manifest", str(refused.exception))
+                self.assertFalse((self.root / "installed").exists(), "nothing is fetched")
+
+    def test_a_bundle_larger_than_the_free_space_is_refused_before_it_is_fetched(self):
+        source = self.bundle()
+        manifest = json.loads((source / "release.json").read_text())
+        files = sum(entry["size"] for entry in manifest["files"])
+        cards = sum(entry["image_size"] for entry in manifest["files"] if entry["kind"] == "card")
+        usage = lambda free: patch.object(bundle.shutil, "disk_usage",  # noqa: E731
+                                          return_value=argparse.Namespace(total=1 << 40, used=0, free=free))
+        with usage(files + cards - 1), self.assertRaises(bundle.BundleError) as refused:
+            self.get(source)
+        self.assertIn("free space", str(refused.exception))
+        self.assertFalse((self.root / "installed").exists(), "nothing is fetched")
+        self.assertFalse((self.root / "cards").exists())
+        # What is already here is not needed again: a card that exists is
+        # not unpacked, a file already fetched is not fetched.
+        (self.root / "cards").mkdir()
+        (self.root / "cards" / "collect.img").write_bytes(b"my saves")
+        collect = next(entry for entry in manifest["files"] if entry.get("card") == "collect")
+        with usage(files + cards - collect["image_size"]):
+            build, installed = self.get(source)
+        self.assertEqual([card.name for card in installed], ["demo.img"])
+        self.assertTrue((build / IMAGE).is_file())
+
     def test_a_name_in_use_by_another_image_is_refused(self):
         source = self.bundle()
         other = self.root / "installed" / "mine"

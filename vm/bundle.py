@@ -48,6 +48,10 @@ from typing import Any, BinaryIO, Callable, Dict, List, Optional, Tuple
 FORMAT = "mun-bundle/1"
 MANIFEST = "release.json"
 MANIFEST_LIMIT = 1 << 20                       # bytes; a manifest is a few kilobytes
+# The largest file, and the largest unpacked card, a manifest may declare.
+# An image is about half a gigabyte and a card tens of megabytes: a larger
+# number is a mistake or a manifest written to fill the disk.
+SIZE_LIMIT = 1 << 36
 FILE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 CARD_NAME = re.compile(r"[a-z0-9][a-z0-9_-]{0,15}")
 BUILD_NAME = re.compile(r"[a-z0-9][a-z0-9-]{1,15}")        # as vm/mundev.py names a build
@@ -166,6 +170,8 @@ def check_manifest(data: Any) -> Dict[str, Any]:
             raise BundleError(f"manifest file {name}: kind {kind!r} not allowed there")
         if not isinstance(entry.get("size"), int) or entry["size"] < 0:
             raise BundleError(f"manifest file {name}: no size")
+        if entry["size"] > SIZE_LIMIT:
+            raise BundleError(f"manifest file {name}: larger than any bundle's file ({entry['size']} bytes)")
         if not isinstance(entry.get("sha256"), str) or not DIGEST.fullmatch(entry["sha256"]):
             raise BundleError(f"manifest file {name}: no SHA-256")
         if kind == "build-info" and name != "BUILD-INFO.json":
@@ -180,6 +186,8 @@ def check_manifest(data: Any) -> Dict[str, Any]:
                 raise BundleError(f"manifest card {name}: its name does not match")
             if not isinstance(entry.get("image_size"), int) or not DIGEST.fullmatch(str(entry.get("image_sha256"))):
                 raise BundleError(f"manifest card {name}: no size or SHA-256 of the card itself")
+            if not 0 <= entry["image_size"] <= SIZE_LIMIT:
+                raise BundleError(f"manifest card {name}: no card has that size ({entry['image_size']} bytes)")
     kinds = [entry["kind"] for entry in files]
     if kinds.count("image") != 1 or kinds.count("build-info") != 1:
         raise BundleError("manifest must list exactly one image and one BUILD-INFO.json")
@@ -337,6 +345,34 @@ def install_card(packed: Path, entry: Dict[str, Any], cards_root: Path) -> Optio
             temporary.unlink()
 
 
+def check_space(manifest: Dict[str, Any], staging: Path, cards_root: Path) -> None:
+    """Refuse, before anything is fetched, a bundle that does not fit: what
+    is still to download into `staging` and the cards still to unpack into
+    `cards_root` against the free space of the file system each is on (one
+    sum when it is the same). The manifest's sizes are what is checked, and
+    every file is held to its declared size as it arrives."""
+    needed: Dict[int, Tuple[Path, int]] = {}
+
+    def add(directory: Path, size: int) -> None:
+        while not directory.exists():
+            directory = directory.parent
+        device = directory.stat().st_dev
+        needed[device] = (directory, needed.get(device, (directory, 0))[1] + size)
+
+    for entry in manifest["files"]:
+        target = staging / entry["name"]
+        part = target.with_name(target.name + ".part")
+        have = target.stat().st_size if target.exists() else part.stat().st_size if part.exists() else 0
+        add(staging, max(0, entry["size"] - have))
+        if entry["kind"] == "card" and not os.path.lexists(cards_root / f"{entry['card']}.img"):
+            add(cards_root, entry["image_size"])
+    for directory, size in needed.values():
+        free = shutil.disk_usage(directory).free
+        if size > free:
+            raise BundleError(f"not enough free space in {directory}: the bundle needs {size / 1e6:.0f} MB there "
+                              f"and {free / 1e6:.0f} MB are free")
+
+
 def default_name(manifest: Dict[str, Any]) -> str:
     """A build name for a download: d<month><day>-<hour><minute><second> of its build id."""
     build_id = manifest["build_id"]
@@ -373,6 +409,7 @@ def get(location: str, builds_root: Path, cards_root: Path, name: Optional[str] 
         report("note: this bundle is a local test: it says it is not of one commit (its cards and texts may not "
                "be those of the image's source)")
     staging = builds_root / f"{name}.download"
+    check_space(manifest, staging, cards_root)
     for entry in manifest["files"]:
         target = staging / entry["name"]
         if target.exists() and target.stat().st_size == entry["size"] and sha256_file(target) == entry["sha256"]:

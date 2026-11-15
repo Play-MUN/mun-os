@@ -41,7 +41,8 @@ class MountErrorPolicyTests(unittest.TestCase):
         def run(cmd, **kwargs):
             self.calls.append(cmd)
             return Mock(returncode=0, stderr="", stdout="")
-        for p in (patch.object(cardd.subprocess, "run", run),
+        from test_cardd import popen_from
+        for p in (patch.object(cardd.subprocess, "run", run), patch.object(cardd.subprocess, "Popen", popen_from(run)),
                   patch.object(cardd.ext4, "check_mountable", lambda path: {})):
             p.start(); self.addCleanup(p.stop)
 
@@ -147,7 +148,9 @@ class RefusedCardIsNamedTests(unittest.TestCase):
         def run(cmd, **kwargs):
             self.commands.append(cmd)
             return Mock(returncode=0, stderr="", stdout="")
-        p = patch.object(cardd.subprocess, "run", run); p.start(); self.addCleanup(p.stop)
+        from test_cardd import popen_from
+        for p in (patch.object(cardd.subprocess, "run", run), patch.object(cardd.subprocess, "Popen", popen_from(run))):
+            p.start(); self.addCleanup(p.stop)
         self.journal = io.StringIO()
         silenced = redirect_stdout(self.journal); silenced.__enter__(); self.addCleanup(silenced.__exit__, None, None, None)
         self.Harness = Harness

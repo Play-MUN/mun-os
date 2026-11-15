@@ -18,6 +18,23 @@ import cardd  # noqa: E402
 from mun_card.errors import CardError  # noqa: E402
 
 
+def popen_from(run):
+    """A stand-in for subprocess.Popen answering as `run` (a stand-in for
+    subprocess.run) does: the service starts mount commands with Popen, to
+    keep one that does not end within its bound."""
+    class Command:
+        def __init__(self, argv, **kwargs):
+            result = run(argv, **kwargs)
+            self.returncode, self.output = result.returncode, (result.stdout, result.stderr)
+
+        def communicate(self, timeout=None):
+            return self.output
+
+        def poll(self):
+            return self.returncode
+    return Command
+
+
 class FakeMounter:
     def __init__(self, fail_for=()):
         self.mounted = {}
@@ -730,7 +747,7 @@ class ReleaseUnmountTests(unittest.TestCase):
         card = self.card(); calls = []
         def run(cmd, **kwargs):
             calls.append(cmd); return Mock(returncode=32, stderr="umount: target is busy.", stdout="")
-        with patch.object(cardd.subprocess, "run", run):
+        with patch.object(cardd.subprocess, "run", run), patch.object(cardd.subprocess, "Popen", popen_from(run)):
             with self.assertRaises(CardError) as ctx:
                 mounter.unmount(card, strict=True)
         self.assertEqual(ctx.exception.code, "unmount_failed"); self.assertIn("busy", ctx.exception.detail)
@@ -742,7 +759,8 @@ class ReleaseUnmountTests(unittest.TestCase):
         card = self.card(); calls = []
         def run(cmd, **kwargs):
             calls.append(cmd); return Mock(returncode=32, stderr="umount: target is busy.", stdout="")
-        with patch.object(cardd.subprocess, "run", run), patch.object(Path, "rmdir", lambda self: None):
+        with patch.object(cardd.subprocess, "run", run), patch.object(cardd.subprocess, "Popen", popen_from(run)), \
+                patch.object(Path, "rmdir", lambda self: None):
             mounter.unmount(card)
         self.assertIsNone(card.mount)
         self.assertEqual(calls, [["umount", "/run/mun/cards/c1"], ["umount", "-l", "/run/mun/cards/c1"]])

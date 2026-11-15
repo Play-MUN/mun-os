@@ -1368,33 +1368,80 @@ def clear_shape_root(root: Path) -> None:
 
 # ------------------------------------------------------------------ platform bits
 
+# How long one mount, remount or umount may take. A healthy card answers in
+# well under a second; one that stops answering leaves the command waiting in
+# the kernel, where no signal reaches it. Past this bound the operation is
+# reported as failed and the process is kept (Mounter.stalled, reaped from the
+# loop), never abandoned; nothing more is started on that mount point until it
+# has ended, and a card whose unmount has not ended is never safe to remove.
+MOUNT_TIMEOUT = 10.0
+
+
 class Mounter:
     """Real mounts under MOUNT_ROOT. Slot names come from the manager, never from the card."""
 
     def __init__(self, root: Path = MOUNT_ROOT):
         self.root = root
+        self.stalled: Dict[str, "tuple[str, subprocess.Popen]"] = {}   # mount point -> (command, process)
 
     def device_path(self, device: str) -> str:
         return f"/dev/{device}"
+
+    @staticmethod
+    def mounted(target: str) -> bool:
+        """Whether `target` is a mount point in this service's namespace,
+        from the kernel's table: a stat of it could wait on the card itself."""
+        try:
+            with open("/proc/self/mountinfo", "rb") as table:
+                return any(line.split(b" ")[4].decode("unicode_escape", "replace") == target
+                           for line in table if line.count(b" ") >= 5)
+        except OSError:
+            return True
+
+    def reap(self) -> None:
+        """Forget stalled commands that have ended. A mount that succeeded
+        after it was reported failed has no card using it: detached."""
+        for target, (command, proc) in list(self.stalled.items()):
+            if proc.poll() is None:
+                continue
+            del self.stalled[target]
+            log(f"{command} on {target} ended at last (exit {proc.returncode})")
+            if command == "mount" and proc.returncode == 0:
+                subprocess.run(["umount", "-l", target], capture_output=True, check=False, timeout=MOUNT_TIMEOUT)
+
+    def _run(self, argv: List[str], target: str, code: str, message: str) -> "tuple[int, str]":
+        """Run a mount-family command on `target` within MOUNT_TIMEOUT."""
+        self.reap()
+        if target in self.stalled:
+            raise CardError(code, message, f"{self.stalled[target][0]} sigue en curso en {target}")
+        proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            out, err = proc.communicate(timeout=MOUNT_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.stalled[target] = (argv[0], proc)
+            log(f"{argv[0]} on {target} still running after {MOUNT_TIMEOUT:.0f} s; kept until it ends")
+            raise CardError(code, message, f"{argv[0]} no terminó en {MOUNT_TIMEOUT:.0f} s")
+        return proc.returncode, (err or out or "").strip()
 
     def mount(self, card: Card, path: str) -> str:
         ext4.check_mountable(Path(path))
         target = self.root / card.slot
         target.mkdir(parents=True, exist_ok=True)
-        result = subprocess.run(["mount", "-t", "ext4", "-o", MOUNT_OPTIONS, path, str(target)],
-                                capture_output=True, text=True, check=False)
-        if result.returncode != 0:
-            raise CardError("mount_failed", "No se pudo montar la tarjeta en solo lectura", result.stderr.strip())
+        code, detail = self._run(["mount", "-t", "ext4", "-o", MOUNT_OPTIONS, path, str(target)], str(target),
+                                 "mount_failed", "No se pudo montar la tarjeta en solo lectura")
+        if code != 0:
+            raise CardError("mount_failed", "No se pudo montar la tarjeta en solo lectura", detail)
         return str(target)
 
     def remount(self, card: Card, rw: bool) -> None:
         if not card.mount:
             raise CardError("card_removed", "La tarjeta ya no está montada")
-        result = subprocess.run(["mount", "-o", f"remount,{'rw' if rw else 'ro'},{MOUNT_FLAGS}", card.mount],
-                                capture_output=True, text=True, check=False)
-        if result.returncode != 0:
+        code, detail = self._run(["mount", "-o", f"remount,{'rw' if rw else 'ro'},{MOUNT_FLAGS}", card.mount],
+                                 card.mount, "sync_failed" if not rw else "write_failed",
+                                 "No se pudo cambiar el modo de la tarjeta")
+        if code != 0:
             raise CardError("sync_failed" if not rw else "write_failed",
-                            "No se pudo cambiar el modo de la tarjeta", result.stderr.strip())
+                            "No se pudo cambiar el modo de la tarjeta", detail)
 
     def unmount(self, card: Card, strict: bool = False) -> None:
         """Unmount the card.
@@ -1408,12 +1455,24 @@ class Mounter:
         if not card.mount:
             return
         target = card.mount
-        result = subprocess.run(["umount", target], capture_output=True, text=True, check=False)
-        if result.returncode != 0:
+        self.reap()
+        # An earlier umount that ran past its bound may have finished since.
+        if target not in self.stalled and not self.mounted(target):
+            card.mount = None
+            return
+        try:
+            code, detail = self._run(["umount", target], target, "unmount_failed",
+                                     "No se pudo desmontar la tarjeta de forma segura")
+        except CardError:
+            if strict:
+                raise
+            code, detail = 1, ""
+        if code != 0:
             if strict:
                 raise CardError("unmount_failed", "No se pudo desmontar la tarjeta de forma segura",
-                                (result.stderr or result.stdout).strip() or f"umount exit {result.returncode}")
-            subprocess.run(["umount", "-l", target], capture_output=True, check=False)
+                                detail or f"umount exit {code}")
+            # The device is gone: a lazy detach does not wait on it.
+            subprocess.run(["umount", "-l", target], capture_output=True, check=False, timeout=MOUNT_TIMEOUT)
         card.mount = None
         try:
             Path(target).rmdir()
@@ -1889,6 +1948,8 @@ def main(argv=None) -> int:
         if args.rescan and time.monotonic() - last_rescan >= args.rescan:
             guarded("a device rescan", rescan)
             last_rescan = time.monotonic()
+        if manager.mounter.__dict__.get("stalled"):
+            guarded("ending stalled mount commands", manager.mounter.reap)
 
     manager.stop_shape()
     for card in list(manager.cards.values()):

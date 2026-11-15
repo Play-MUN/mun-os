@@ -51,7 +51,11 @@ xz -dc mun-os-<version>-radxa-dragon-q6a.img.xz | sudo dd of=/dev/DEVICE bs=4M c
 We write the eMMC from the vendor's system started from a microSD card, and
 read it back against the image. The board's firmware must start the eMMC
 before the slot for a card in the slot to be read as a Game Card and not
-booted. The board we use has firmware 6.0.251230 in its SPI flash.
+booted. The board we use has firmware 6.0.251230 in its SPI flash, as it
+came; we have not updated it. The profile boots through a plain boot entry
+rather than a unified kernel image because a report about a later firmware
+(6.0.260120) says that one restarts on such images; we have not tried
+either on this board.
 
 The image carries no SSH key: add yours to `/root/.ssh/authorized_keys` on
 the installed system. The wired network takes an address by DHCP, and SSH

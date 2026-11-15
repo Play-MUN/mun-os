@@ -53,7 +53,11 @@ Nosotros escribimos la eMMC desde el sistema del fabricante arrancado de
 una tarjeta microSD, y la leemos de vuelta contra la imagen. El firmware de
 la placa debe arrancar la eMMC antes que la ranura para que una tarjeta en
 la ranura se lea como Game Card y no se arranque. La placa que usamos tiene
-el firmware 6.0.251230 en su flash SPI.
+el firmware 6.0.251230 en su flash SPI, el que traía; no lo hemos
+actualizado. El perfil arranca con una entrada de arranque simple y no con
+una imagen de núcleo unificada porque un informe sobre un firmware posterior
+(6.0.260120) dice que este se reinicia con esas imágenes; no hemos probado
+ninguna de las dos cosas en esta placa.
 
 La imagen no lleva ninguna clave SSH: añade la tuya a
 `/root/.ssh/authorized_keys` en el sistema instalado. La red por cable toma

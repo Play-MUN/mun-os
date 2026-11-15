@@ -27,6 +27,17 @@ QtObject {
                  choose: choose, note: note || "" }
     }
     function unavailable(label) { return info(label, I18n.notAvailable) }
+    // Play (`play`) and Eject safely need the launcher. While it does not
+    // answer they do nothing: the option then says why, and what the player
+    // can do if the launcher does not come back by itself.
+    function needsLauncher(option, play) {
+        if (!LaunchClient.available)
+            option.note = play ? t("The console cannot start a game right now. If this does not pass by itself, turn the console off and on again.",
+                                   "La consola no puede iniciar un juego ahora mismo. Si no se resuelve sola, apágala y vuelve a encenderla.")
+                               : t("The console cannot eject the card safely right now. If this does not pass by itself, turn the console off before taking the card out.",
+                                   "La consola no puede retirar la tarjeta con seguridad ahora mismo. Si no se resuelve sola, apaga la consola antes de sacar la tarjeta.")
+        return option
+    }
 
     function build(key) {
         switch (key) {
@@ -69,9 +80,10 @@ QtObject {
             const info = CardClient.info
             const options = []
             if (info.kind === "game")
-                options.push(action(t("Play", "Jugar"), shell.launchable ? "" : shell.launchBlocker, shell.play, "", "launch"))
-            options.push(action(t("Eject safely", "Retirar con seguridad"),
-                                LaunchClient.releasePending ? t("Ejecting…", "Retirando…") : "", shell.eject))
+                options.push(needsLauncher(action(t("Play", "Jugar"), shell.launchable ? "" : shell.launchBlocker, shell.play, "", "launch"), true))
+            options.push(needsLauncher(action(t("Eject safely", "Retirar con seguridad"),
+                                              LaunchClient.releasePending ? t("Ejecting…", "Retirando…")
+                                              : LaunchClient.available ? "" : shell.launchBlocker, shell.eject), false))
             return {
                 kicker: kicker,
                 title: info.title || "Game Card",
@@ -133,7 +145,7 @@ QtObject {
                 text: shell.hasGame ? t("Right now you have " + title + " at hand.", "Ahora mismo tienes a mano " + title + ".")
                                     : t("Nothing here yet. Your games travel on their MUN Disks.",
                                         "Todavía no hay nada aquí. Tus juegos viajan en sus MUN Disk."),
-                options: shell.hasGame ? [action(title, shell.launchable ? t("Play", "Jugar") : shell.launchBlocker, shell.play, "", "launch")] : []
+                options: shell.hasGame ? [needsLauncher(action(title, shell.launchable ? t("Play", "Jugar") : shell.launchBlocker, shell.play, "", "launch"), true)] : []
             }
         return {
             kicker: t("MY GAMES", "MIS JUEGOS"),
@@ -141,7 +153,7 @@ QtObject {
             text: shell.hasGame ? t("Right now you have " + title + " at hand.", "Ahora mismo tienes a mano " + title + ".")
                                 : t("There are no games on the console. Your games live on their Game Cards.",
                                     "No hay ningún juego en la consola. Tus juegos viven en sus Game Cards."),
-            options: shell.hasGame ? [action(title, shell.launchable ? t("Play", "Jugar") : shell.launchBlocker, shell.play, "", "launch")] : []
+            options: shell.hasGame ? [needsLauncher(action(title, shell.launchable ? t("Play", "Jugar") : shell.launchBlocker, shell.play, "", "launch"), true)] : []
         }
     }
 

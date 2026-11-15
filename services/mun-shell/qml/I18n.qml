@@ -87,6 +87,7 @@ QtObject {
             "card_in_use": "A game session is using the card.",
             "busy": "A game is already running.",
             "reader_unavailable": "The card reader is not available.",
+            "launcher_unavailable": "The console lost contact with its launcher. Try again in a moment.",
             "card_mismatch": "The card changed. Try again.",
             "not_runnable": "The card has no game this console can run.",
             "prepare_failed": "The game could not be prepared."

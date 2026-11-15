@@ -31,6 +31,10 @@ function functionText(source, name, indent, from = 0) {
     const end = source.indexOf("\n" + pad + "}\n", at);
     if (at < 0 || end < 0)
         throw new Error("no function " + name + " at " + indent + " spaces");
+    // Written on one line, or over several down to its closing brace.
+    const line = source.slice(at + 1, source.indexOf("\n", at + 1));
+    if (line.endsWith("}"))
+        return line;
     return source.slice(at + 1, end + pad.length + 2);
 }
 
@@ -278,8 +282,84 @@ function awakeChecks() {
     check("neither Home nor the start-up's layer: not awake", h.awake() === false);
 }
 
+// ---------------------------------------------------------------- what the panels say
+
+// I18n.qml's own functions, in one of the interface's two languages.
+function i18n(spanish) {
+    const source = qml("I18n.qml");
+    const object = { spanish: spanish, notAvailable: spanish ? "No disponible todavía" : "Not available yet" };
+    for (const name of ["t", "serviceText", "launchError", "savesText"])
+        object[name] = bind(object, functionText(source, name, 4));
+    return object;
+}
+
+// Panels.qml's own card() and games() for a valid Game Card with a game,
+// against a launcher that answers (idle or busy) or does not.
+function panels({ spanish = false, launcher = "idle", orbital = true }) {
+    const source = qml("Panels.qml");
+    const main = qml("Main.qml");
+    const LaunchClient = { available: launcher !== "down", state: launcher === "busy" ? "running" : "idle", releasePending: false };
+    const I18n = i18n(spanish);
+    const shell = { orbital: orbital, cardMode: "valid", hasGame: true, play() {}, eject() {}, LaunchClient: LaunchClient, I18n: I18n };
+    shell.launchable = LaunchClient.available && LaunchClient.state === "idle";
+    // What Main.qml says in Play's place when it cannot be pressed.
+    shell.launchBlocker = bind(shell, "function () { return " + /property string launchBlocker: ([^\n]+)\n/.exec(main)[1] + " }")();
+    const object = {
+        shell: shell, I18n: I18n, LaunchClient: LaunchClient,
+        CardClient: { info: { kind: "game", title: "MUN Collect" }, waitingCount: 0 },
+        Shape: { source: "" }
+    };
+    for (const name of ["t", "action", "waitingText", "shapeText", "needsLauncher", "card", "games"]) {
+        if (source.indexOf("\n    function " + name + "(") >= 0)
+            object[name] = bind(object, functionText(source, name, 4));
+    }
+    return object;
+}
+
+function panelChecks() {
+    for (const spanish of [false, true]) {
+        const language = spanish ? "Spanish" : "English";
+        const restart = spanish ? /apágala y vuelve a encenderla/ : /turn the console off and on again/;
+        const off = spanish ? /apaga la consola antes de sacar la tarjeta/ : /turn the console off before taking the card out/;
+
+        let options = panels({ spanish: spanish, launcher: "down" }).card().options;
+        const [play, eject] = options;
+        check(language + ": the launcher does not answer: Play says it is unavailable, and why and what to do",
+              play.value === (spanish ? "No disponible" : "Unavailable") && restart.test(play.note), JSON.stringify(play));
+        check(language + ": and Eject safely, which would do nothing, says so too",
+              eject.value === (spanish ? "No disponible" : "Unavailable") && off.test(eject.note), JSON.stringify(eject));
+        for (const orbital of [true, false]) {
+            options = panels({ spanish: spanish, launcher: "down", orbital: orbital }).games().options;
+            check(language + ": the same under " + (orbital ? "Universe" : "My games"),
+                  options.length === 1 && options[0].value === (spanish ? "No disponible" : "Unavailable") && restart.test(options[0].note),
+                  JSON.stringify(options));
+        }
+
+        options = panels({ spanish: spanish }).card().options;
+        check(language + ": the launcher idle: Play and Eject safely say nothing more",
+              options.length === 2 && options.every((option) => option.value === "" && option.note === ""), JSON.stringify(options));
+        options = panels({ spanish: spanish, launcher: "busy" }).card().options;
+        check(language + ": the launcher busy: Play says so, with no advice to restart",
+              options[0].value === (spanish ? "Ocupada" : "Busy") && options[0].note === "" && options[1].note === "",
+              JSON.stringify(options));
+    }
+
+    // The shell's own refusal when the launcher is lost during a safe
+    // release (src/launchclient.cpp): its words in Spanish, its meaning in
+    // English, never Spanish words in the English interface.
+    const lost = /emit releaseFinished\(false, QStringLiteral\("([a-z_]+)"\), QStringLiteral\("([^"]+)"\)\)/
+        .exec(fs.readFileSync(path.join(__dirname, "..", "src", "launchclient.cpp"), "utf8"));
+    const error = { code: lost[1], message: lost[2] };
+    check("English: the launcher lost during a safe release is said in English",
+          /^The console lost contact with its launcher\./.test(i18n(false).launchError(error)), i18n(false).launchError(error));
+    check("Spanish: and in the shell's own words", i18n(true).launchError(error) === lost[2], i18n(true).launchError(error));
+    check("English: a refusal the interface knows keeps its text",
+          i18n(false).launchError({ code: "busy", message: "Ya hay un juego en marcha" }) === "A game is already running.");
+}
+
 startUpChecks();
 awakeChecks();
+panelChecks();
 
 console.log("interface logic: " + passed + " passed, " + failed + " failed");
 process.exit(failed === 0 ? 0 : 1);

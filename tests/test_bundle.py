@@ -230,6 +230,23 @@ class GetTests(Fixture):
             self.get(source, name="mine")
 
 
+    def test_a_build_name_that_is_not_a_name_is_refused_and_nothing_is_written(self):
+        source = self.bundle()
+        builds = self.root / "deep" / "er" / "installed"
+        for name in ("../../../escaped", str(self.root / "absolute"), "a/b", "..", ".hidden", "UPPER", "-dash",
+                     "x" * 17, "a"):
+            with self.subTest(name=name):
+                with self.assertRaises(bundle.BundleError) as refused:
+                    bundle.get(str(source), builds, self.root / "cards", name, report=self.report)
+                self.assertIn("build name", str(refused.exception))
+        self.assertFalse((self.root / "escaped").exists() or (self.root / "absolute").exists(),
+                         "nothing is installed outside the builds")
+        self.assertFalse((self.root / "deep").exists(), "nothing is fetched for a refused name")
+        self.assertFalse((self.root / "cards").exists())
+        build, _ = bundle.get(str(source), builds, self.root / "cards", "mine-2", report=self.report)
+        self.assertEqual(build, builds / "mine-2")
+
+
 class ManifestTests(Fixture):
     def manifest(self):
         return json.loads((self.bundle() / "release.json").read_text())

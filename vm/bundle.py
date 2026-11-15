@@ -50,6 +50,7 @@ MANIFEST = "release.json"
 MANIFEST_LIMIT = 1 << 20                       # bytes; a manifest is a few kilobytes
 FILE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 CARD_NAME = re.compile(r"[a-z0-9][a-z0-9_-]{0,15}")
+BUILD_NAME = re.compile(r"[a-z0-9][a-z0-9-]{1,15}")        # as vm/mundev.py names a build
 DIGEST = re.compile(r"[0-9a-f]{64}")
 KINDS = ("image", "build-info", "card", "licence")
 CHUNK = 1 << 20
@@ -342,6 +343,10 @@ def get(location: str, builds_root: Path, cards_root: Path, name: Optional[str] 
         report: Callable[[str], None] = print) -> Tuple[Path, List[Path]]:
     """Fetch the bundle at `location`, verify every file and install it as
     build `name`. Returns the build directory and the cards unpacked."""
+    # The name becomes a directory under builds_root: a name, never a path.
+    if name is not None and not BUILD_NAME.fullmatch(name):
+        raise BundleError(f"build name {name!r} not allowed: 2-16 lowercase letters, digits or '-', starting "
+                          "with a letter or digit")
     source = Source(location)
     if source.insecure:
         report("warning: plain http: the manifest is not protected in transit; use https except for a local test")

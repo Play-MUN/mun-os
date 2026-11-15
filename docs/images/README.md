@@ -36,6 +36,14 @@ How they were taken:
   as a player would. Scaled to 1600×900 and saved as JPEG; nothing was
   drawn over them or retouched.
 
+One image was taken again later: `home-sea.es.jpg`, on 2026-11-15, from
+build `20261115T145925Z-3f136840027e` of commit
+`3f136840027eecd97f545a93fac7330abfe73c50` (image SHA-256
+`4d394ae90bfda6e23789bd3d7a6cad09f417a718b717636e461066bff7ee8ef5`), in the
+same way and with that build's own `collect-sea` card. The earlier one
+caught the scene at a moment when its light was faint and a shoal of fish
+crossed the panel's text.
+
 The time in the top bar is the guest's clock. In the two languages the
-pictures were taken minutes apart: the moving scenes are not at the same
-instant.
+pictures were taken minutes apart, `home-sea.es.jpg` a day later: the
+moving scenes are not at the same instant.

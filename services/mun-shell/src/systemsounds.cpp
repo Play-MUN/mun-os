@@ -164,9 +164,12 @@ SystemSounds::~SystemSounds()
     // A device that takes samples and never drains holds the worker in its
     // write, where no flag reaches it (measured with a sink nobody read: the
     // shell asked for a new resolution sat in join() with its screen black).
-    // The shell is leaving, for a new resolution or a stop: it waits a moment
-    // and goes without the worker rather than for ever. Leaving ends the
-    // process, the blocked thread with it.
+    // The shell is leaving, for a new resolution or a stop. If after a moment
+    // the worker is still in that write, the shell goes without it: leaving
+    // ends the process, the blocked thread with it. Only that write is
+    // covered. A worker held in another ALSA call that never returns
+    // (reproduced with a stand-in for one, not observed on a board) is
+    // waited for, without a bound.
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
     while (!m_finished && std::chrono::steady_clock::now() < deadline)
         std::this_thread::sleep_for(std::chrono::milliseconds(10));

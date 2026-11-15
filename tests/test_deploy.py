@@ -3,6 +3,8 @@ image build runs. Run for real into temporary directories; no root, packages
 or systemd are needed."""
 
 import os
+import re
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -53,6 +55,50 @@ class StagingTests(unittest.TestCase):
                 self.stage(src / "deploy" / "stage.sh", src, tmp)
                 records.append((Path(tmp) / "opt/mun/launchd/BUILD-INFO").read_text())
         self.assertEqual(records[0], records[1])
+
+    def test_the_shell_record_covers_every_directory_compiled_into_it(self):
+        # The binary embeds its QML, fonts, sounds, images and shaders: a
+        # change in any of them is another shell, and its record says so.
+        src = ROOT / "services" / "mun-shell"
+        listed = re.findall(r"^\s+([a-z]+)/([\w./-]+)\s*$", (src / "CMakeLists.txt").read_text(), flags=re.MULTILINE)
+        compiled = {}
+        for directory, rest in listed:
+            compiled.setdefault(directory, f"{directory}/{rest}")
+        self.assertLessEqual({"src", "qml", "fonts", "sounds", "images", "shaders"}, set(compiled))
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            copy = tmp / "mun-shell"
+            shutil.copytree(src, copy, ignore=shutil.ignore_patterns("tests"))
+            build = tmp / "build"
+            build.mkdir()
+            (build / "CMakeCache.txt").write_text("MUN_BUILD_ID:STRING=test\n")
+            # The compiled shell is not needed for its record: `cmake --install`
+            # is replaced by what it leaves for the script, the prefix.
+            tools = tmp / "bin"
+            tools.mkdir()
+            (tools / "cmake").write_text('#!/bin/sh\nmkdir -p "$DESTDIR/opt/mun/shell"\n')
+            (tools / "cmake").chmod(0o755)
+            environment = dict(os.environ, PATH=f"{tools}{os.pathsep}{os.environ['PATH']}")
+
+            def record(name):
+                dest = tmp / name
+                result = subprocess.run(["sh", str(copy / "deploy" / "stage.sh"), str(copy), str(build), str(dest)],
+                                        capture_output=True, text=True, env=environment)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                text = (dest / "opt/mun/shell/BUILD-INFO").read_text()
+                self.assertRegex(text, r"source_sha256=[0-9a-f]{64}\n")
+                return text
+
+            unchanged = record("first")
+            self.assertEqual(record("again"), unchanged, "the same sources give the same record")
+            for directory, file in sorted(compiled.items()):
+                with self.subTest(directory=directory):
+                    original = (copy / file).read_bytes()
+                    (copy / file).write_bytes(original + b"\n")
+                    try:
+                        self.assertNotEqual(record(f"changed-{directory}"), unchanged, f"{file} changed")
+                    finally:
+                        (copy / file).write_bytes(original)
 
     def test_reset_files_land_under_destdir_only(self):
         with tempfile.TemporaryDirectory() as tmp:

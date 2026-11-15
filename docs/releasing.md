@@ -155,9 +155,10 @@ gh workflow run hosts.yml --ref <branch> -f draft=v0.1.0-dev.2
 
 The Hosts workflow takes the draft's bundle and, on macOS, Linux (x86_64,
 ARM64) and Windows (x86_64, ARM64), runs the same two checks as step 5 and,
-on Windows, those of the console's control channel. Only one job of it
-reads the draft, which needs write access; it hands the bundle to the
-others, which keep read-only access. When every host passes, publish the
+on Windows, those of the console's control channel. Reading a draft needs
+write access: each job reads it itself, the token goes to that download
+alone, and nothing of the draft is kept in the run, whose artifacts anyone
+signed in to GitHub could download. When every host passes, publish the
 draft as it is, and its tag is created at `<commit>`:
 
 ```sh

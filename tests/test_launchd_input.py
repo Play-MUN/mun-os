@@ -6,10 +6,13 @@ the launcher."""
 import contextlib
 import io
 import json
+import os
 import shutil
 import socket
 import sys
 import tempfile
+import time
+import tracemalloc
 import unittest
 import zlib
 from pathlib import Path
@@ -214,6 +217,70 @@ class SaveUnitSessionTests(unittest.TestCase):
         self.write(h, "save-0001.sav", latin)
         h.advance(0.5)
         self.assertEqual((h.saves[-1][0]["payload_kind"], h.m.sync.omitted), ("files", []))
+
+
+MIB = 1024 * 1024
+
+
+class SaveUnitCostTests(directory_saves.SyncCase):
+    """What checking one unit may cost the launcher, whatever the unit holds."""
+
+    MARKUP = b"<a b='1'/>"
+
+    def checked(self, check: str, unit: bytes, *limit) -> "tuple":
+        tracemalloc.start()
+        started = time.monotonic()
+        try:
+            problem = launchd.unit_check(check, unit, *limit)
+            return problem, tracemalloc.get_traced_memory()[1], time.monotonic() - started
+        finally:
+            tracemalloc.stop()
+
+    def test_a_small_unit_that_inflates_to_64_mib_of_markup_is_refused_cheaply(self):
+        unit = zlib.compress(self.MARKUP * ((64 * MIB - 64) // len(self.MARKUP)), 9)
+        self.assertLess(len(unit), 160 * 1024, "inside every bound a card may declare")
+        problem, peak, seconds = self.checked("zlib-xml", unit)
+        self.assertIn("límite", problem or "accepted")
+        self.assertLess(peak, 64 * MIB, f"peak {peak / MIB:.0f} MiB in {seconds:.1f} s")
+
+    def test_the_largest_xml_a_unit_may_hold_is_checked_without_building_a_document(self):
+        body = self.MARKUP * (launchd.XML_INFLATE_LIMIT // len(self.MARKUP))
+        plain = self.MARKUP * (8 * MIB // len(self.MARKUP))        # the most a card may declare
+        for check, unit in (("zlib-xml", zlib.compress(body, 1)), ("xml", plain)):
+            with self.subTest(check):
+                problem, peak, seconds = self.checked(check, unit)
+                self.assertIsNone(problem)
+                self.assertLess(peak, 3 * launchd.XML_INFLATE_LIMIT, f"peak {peak / MIB:.0f} MiB in {seconds:.1f} s")
+        self.assertIn("XML incompleto", launchd.unit_check("zlib-xml", zlib.compress(plain + b"<a><b></a>", 1)),
+                      "and what it holds is still read to its end")
+        self.assertIn("límite", launchd.unit_check("zlib-xml", zlib.compress(body + self.MARKUP, 1)))
+
+    def test_saves_of_the_size_real_engines_write_still_pass(self):
+        rows = "".join(f'<Entity id="{n}" x="{n * 3.5:.2f}" y="{n * 1.25:.2f}" state="idle"><Flag name="seen{n}" v="1"/>'
+                       f"<Note>caf\u00e9 &amp; t\u00e9 {n}</Note></Entity>\n" for n in range(4000)).encode("utf-8")
+        save = b"<?xml version='1.0' encoding='UTF-8'?>\n<Version major='1'/>\n<World>" + rows + b"</World>\n\0"
+        self.assertGreater(len(save), 400 * 1024)
+        self.assertIsNone(launchd.unit_check("zlib-xml", zlib.compress(save)))
+        self.assertIsNone(launchd.unit_check("xml", save))
+        thumbnail = zlib.compress(bytes(4 * MIB + 18))            # a 1024x1024 RGBA picture, all black
+        self.assertLess(len(thumbnail), 8192)
+        self.assertIsNone(launchd.unit_check("zlib", thumbnail))
+
+    def test_a_unit_may_inflate_only_so_far_beyond_what_the_card_declared_for_its_saves(self):
+        self.assertEqual(launchd.inflate_limit(8 * MIB), launchd.INFLATE_LIMIT, "the absolute bound")
+        small = launchd.inflate_limit(4096)
+        self.assertLess(small, MIB)
+        self.assertIsNone(launchd.unit_check("zlib", zlib.compress(bytes(small)), small))
+        self.assertIn("límite", launchd.unit_check("zlib", zlib.compress(bytes(small + 1)), small))
+        # In a session: the unit is not complete, so it is left out and reported.
+        self.sync = launchd.DirectorySync("s1", dict(directory_saves.SPEC, max_bytes=4096), self.dest, os.getuid(),
+                                          os.getgid(), self.host, lambda *sent: self.sent.append(sent),
+                                          wall=lambda: self.clock[0], inotify_factory=lambda: self.watch,
+                                          root_ids=(os.getuid(), os.getgid()), lease=self.host.lease)
+        self.prepare()
+        self.game_writes("screen-0000.zsc", zlib.compress(bytes(small + 1)))
+        self.sync.poll()
+        self.assertEqual((self.sent, self.sync.omitted), ([], ["screen-0000.zsc"]))
 
 
 if __name__ == "__main__":

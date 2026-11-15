@@ -35,10 +35,10 @@ import threading
 import time
 import traceback
 import uuid
-import xml.etree.ElementTree as ElementTree
 import zlib
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
+from xml.parsers import expat
 
 PROTOCOL = 1
 SOCKET_PATH = Path(os.environ.get("MUN_LAUNCHD_SOCKET", "/run/mun/launchd.sock"))
@@ -860,7 +860,16 @@ WATCH_MASK = (IN_MODIFY | IN_CLOSE_WRITE | IN_CREATE | IN_DELETE | IN_MOVED_FROM
 UNIT_CHECKS = ("zlib-xml", "zlib", "xml", "any")
 DIRECTORY_SAVES_MAX_BYTES = 8 * 1024 * 1024   # the card format's ceiling (validator)
 MAX_UNIT_FILES = 64                           # the card service's ceiling per snapshot
-INFLATE_LIMIT = 64 * 1024 * 1024              # a unit that inflates beyond this is not a save
+# How far a unit may inflate and still be a save. The launcher inflates every
+# unit of every capture on its own loop, so the work is bounded twice: by a
+# multiple of what the card declared for all its saves, and absolutely. XML
+# is also read in full, so it has a bound of its own. The figures leave a
+# wide margin over what was measured from an engine: saves of a few hundred
+# KiB of XML, and a thumbnail of 4 MiB that inflates five times, or over a
+# thousand times when the picture is black.
+INFLATE_LIMIT = 64 * 1024 * 1024
+INFLATE_FACTOR = 64
+XML_INFLATE_LIMIT = 16 * 1024 * 1024
 DIRECTORY_SAVE_SCHEMA = 1
 _SEGMENT = re.compile(r"[A-Za-z0-9._-]{1,128}")
 _UNIT_PATTERN = re.compile(r"[A-Za-z0-9._*-]{1,64}")
@@ -924,11 +933,24 @@ class Inotify:
             self.fd = -1
 
 
-def unit_check(check: str, data: bytes) -> Optional[str]:
-    """Why `data` is not one complete unit under `check` (docs/saves.md), or None."""
+def inflate_limit(max_bytes: int) -> int:
+    """How far a unit may inflate on a card that declares `max_bytes` for its saves."""
+    return min(INFLATE_LIMIT, INFLATE_FACTOR * max_bytes)
+
+
+_XML_SPACE = re.compile(rb"[ \t\n\r\x0b\x0c]*")
+
+
+def unit_check(check: str, data: bytes, limit: int = INFLATE_LIMIT) -> Optional[str]:
+    """Why `data` is not one complete unit under `check` (docs/saves.md), or
+    None. `limit` is how far it may inflate (inflate_limit()). Never raises
+    for what `data` holds, and its memory is bounded by the limits: the
+    inflated bytes of an XML unit once, of any other unit a step at a time."""
     if check == "any":
         return None
     if check in ("zlib", "zlib-xml"):
+        if check == "zlib-xml":
+            limit = min(limit, XML_INFLATE_LIMIT)
         # Inflate in bounded steps and keep the output only when XML follows:
         # a thumbnail inflates to 4 MiB and is checked for its end marker only.
         inflater, pending, total, parts = zlib.decompressobj(), data, 0, []
@@ -936,7 +958,7 @@ def unit_check(check: str, data: bytes) -> Optional[str]:
             while True:
                 chunk = inflater.decompress(pending, 1 << 20)
                 total += len(chunk)
-                if total > INFLATE_LIMIT:
+                if total > limit:
                     return "se descomprime más allá del límite"
                 if check == "zlib-xml":
                     parts.append(chunk)
@@ -952,27 +974,33 @@ def unit_check(check: str, data: bytes) -> Optional[str]:
         if check == "zlib":
             return None
         data = b"".join(parts)
+        del parts
+    # The document is read where it lies, by position: no second copy of it.
     # Some engines write their XML with the C string terminator (measured on
     # one: a NUL at the very end); their own loaders stop there, so one final
     # NUL is not part of the document. A NUL anywhere else still fails the parse.
-    if data.endswith(b"\0"):
-        data = data[:-1]
-    # Some games' files have several top-level elements: wrap them in one
-    # root, after the XML declaration if there is one (it must stay first).
-    text, declaration = data, b""
-    if text.startswith(b"\xef\xbb\xbf"):
-        declaration, text = text[:3], text[3:]
-    if text.lstrip().startswith(b"<?xml"):
-        text = text.lstrip()
-        end = text.find(b"?>")
-        if end < 0:
+    end = len(data) - 1 if data.endswith(b"\0") else len(data)
+    # Some games' files have several top-level elements: they are wrapped in
+    # one root, after the XML declaration if there is one (it must stay first).
+    start = 3 if data.startswith(b"\xef\xbb\xbf") else 0
+    declared = _XML_SPACE.match(data, start, end).end()
+    body = start
+    if data.startswith(b"<?xml", declared, end):
+        body = data.find(b"?>", declared, end) + 2
+        if body < 2:
             return "declaración XML incompleta"
-        declaration, text = declaration + text[:end + 2], text[end + 2:]
-    if b"<!DOCTYPE" in text or b"<!ENTITY" in text:
+    if data.find(b"<!DOCTYPE", body, end) >= 0 or data.find(b"<!ENTITY", body, end) >= 0:
         return "XML con declaraciones no admitidas"
+    # Well-formedness only: the parser is given no handlers, so it builds
+    # nothing (a document tree of a unit made of millions of empty elements
+    # took gigabytes), and with the document inside a root element of ours
+    # no document type can be declared, so there are no entities to expand.
+    view, parser = memoryview(data), expat.ParserCreate(None, "}")
     try:
-        ElementTree.fromstring(declaration + b"<mun-unit>" + text + b"</mun-unit>")
-    except ElementTree.ParseError as exc:
+        for piece in (view[:start], view[declared:body] if body > start else b"", b"<mun-unit>", view[body:end]):
+            parser.Parse(piece, False)
+        parser.Parse(b"</mun-unit>", True)
+    except expat.ExpatError as exc:
         return f"XML incompleto o dañado ({exc})"
     except (LookupError, ValueError) as exc:
         # The declaration names an encoding the parser cannot read: it knows
@@ -1033,6 +1061,7 @@ class DirectorySync:
         self.host, self.sender, self.wall, self.inotify_factory = host, sender, wall, inotify_factory
         self.patterns = list(zip(spec["units"], spec["checks"]))
         self.max_bytes = int(spec["max_bytes"])
+        self.inflate_limit = inflate_limit(self.max_bytes)
         self.sync_dir = dest / "sync"
         self.dir_fd = -1
         self.watch: Optional["Inotify"] = None
@@ -1209,7 +1238,7 @@ class DirectorySync:
                 return "la partida supera el tamaño declarado", {}
             if len(data) != entry.get("size") or hashlib.sha256(data).hexdigest() != entry.get("sha256"):
                 return f"{name}: tamaño o huella no coinciden", {}
-            problem = unit_check(check, data)
+            problem = unit_check(check, data, self.inflate_limit)
             if problem:
                 return f"{name}: {problem}", {}
             files[name] = data
@@ -1345,7 +1374,7 @@ class DirectorySync:
         carried, omitted = [], []
         for name, data in found.items():
             check = self.unit_pattern(name) or "any"
-            problem = "no es un archivo normal" if data is None else unit_check(check, data)
+            problem = "no es un archivo normal" if data is None else unit_check(check, data, self.inflate_limit)
             if problem is None:
                 snapshot[name] = data
             elif name in previous:

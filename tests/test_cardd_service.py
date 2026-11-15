@@ -67,7 +67,9 @@ class RunningService:
         test.addCleanup(self.stop)
         waited = threading.Event()
         for _ in range(500):
-            if self.control.exists() and (not self.devices or self.card()):
+            # The control socket exists before the udev monitor is started:
+            # events can be delivered only once main() has handed over its callback.
+            if self.control.exists() and self.udev is not None and (not self.devices or self.card()):
                 return
             if not self.thread.is_alive():
                 break

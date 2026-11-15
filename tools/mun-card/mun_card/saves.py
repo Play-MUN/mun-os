@@ -119,10 +119,12 @@ def unit_check(check: str, data: bytes, limit: int = INFLATE_LIMIT) -> Optional[
         return f"XML incompleto o dañado ({exc})"
     except (LookupError, ValueError) as exc:
         # The declaration names an encoding the parser cannot read: it knows
-        # UTF-8, UTF-16, US-ASCII and ISO-8859-1 itself and takes any other
+        # UTF-8, US-ASCII and ISO-8859-1 itself and takes any other
         # single-byte encoding from Python's codecs; a name they do not have
         # is a LookupError there and a multibyte encoding (Shift-JIS, EUC-JP)
-        # a ValueError. Such a unit cannot be shown to be complete.
+        # a ValueError. Such a unit cannot be shown to be complete. (UTF-16,
+        # which the parser also knows, never gets this far: the unit is
+        # checked inside a root element written in ASCII, so it is malformed.)
         return f"codificación XML no admitida ({exc})"
     return None
 

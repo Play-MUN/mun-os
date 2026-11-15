@@ -37,9 +37,8 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple, Union
 
 # A control address: a UNIX socket path, or a loopback (host, port).
-Address = Union[Path, Tuple[str, int]]
+Address = Path   # a UNIX socket, on every host (connect())
 
-LOOPBACK = "127.0.0.1"
 
 
 class HostError(Exception):
@@ -62,10 +61,6 @@ class Host:
 
     @property
     def daemonizes(self) -> bool:
-        return self.system != "windows"
-
-    @property
-    def unix_sockets(self) -> bool:
         return self.system != "windows"
 
     # QEMU locks image files on macOS and Linux; its Windows file driver has
@@ -350,37 +345,66 @@ def local_timezone(host: Host, environ: Optional[Dict[str, str]] = None,
 
 # --------------------------------------------------------------- control channel
 
-def free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        probe.bind((LOOPBACK, 0))
-        return probe.getsockname()[1]
-
+#
+# QMP and qemu-ga listen on UNIX sockets on every host. Whoever connects to
+# QMP drives the guest and, through it, acts with this user's rights on the
+# host, so the channel must be closed to other users: a socket's file decides
+# who may connect, and it lies in a directory of this user's (munvm
+# socket_path). Windows has AF_UNIX since Windows 10 version 1803, and QEMU
+# listens on it there since 7.2; a loopback TCP port, which any local process
+# of any user can reach, is not used.
 
 def qmp_option(address: Address) -> str:
-    if isinstance(address, Path):
-        return f"unix:{address},server,nowait"
-    return f"tcp:{address[0]}:{address[1]},server=on,wait=off"
+    return f"unix:{address},server,nowait"
 
 
 def chardev_socket(chardev_id: str, address: Address) -> str:
-    if isinstance(address, Path):
-        return f"socket,id={chardev_id},path={address},server=on,wait=off"
-    return f"socket,id={chardev_id},host={address[0]},port={address[1]},server=on,wait=off"
+    return f"socket,id={chardev_id},path={address},server=on,wait=off"
 
 
 def connect(address: Address, timeout: float) -> socket.socket:
-    if isinstance(address, Path):
-        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        target: Union[str, Tuple[str, int]] = str(address)
-    else:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        target = address
+    if not hasattr(socket, "AF_UNIX"):
+        return _windows_unix_connect(address, timeout)
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     sock.settimeout(timeout)
     try:
-        sock.connect(target)
+        sock.connect(str(address))
     except OSError:
         sock.close()
         raise
+    return sock
+
+
+def _windows_unix_connect(path: Path, timeout: float) -> socket.socket:
+    """A stream connection to the AF_UNIX socket `path` on Windows. CPython's
+    socket module has no AF_UNIX there, so the connection is made through
+    Winsock and then handed to a socket object, which sends and receives on
+    any connected stream socket without looking at its addresses."""
+    import ctypes
+    af_unix, sock_stream = 1, 1
+    ws2 = ctypes.WinDLL("ws2_32", use_last_error=True)
+    ws2.socket.restype = ctypes.c_size_t                  # SOCKET is a UINT_PTR
+    ws2.socket.argtypes = (ctypes.c_int, ctypes.c_int, ctypes.c_int)
+    ws2.connect.argtypes = (ctypes.c_size_t, ctypes.c_void_p, ctypes.c_int)
+    ws2.closesocket.argtypes = (ctypes.c_size_t,)
+
+    class SockaddrUn(ctypes.Structure):
+        _fields_ = [("sun_family", ctypes.c_ushort), ("sun_path", ctypes.c_char * 108)]
+
+    encoded = str(path).encode("utf-8")
+    if len(encoded) >= 108:
+        raise OSError(f"{path} is longer than an AF_UNIX socket's path may be")
+    handle = ws2.socket(af_unix, sock_stream, 0)
+    if handle == ctypes.c_size_t(-1).value:
+        raise OSError(ctypes.get_last_error(), "this Windows has no AF_UNIX sockets: Windows 10 version 1803 or "
+                      "later is needed")
+    address = SockaddrUn(af_unix, encoded)
+    if ws2.connect(handle, ctypes.byref(address), ctypes.sizeof(address)) != 0:
+        error = ctypes.get_last_error()
+        ws2.closesocket(handle)
+        raise ConnectionRefusedError(error, f"nothing listens on {path}")
+    sock = socket.socket(fileno=handle)
+    sock.settimeout(timeout)
     return sock
 
 

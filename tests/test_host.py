@@ -46,6 +46,7 @@ class Fixture(unittest.TestCase):
     def guest_paths(self, on: host.Host):
         """A guest directory with the real file names, laid out as `on` would."""
         root = self.temporary()
+        self.enterContext(patch.dict(os.environ, {"LOCALAPPDATA": str(self.temporary())}))
         with patch.object(vm, "HOST", on):
             paths = vm.instance_paths(root)
         for key in ("system_disk", "efivars"):
@@ -283,9 +284,9 @@ class CommandLineTests(Fixture):
                                        return_value=["none", "cocoa", "gtk", "sdl", "coreaudio", "pipewire", "dsound", "wav"]))
         self.enterContext(patch.dict(os.environ, {"MUN_VM_ACCEL": ""}))
 
-    def command(self, on, display="none", audio=None, ports=None):
+    def command(self, on, display="none", audio=None):
         with patch.object(vm, "HOST", on):
-            return vm.qemu_command(display, audio, ports)
+            return vm.qemu_command(display, audio)
 
     def test_the_guest_is_given_the_hosts_time_zone(self):
         with patch.object(vm.host, "local_timezone", return_value="Europe/Madrid"):
@@ -308,20 +309,27 @@ class CommandLineTests(Fixture):
         self.assertEqual(pc[pc.index("-display") + 1], "gtk")
         self.assertIn(f"unix:{self.paths['qmp']},server,nowait", pc)
 
-    def test_windows_talks_over_loopback_ports(self):
-        cmd = self.command(WINDOWS, "none", "dsound", {"qmp": 40001, "qga": 40002})
-        self.assertIn("tcp:127.0.0.1:40001,server=on,wait=off", cmd)
-        self.assertIn("socket,id=qga0,host=127.0.0.1,port=40002,server=on,wait=off", cmd)
+    def test_windows_talks_over_unix_sockets_in_the_users_own_folder(self):
+        # A loopback TCP port can be reached by any local process of any user,
+        # and whoever reaches QMP drives the guest: never used.
+        local = self.temporary()
+        with patch.dict(os.environ, {"LOCALAPPDATA": str(local)}), patch.object(vm, "HOST", WINDOWS):
+            paths = vm.instance_paths(self.temporary())
+        self.paths.update(qmp=paths["qmp"], qga=paths["qga"])
+        cmd = self.command(WINDOWS, "none", "dsound")
+        self.assertTrue(str(paths["qmp"]).startswith(str(local / "mun" / "sockets")))
+        self.assertIn(f"unix:{paths['qmp']},server,nowait", cmd)
+        self.assertIn(f"socket,id=qga0,path={paths['qga']},server=on,wait=off", cmd)
+        self.assertFalse(any("tcp:" in part or "host=127.0.0.1" in part for part in cmd))
         self.assertIn("virt,accel=tcg,gic-version=max", cmd)
         self.assertNotIn("-daemonize", cmd)
-        self.assertFalse(any("unix:" in part for part in cmd))
 
     def test_the_rest_of_the_machine_is_the_same_everywhere(self):
         def devices(cmd):
             return [cmd[i + 1] for i, part in enumerate(cmd) if part == "-device"]
         reference = devices(self.command(MAC, audio="none"))
         for on in (LINUX_KVM, LINUX_PC, WINDOWS_ARM):
-            self.assertEqual(devices(self.command(on, audio="none", ports={"qmp": 1, "qga": 2})), reference, on.label)
+            self.assertEqual(devices(self.command(on, audio="none")), reference, on.label)
 
     def test_an_unknown_display_or_an_absent_backend_is_refused(self):
         with self.assertRaises(vm.LabError):
@@ -329,15 +337,21 @@ class CommandLineTests(Fixture):
         with patch.object(vm.host, "qemu_offers", return_value=["none", "wav"]), self.assertRaises(vm.LabError):
             self.command(LINUX_PC, audio="pipewire")
 
-    def test_the_windows_channel_is_read_back_from_the_guest_directory(self):
-        with patch.object(vm, "HOST", WINDOWS):
-            self.assertIsNone(vm.control_address(self.paths["qmp"]))
-            self.paths["control"].write_text(json.dumps({"qmp": 40001, "qga": 40002}))
-            self.assertEqual(vm.control_address(self.paths["qga"]), ("127.0.0.1", 40002))
-        with patch.object(vm, "HOST", MAC):
-            self.assertIsNone(vm.control_address(self.paths["qmp"]), "a UNIX socket that is not there")
-            self.paths["qmp"].touch()
-            self.assertEqual(vm.control_address(self.paths["qmp"]), self.paths["qmp"])
+    def test_the_channel_is_its_socket_while_the_socket_is_there(self):
+        for on in (MAC, WINDOWS):
+            with patch.object(vm, "HOST", on):
+                self.assertIsNone(vm.control_address(self.paths["qmp"]), "a UNIX socket that is not there")
+                self.paths["qmp"].touch()
+                self.assertEqual(vm.control_address(self.paths["qmp"]), self.paths["qmp"])
+                self.paths["qmp"].unlink()
+
+    def test_without_af_unix_in_python_the_connection_goes_through_winsock(self):
+        # CPython has no socket.AF_UNIX on Windows; host.connect then uses Winsock.
+        with patch.object(host, "socket") as module, \
+                patch.object(host, "_windows_unix_connect", return_value="connected") as winsock:
+            del module.AF_UNIX
+            self.assertEqual(host.connect(self.paths["qmp"], 3.0), "connected")
+        winsock.assert_called_once_with(self.paths["qmp"], 3.0)
 
 
 class Started:
@@ -366,7 +380,7 @@ class StartTests(Fixture):
         self.enterContext(patch.dict(os.environ, {"MUN_VM_ACCEL": ""}))
         self.enterContext(contextlib.redirect_stdout(io.StringIO()))
 
-    def test_windows_starts_detached_records_its_ports_and_says_it_emulates(self):
+    def test_windows_starts_detached_on_its_unix_sockets_and_says_it_emulates(self):
         started = []
         out = io.StringIO()
         with patch.object(vm, "HOST", WINDOWS), \
@@ -375,8 +389,8 @@ class StartTests(Fixture):
                 patch.object(vm.time, "monotonic", side_effect=itertools.count(0, 5)), \
                 contextlib.redirect_stdout(out):
             vm.cmd_start(argparse.Namespace(display="none", print_command=False, wait=0, audio="none"))
-        ports = json.loads(self.paths["control"].read_text())
-        self.assertIn(f"tcp:127.0.0.1:{ports['qmp']},server=on,wait=off", started[0])
+        self.assertIn(f"unix:{self.paths['qmp']},server,nowait", started[0])
+        self.assertFalse(any("tcp:" in part for part in started[0]))
         self.assertNotIn("-daemonize", started[0])
         self.assertEqual(self.paths["pidfile"].read_text().strip(), "4242")
         self.assertIn("emulated (TCG)", out.getvalue())

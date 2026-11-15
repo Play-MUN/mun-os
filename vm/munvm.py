@@ -81,7 +81,6 @@ PATHS = {
     "screens": _GUEST_ROOT / "screens",
     "audio": _GUEST_ROOT / "audio.wav",
     "lifecycle_lock": _GUEST_ROOT / "lifecycle.lock",
-    "control": _GUEST_ROOT / "control.json",
     "qemu_log": _GUEST_ROOT / "qemu.log",
 }
 
@@ -93,10 +92,20 @@ def socket_path(root: Path, name: str) -> Path:
     """A UNIX socket path QEMU can bind. macOS limits sun_path to 104 bytes
     (Linux to 108); a checkout in a deep directory would exceed it, so a long
     path moves to a private per-user directory named after the instance
-    directory. On Windows the path only names the loopback port recorded
-    next to it (see control_address)."""
+    directory. On Windows every socket goes to such a directory under the
+    user's local application data (host.connect)."""
     path = root / name
-    if len(str(path).encode()) <= 100 or not HOST.unix_sockets:
+    if HOST.system == "windows":
+        # A socket's file decides who may connect; a checkout may lie where
+        # other users can write. The user's own local application data folder
+        # is closed to them by default (host.connect).
+        base = os.environ.get("LOCALAPPDATA")
+        if not base:
+            raise LabError("LOCALAPPDATA is not set, and QEMU's control sockets go in this user's own folder there")
+        short = Path(base) / "mun" / "sockets" / hashlib.sha1(str(root).encode()).hexdigest()[:12]
+        short.mkdir(parents=True, exist_ok=True)
+        return short / name
+    if len(str(path).encode()) <= 100:
         return path
     short = Path(tempfile.gettempdir()) / f"mun-{os.getuid()}" / hashlib.sha1(str(root).encode()).hexdigest()[:12]
     # Whoever connects to QMP runs commands as this user, and on a shared
@@ -129,7 +138,6 @@ def instance_paths(root: Path) -> Dict[str, Path]:
         "screens": root / "screens",
         "audio": root / "audio.wav",
         "lifecycle_lock": root / "lifecycle.lock",
-        "control": root / "control.json",
         "qemu_log": root / "qemu.log",
     }
 
@@ -410,16 +418,9 @@ def clear_cards() -> None:
 
 def control_address(path: Path) -> Optional["host.Address"]:
     """Where QEMU listens for the channel `path` names (qmp.sock or
-    qga.sock): the UNIX socket itself, or on Windows the loopback port it was
-    started with, recorded next to it in control.json. None while nothing
-    listens there."""
-    if HOST.unix_sockets:
-        return path if path.exists() else None
-    try:
-        ports = json.loads((path.parent / "control.json").read_text())
-        return (host.LOOPBACK, int(ports[path.stem]))
-    except (OSError, ValueError, KeyError):
-        return None
+    qga.sock): the UNIX socket itself, or None while it is not there. (lexists:
+    on Windows a socket's file is a reparse point a stat does not follow.)"""
+    return path if os.path.lexists(path) else None
 
 
 class Qmp:
@@ -638,29 +639,14 @@ def default_window_audio() -> str:
     return host.default_audio(HOST, host.qemu_offers(which("qemu-system-aarch64"), "audiodev"))
 
 
-def control_ports() -> Dict[str, int]:
-    """Loopback ports for QMP and qemu-ga where there are no UNIX sockets:
-    those recorded for this guest if any, otherwise new ones."""
-    try:
-        ports = json.loads(PATHS["control"].read_text())
-        return {"qmp": int(ports["qmp"]), "qga": int(ports["qga"])}
-    except (OSError, ValueError, KeyError):
-        return {"qmp": host.free_port(), "qga": host.free_port()}
-
-
-def qemu_command(display: str, audio: Optional[str] = None, ports: Optional[Dict[str, int]] = None) -> List[str]:
+def qemu_command(display: str, audio: Optional[str] = None) -> List[str]:
     """The guest's machine: display, input, card slots and sound device, with
     no network interface (`-nic none`: the guest sees only `lo`) and qemu-ga's
     virtio-serial port as the host's only way in besides QMP. `display` is
-    `none` or `window` (the host's window backend); `ports` are the loopback
-    ports of a host without UNIX sockets."""
+    `none` or `window` (the host's window backend)."""
     qemu = which("qemu-system-aarch64")
-    if HOST.unix_sockets:
-        qmp: "host.Address" = Path(option_path(PATHS["qmp"]))
-        qga: "host.Address" = Path(option_path(PATHS["qga"]))
-    else:
-        ports = ports or control_ports()
-        qmp, qga = (host.LOOPBACK, ports["qmp"]), (host.LOOPBACK, ports["qga"])
+    qmp: "host.Address" = Path(option_path(PATHS["qmp"]))
+    qga: "host.Address" = Path(option_path(PATHS["qga"]))
     if display == "window":
         try:
             display = host.window_display(HOST, host.qemu_offers(qemu, "display"))
@@ -733,19 +719,16 @@ def cmd_start(args: argparse.Namespace) -> None:
         if not PATHS[key].exists():
             raise LabError(f"{PATHS[key]} missing; recreate the guest with `./mun dev run --guest {INSTANCE}`")
     audio = getattr(args, "audio", None)
-    ports = None if HOST.unix_sockets else {"qmp": host.free_port(), "qga": host.free_port()}
-    cmd = qemu_command(args.display, audio, ports)
+    cmd = qemu_command(args.display, audio)
     if args.print_command:
         print(" ".join(repr(part) if " " in part or "{" in part else part for part in cmd))
         return
     check_qemu()
     check_sound_device(audio)
-    for stale in (PATHS["qmp"], PATHS["qga"], PATHS["pidfile"], PATHS["control"]):
-        if stale.exists():
+    for stale in (PATHS["qmp"], PATHS["qga"], PATHS["pidfile"]):
+        if os.path.lexists(stale):
             stale.unlink()
     clear_cards()
-    if ports is not None:
-        write_json_atomically(PATHS["control"], ports)
     accel = accelerator()
     if accel == "tcg":
         print(f"{HOST.label}: the guest's ARM64 processor is emulated (TCG); it runs, more slowly than with "

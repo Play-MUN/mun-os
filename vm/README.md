@@ -33,21 +33,22 @@ What each host changes (`host.py`):
 | Window | `cocoa` | `gtk`, else `sdl` | `gtk`, else `sdl` |
 | Audible sound | `coreaudio` | `pipewire`, `pa`, `alsa`, `sdl` | `dsound`, `sdl` |
 | Background start | `-daemonize` | `-daemonize` | detached process; its output in `qemu.log` |
-| QMP and qemu-ga | UNIX sockets | UNIX sockets | loopback TCP ports chosen at start, in `control.json` |
+| QMP and qemu-ga | UNIX sockets | UNIX sockets | UNIX sockets in `%LOCALAPPDATA%\mun\sockets\` (Windows 10 version 1803 or later) |
 
 `MUN_VM_ACCEL=tcg` forces emulation on any host; `MUN_VM_FIRMWARE` names the
 firmware file; on Windows `MUN_QEMU_DIR` names QEMU's directory when it is
 neither on `PATH` nor in `Program Files\qemu`.
 
-On Windows the laboratory's two control channels, QMP and qemu-ga,
-are loopback TCP ports with no authentication and no file permissions. While
-a guest runs, any program of the computer, of any of its users, can connect
-to them: it can drive the guest (keys, cards, commands as root in it) and,
-through QMP, which makes QEMU open and write files, act on the host with the
-rights of the user who started the guest. Do not run a guest on a Windows
-computer you share with users or programs you do not trust. On macOS and
-Linux the channels are UNIX sockets, under the file permissions of the
-directory they are in.
+Whoever connects to QMP drives the guest (keys, cards, commands as root in
+it) and, since QMP makes QEMU open and write files, acts on the host with the
+rights of the user who started the guest. So both control channels, QMP and
+qemu-ga, are UNIX sockets on every host, and a socket's file decides who may
+connect. On macOS and Linux they are in the guest's directory, or in a
+directory of the user alone when that path is too long. On Windows they are
+always in the user's own `%LOCALAPPDATA%\mun\sockets\`, closed to other users
+by default, whatever folder the checkout is in: Windows has AF_UNIX since
+Windows 10 version 1803, QEMU listens on it there, and the tools connect to it
+through Winsock, since Python's own socket module has none there.
 
 A path of a guest's or a builder's files that contains a comma is refused
 before QEMU is started: QEMU's options are comma-separated fields and would
@@ -285,7 +286,7 @@ short tap: `send-key esc --hold 150` holds the key longer.
 | Display / input | `virtio-gpu-pci`; the development image gives it the EDID of a display that prefers 1920×1080 and takes 2560×1440 and 1280×720 (`drm.edid_firmware`, `os/builder/lab_edid.py`), so the shell's Resolution setting and the games see those modes as a television's; the window and screenshots follow the mode; `qemu-xhci` with `usb-kbd` and `usb-tablet`; `-display none` in the background, captured with QMP `screendump` |
 | Sound | `virtio-sound-pci`, playback only; backend `none`, `wav`, `off` or one of the host's audible ones |
 | Network | none |
-| Control | QMP and qemu-ga UNIX sockets in `.local/mun/guests/<name>/`, or in a directory of the user alone when that path is too long (unauthenticated loopback ports on Windows); serial console to `console.log` there |
+| Control | QMP and qemu-ga UNIX sockets in `.local/mun/guests/<name>/`, or in a directory of the user alone when that path is too long (on Windows, always in the user's own `%LOCALAPPDATA%\mun\sockets\`); serial console to `console.log` there |
 
 Generated files live under `.local/mun/` and `.local/gamecards/`, both ignored
 by Git. Never point the tool at a host physical disk; card images are plain

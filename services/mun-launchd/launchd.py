@@ -33,6 +33,7 @@ import struct
 import subprocess
 import threading
 import time
+import traceback
 import uuid
 import xml.etree.ElementTree as ElementTree
 import zlib
@@ -124,6 +125,25 @@ def card_naming(record: dict) -> str:
 
 def log(message: str) -> None:
     print(message, flush=True)
+
+
+def run_step(seen: set, what: str, step: Callable, *args) -> bool:
+    """Run one step of the launcher's work (a request, a callback, a tick) so
+    that an exception nobody expected stays that step's failure: False is
+    returned and the traceback is written to the journal, once for each place
+    it comes from, since a tick may fail the same way twice a second. The
+    launcher supervises a running game and holds the way back to the shell;
+    nothing that reaches one step may end it."""
+    try:
+        step(*args)
+        return True
+    except Exception as exc:  # noqa: BLE001 - the purpose is to outlive what was not foreseen
+        frame = traceback.extract_tb(exc.__traceback__)[-1]
+        fault = (what, type(exc).__name__, frame.filename, frame.lineno)
+        if fault not in seen:
+            seen.add(fault)
+            log(f"{what} failed, the launcher goes on; reported once:\n{traceback.format_exc().rstrip()}")
+        return False
 
 
 # ---------------------------------------------------------------- state machine
@@ -686,14 +706,20 @@ class ResultStore:
         if not self.path:
             return
         tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(self._current))
-        os.chmod(tmp, 0o640)
         try:
-            import grp
-            os.chown(tmp, 0, grp.getgrnam(SOCKET_GROUP).gr_gid)
-        except (KeyError, PermissionError, ImportError):
-            pass
-        tmp.replace(self.path)
+            tmp.write_text(json.dumps(self._current))
+            os.chmod(tmp, 0o640)
+            try:
+                import grp
+                os.chown(tmp, 0, grp.getgrnam(SOCKET_GROUP).gr_gid)
+            except (KeyError, PermissionError, ImportError):
+                pass
+            tmp.replace(self.path)
+        except OSError as exc:
+            # The file shares its file system with the game's writable
+            # directory, which the game can fill. The shell is told the result
+            # over the socket either way; only a launcher restart would lose it.
+            log(f"warning: the session result could not be written to {self.path}: {exc}")
 
 
 # ---------------------------------------------------------------- platform pieces
@@ -1229,10 +1255,11 @@ class DirectorySync:
             self._drain()
             if self.pending and self.in_flight is None and self.lost is None:
                 self._attempt(frozen=True)
-        except OSError as exc:
+        except Exception as exc:  # noqa: BLE001 - whatever it is, it is this capture's failure
             # The loop must go on; the failure is the player's to know.
             self.last_error = {"code": "save_failed", "message": "No se pudieron leer los archivos de partida", "detail": str(exc)}
-            log(f"session {self.sid}: save capture failed: {exc}")
+            log(f"session {self.sid}: save capture failed: {exc}"
+                + ("" if isinstance(exc, OSError) else "\n" + traceback.format_exc().rstrip()))
 
     # --- capture -------------------------------------------------------------
     def _read_units(self, check_writers: bool) -> "tuple[Dict[str, Optional[bytes]], bool, Optional[str]]":
@@ -1400,8 +1427,10 @@ class DirectorySync:
             self._final_captured = True
             try:
                 self._attempt(frozen=False)
-            except OSError as exc:
+            except Exception as exc:  # noqa: BLE001 - the session must still end, with this as its last save
                 self.last_error = {"code": "save_failed", "message": "No se pudieron leer los archivos de partida", "detail": str(exc)}
+                log(f"session {self.sid}: the last save capture failed: {exc}"
+                    + ("" if isinstance(exc, OSError) else "\n" + traceback.format_exc().rstrip()))
             if self.in_flight is not None:
                 return                    # _written() comes back here with the answer
         self._finish_final()
@@ -1908,6 +1937,13 @@ def stage_via_cardd(request: dict, reply: Callable[[dict], None]) -> None:
     threading.Thread(target=work, name="stage", daemon=True).start()
 
 
+def encode_line(message: dict) -> bytes:
+    """One message as a line for the shell or a game. A title or a detail
+    that came from a card or a game may hold half of a surrogate pair (JSON
+    can spell one), which UTF-8 cannot carry: it is replaced, not raised."""
+    return (json.dumps(message, ensure_ascii=False) + "\n").encode("utf-8", "replace")
+
+
 # ---------------------------------------------------------------- shell-facing socket
 
 class Server:
@@ -1917,6 +1953,7 @@ class Server:
         self.clients: Dict[socket.socket, LineReader] = {}
         self.listener: Optional[socket.socket] = None
         self.selector: Optional[selectors.BaseSelector] = None
+        self.faults: set = set()             # run_step()'s record of what was reported
 
     def drop(self, conn: socket.socket) -> None:
         """Forget a client everywhere: a closed fd number is reused by the next accept."""
@@ -1964,25 +2001,34 @@ class Server:
         for request in requests:
             if conn not in self.clients:
                 return False     # dropped while an earlier request was answered
-            if request.get("type") == "launch":
-                result = self.manager.launch(request)
-                if not result.get("accepted"):
-                    log(f"launch rejected: {result.get('error', {}).get('code')} (state {self.manager.state})")
-                self._send(conn, {"type": "launch_result", **result})
-                if result.get("accepted"):
-                    self.manager._emit()
-            elif request.get("type") == "ack":
-                self.manager.acknowledge()
-            elif request.get("type") == "status":
-                self._send(conn, self.manager.snapshot())
-            elif request.get("type") == "release":
-                refusal = self.manager.release_request(str(request.get("serial", "")))
-                if refusal is not None:
-                    self._send(conn, {"type": "released", **refusal})
-                else:
-                    stage_via_cardd({"type": "release", "serial": request.get("serial")},
-                                    lambda outcome, c=conn: self.manager.schedule(lambda: self._send(c, {"type": "released", **outcome})))
-        return True
+            if not run_step(self.faults, "shell request", self._request, conn, request):
+                # The shell waits for these two answers.
+                error = {"code": "launcher_error", "message": "El lanzador no pudo atender la petición"}
+                if request.get("type") == "launch":
+                    self._send(conn, {"type": "launch_result", "accepted": False, "error": error})
+                elif request.get("type") == "release":
+                    self._send(conn, {"type": "released", "ok": False, "error": error})
+        return conn in self.clients
+
+    def _request(self, conn: socket.socket, request: dict) -> None:
+        if request.get("type") == "launch":
+            result = self.manager.launch(request)
+            if not result.get("accepted"):
+                log(f"launch rejected: {result.get('error', {}).get('code')} (state {self.manager.state})")
+            self._send(conn, {"type": "launch_result", **result})
+            if result.get("accepted"):
+                self.manager._emit()
+        elif request.get("type") == "ack":
+            self.manager.acknowledge()
+        elif request.get("type") == "status":
+            self._send(conn, self.manager.snapshot())
+        elif request.get("type") == "release":
+            refusal = self.manager.release_request(str(request.get("serial", "")))
+            if refusal is not None:
+                self._send(conn, {"type": "released", **refusal})
+            else:
+                stage_via_cardd({"type": "release", "serial": request.get("serial")},
+                                lambda outcome, c=conn: self.manager.schedule(lambda: self._send(c, {"type": "released", **outcome})))
 
     def broadcast(self, message: dict) -> None:
         for conn in list(self.clients):
@@ -1990,7 +2036,7 @@ class Server:
 
     def _send(self, conn: socket.socket, message: dict) -> None:
         try:
-            conn.sendall((json.dumps(message, ensure_ascii=False) + "\n").encode("utf-8"))
+            conn.sendall(encode_line(message))
         except OSError:
             self.drop(conn)
 
@@ -2050,8 +2096,11 @@ def reconcile_sessions(runner: "Runner", manager: SessionManager, root: Path,
                 manager.adopt(sid, json.loads(session_file.read_text()))
                 adopted = sid
                 continue
-            except (OSError, ValueError):
-                pass
+            except Exception:  # noqa: BLE001 - whatever keeps it from being supervised, it is ended
+                log(f"session {sid}: could not be adopted; ending it\n{traceback.format_exc().rstrip()}")
+                if manager.sync is not None:
+                    manager.sync.close()
+                manager.session, manager.sync, manager.reader_lost_at, manager.state = None, None, None, "idle"
         runner.stop_unit(sid)
         if (root / sid).is_dir():
             record_interrupted(manager.results, sid, root / sid, status, notices.pop(sid, None))
@@ -2252,7 +2301,7 @@ def main(argv=None) -> int:
 
     def gate_send(conn: socket.socket, message: dict) -> None:
         try:
-            conn.sendall((json.dumps(message, ensure_ascii=False) + "\n").encode("utf-8"))
+            conn.sendall(encode_line(message))
         except OSError:
             pass
         gate_drop(conn)
@@ -2283,6 +2332,85 @@ def main(argv=None) -> int:
         selector.register(gate["listener"], selectors.EVENT_READ, "save-accept")
 
     manager.gate_open, manager.gate_close = gate_open, gate_close
+    faults: set = server.faults
+
+    def save_line(conn: socket.socket) -> None:
+        reader = gate["clients"].get(conn)
+        try:
+            data = conn.recv(65536)
+            requests = reader.feed(data) if (data and reader) else []
+        except (OSError, FrameTooLarge):
+            data = b""
+            requests = []
+        if not data:
+            gate_drop(conn)
+            return
+        for request in requests[:1]:   # one request per connection
+            if not run_step(faults, "save request", manager.save_request, gate["sid"], request,
+                            lambda message, c=conn: gate_send(c, message)):
+                gate_send(conn, {"type": "saved", "ok": False, "error": {
+                    "code": "save_failed", "message": "El lanzador no pudo atender el guardado"}})
+
+    def card_feed() -> None:
+        nonlocal cardd_sock
+        try:
+            data = cardd_sock.recv(1 << 20)
+            messages = cardd_reader.feed(data) if data else []
+        except FrameTooLarge as exc:
+            log(f"card service feed: {exc}; reconnecting for a fresh snapshot")
+            data = b""
+        except OSError:
+            data = b""
+        if not data:
+            selector.unregister(cardd_sock)
+            cardd_sock.close()
+            cardd_sock = None
+            cards.connected = False
+            manager.reader_disconnected()
+            return
+        for message in messages:
+            run_step(faults, "card service message", card_message, message)
+
+    def card_message(message: dict) -> None:
+        was_connected = cards.connected
+        removed = cards.apply(message)
+        if message.get("type") == "snapshot" and not was_connected:
+            manager.reader_reconnected()
+        elif message.get("type") == "card":
+            manager.card_changed()
+        if removed:
+            manager.card_removed(removed, message.get("insertion"))
+
+    def event(key: selectors.SelectorKey) -> None:
+        if key.data == "accept":
+            conn = server.accept()
+            if conn is not None:
+                selector.register(conn, selectors.EVENT_READ, "client")
+        elif key.data == "client":
+            server.handle(key.fileobj)   # drop() unregisters on close
+        elif key.data == "save-accept":
+            try:
+                conn, _ = gate["listener"].accept()
+            except OSError:
+                return
+            conn.setblocking(False)
+            gate["clients"][conn] = LineReader(limit=SAVE_LINE_MAX)
+            selector.register(conn, selectors.EVENT_READ, "save-client")
+        elif key.data == "save-client":
+            save_line(key.fileobj)
+        elif key.data == "wake":
+            wake_r.recv(4096)
+            with lock:
+                pending, queue[:] = queue[:], []
+            for fn in pending:
+                run_step(faults, "scheduled step", fn)
+        elif key.data == "cardd":
+            card_feed()
+
+    # Every step runs through run_step(): what a game, a card or a client
+    # makes one of them raise is that step's failure. The wait itself does
+    # not: a selector that cannot wait is a launcher that cannot work, and
+    # ending is then what lets systemd start one that adopts the session.
     last_tick = time.monotonic()
     while not stop["flag"]:
         if cardd_sock is None and time.monotonic() - last_cardd_attempt > 1.0:
@@ -2292,67 +2420,12 @@ def main(argv=None) -> int:
                 selector.register(cardd_sock, selectors.EVENT_READ, "cardd")
                 cardd_reader = LineReader()
         for key, _ in selector.select(timeout=POLL_INTERVAL):
-            if key.data == "accept":
-                conn = server.accept()
-                if conn is not None:
-                    selector.register(conn, selectors.EVENT_READ, "client")
-            elif key.data == "client":
-                server.handle(key.fileobj)   # drop() unregisters on close
-            elif key.data == "save-accept":
-                try:
-                    conn, _ = gate["listener"].accept()
-                except OSError:
-                    continue
-                conn.setblocking(False)
-                gate["clients"][conn] = LineReader(limit=SAVE_LINE_MAX)
-                selector.register(conn, selectors.EVENT_READ, "save-client")
-            elif key.data == "save-client":
-                conn = key.fileobj
-                reader = gate["clients"].get(conn)
-                try:
-                    data = conn.recv(65536)
-                    requests = reader.feed(data) if (data and reader) else []
-                except (OSError, FrameTooLarge):
-                    data = b""
-                    requests = []
-                if not data:
-                    gate_drop(conn)
-                    continue
-                for request in requests[:1]:   # one request per connection
-                    manager.save_request(gate["sid"], request, lambda message, c=conn: gate_send(c, message))
-            elif key.data == "wake":
-                wake_r.recv(4096)
-                with lock:
-                    pending, queue[:] = queue[:], []
-                for fn in pending:
-                    fn()
-            elif key.data == "cardd":
-                try:
-                    data = cardd_sock.recv(1 << 20)
-                    messages = cardd_reader.feed(data) if data else []
-                except FrameTooLarge as exc:
-                    log(f"card service feed: {exc}; reconnecting for a fresh snapshot")
-                    data = b""
-                except OSError:
-                    data = b""
-                if not data:
-                    selector.unregister(cardd_sock)
-                    cardd_sock.close()
-                    cardd_sock = None
-                    cards.connected = False
-                    manager.reader_disconnected()
-                    continue
-                for message in messages:
-                    was_connected = cards.connected
-                    removed = cards.apply(message)
-                    if message.get("type") == "snapshot" and not was_connected:
-                        manager.reader_reconnected()
-                    elif message.get("type") == "card":
-                        manager.card_changed()
-                    if removed:
-                        manager.card_removed(removed, message.get("insertion"))
+            if not run_step(faults, f"event {key.data}", event, key):
+                # What failed may still be waiting (a connection that could
+                # not be accepted): the loop must not spin on it.
+                time.sleep(0.05)
         if time.monotonic() - last_tick >= POLL_INTERVAL:
-            manager.tick()
+            run_step(faults, "tick", manager.tick)
             last_tick = time.monotonic()
 
     try:

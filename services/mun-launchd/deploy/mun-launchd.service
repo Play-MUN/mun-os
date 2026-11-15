@@ -26,6 +26,11 @@ ExecStart=/usr/bin/python3 /opt/mun/launchd/launchd.py
 # (RestartMode= is left at its default), which is what triggers OnFailure=.
 Restart=always
 RestartSec=1
+# A backstop: the launcher's largest legitimate work (a card's biggest save
+# envelope, read and checked) stays under 200 MiB; past this the kernel ends
+# it inside its own cgroup, and it restarts as above, instead of the machine
+# running short.
+MemoryMax=512M
 Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=PYTHONUNBUFFERED=1
 

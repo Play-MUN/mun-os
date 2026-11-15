@@ -968,6 +968,15 @@ class LauncherUnitTests(unittest.TestCase):
         self.assertLessEqual(float(service["RestartSec"]), launchd.READER_GRACE,
                              "and a running game is not left unsupervised for long")
 
+    def test_the_launcher_has_a_memory_ceiling_far_above_its_own_needs(self):
+        # The largest save envelope a card may hold is read, parsed and its
+        # units checked in under 200 MiB (tests/test_launchd_input.py); the
+        # ceiling is a backstop for what no test foresaw, never a limit a
+        # legitimate card reaches.
+        service = dict(unit_file("mun-launchd.service")["Service"])
+        self.assertEqual(service.get("MemoryMax"), "512M")
+        self.assertNotIn("MemoryHigh", service, "throttled, it would stall the game it supervises")
+
     def test_a_failure_still_brings_the_shell_back(self):
         unit = unit_file("mun-launchd.service")
         self.assertIn(("OnFailure", "mun-shell-restore.service"), unit["Unit"])

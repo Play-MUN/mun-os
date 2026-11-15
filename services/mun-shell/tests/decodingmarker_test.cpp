@@ -1,8 +1,10 @@
 // Host-side checks of the marker that guards the shell's decoding of a
 // card's images (src/decodingmarker.h): it is written whole or reported as
 // not written, with nothing left behind, so that nothing is decoded
-// unguarded; and an export's folder names its insertion only when it is
-// named as the card service names it. Real files in a temporary directory.
+// unguarded; an export's folder names its insertion only when it is named
+// as the card service names it; and a start that finds a marker skips its
+// insertion and keeps it skipped over the starts that follow. Real files in
+// a temporary directory.
 // Any C++20 compiler; no Qt. Run by `make check` (tests/Makefile here).
 #include "decodingmarker.h"
 
@@ -106,6 +108,80 @@ void exportNames()
         check("no insertion in '" + name + "'", insertionOf(name).empty());
 }
 
+void put(const fs::path &path, const std::string &text)
+{
+    std::ofstream out(path, std::ios::binary);
+    out << text;
+}
+
+void resuming(const fs::path &runtime)
+{
+    using decodingmarker::resume;
+    const fs::path marker = runtime / "shape-decoding", kept = runtime / "shape-skipped";
+    const std::string other = "fedcba9876543210";
+
+    decodingmarker::Skip skip = resume(marker.string(), kept.string());
+    check("no marker and nothing kept: no insertion is skipped", skip.insertion.empty() && !skip.found);
+    check("and nothing is written", !fs::exists(marker) && !fs::exists(kept));
+
+    // The last start ended while it decoded an insertion's images.
+    put(marker, kInsertion);
+    skip = resume(marker.string(), kept.string());
+    check("a marker names the insertion to skip", skip.insertion == kInsertion && skip.found);
+    check("the marker is consumed", !fs::exists(marker));
+    check("the insertion is kept", contents(kept) == kInsertion);
+
+    // The starts after it, a clean stop between them (which removes the
+    // markers, never what is kept): the insertion stays skipped.
+    for (int start = 0; start < 3; ++start) {
+        skip = resume(marker.string(), kept.string());
+        check("a later start still skips it, and does not take it for a new crash",
+              skip.insertion == kInsertion && !skip.found && contents(kept) == kInsertion);
+    }
+
+    // Another insertion's decoding ends a start: it is the one skipped now.
+    put(marker, other + "\n");
+    skip = resume(marker.string(), kept.string());
+    check("a new marker replaces what was kept", skip.insertion == other && skip.found && contents(kept) == other
+                                                     && !fs::exists(marker));
+
+    // A marker that names nothing (the shell ended as it made it).
+    put(marker, "");
+    skip = resume(marker.string(), kept.string());
+    check("an empty marker is consumed and changes nothing", skip.insertion == other && !skip.found
+                                                                 && !fs::exists(marker) && contents(kept) == other);
+
+    // Something that is not a file where the marker goes is not a marker:
+    // it is left as it is (it keeps the marker from being written, and the
+    // images from being decoded).
+    fs::create_directory(marker);
+    skip = resume(marker.string(), kept.string());
+    check("a directory in the marker's place is left alone", fs::is_directory(marker) && skip.insertion == other
+                                                                 && !skip.found);
+    fs::remove(marker);
+
+    // What is kept cannot be written: this start skips the insertion all the same.
+    fs::remove(kept);
+    fs::create_directory(kept);
+    put(marker, kInsertion);
+    skip = resume(marker.string(), kept.string());
+    check("an insertion that cannot be kept is skipped at this start", skip.insertion == kInsertion && skip.found
+                                                                           && !fs::exists(marker));
+    skip = resume(marker.string(), kept.string());
+    check("and nothing is skipped after it", skip.insertion.empty() && !skip.found);
+    fs::remove(kept);
+
+    // Only an insertion's worth is read, without the white space round it.
+    put(marker, "  " + kInsertion + " \n" + std::string(4096, 'x'));
+    skip = resume(marker.string(), kept.string());
+    check("a marker is read as far as an insertion goes", skip.insertion.size() <= 64
+                                                              && skip.insertion.rfind(kInsertion, 0) == 0);
+    fs::remove(kept);
+
+    skip = resume({}, {});
+    check("without a runtime directory nothing is skipped", skip.insertion.empty() && !skip.found);
+}
+
 } // namespace
 
 int main()
@@ -115,6 +191,7 @@ int main()
     fs::create_directories(runtime);
     writing(runtime);
     exportNames();
+    resuming(runtime);
     fs::remove_all(runtime);
     std::printf("decoding marker: %d passed, %d failed\n", g_passed, g_failed);
     return g_failed == 0 ? 0 : 1;

@@ -244,7 +244,7 @@ private:
     QString m_mode = QStringLiteral("full");
     QString m_key;             // what the current resolution was made for
     quint64 m_token = 0;       // of the newest load
-    QString m_skip;            // an insertion whose decoding crashed the last start
+    QString m_skip;            // an insertion whose decoding ended a start (the last, or one before it)
     QString m_skipMotion;      // an insertion whose motion's decoding did
     QString m_arrival;         // the insertion that arrived while the shell watched
     QString m_adoptedFor;      // the insertion the last `adopted` was for

@@ -74,6 +74,19 @@ class DecodingGuardTests(unittest.TestCase):
             self.assertIn("guarded", condition, condition)
         self.assertLess(max(decodes), loader.index("QFile::remove(marker)"))
 
+    def test_an_insertion_skipped_after_a_crash_stays_skipped_over_clean_restarts(self):
+        # The launcher stops the shell around every game: a skip held in
+        # memory only would be forgotten then, and the image that ended the
+        # shell read again after every game. What a start learns from a
+        # marker is kept in a file of its own, which a clean stop does not
+        # remove.
+        start = function(self.source("shape.cpp"), "Shape::Shape(QObject *parent)")
+        for marker, kept in (("shape-decoding", "shape-skipped"), ("shape-decoding-motion", "shape-skipped-motion")):
+            self.assertRegex(start, rf'decodingmarker::resume\(\s*\w+\("{marker}"\),\s*\w+\("{kept}"\)\)')
+        unit = (SHELL / "deploy" / "mun-shell.service").read_text(encoding="utf-8")
+        stop = re.search(r"(?m)^ExecStopPost=(.+)$", unit).group(1)
+        self.assertNotIn("shape-skipped", stop, "a clean stop forgets only what was being decoded")
+
     def test_the_marker_is_built_and_run_with_the_host_checks(self):
         recipe = (SHELL / "tests" / "Makefile").read_text(encoding="utf-8")
         self.assertIn("\t./decodingmarker_test\n", recipe)

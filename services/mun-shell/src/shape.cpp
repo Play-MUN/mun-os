@@ -46,7 +46,8 @@ const QColor kNeutralInk(0x13, 0x14, 0x17);     // a chosen entry's label
 
 // A marker in the runtime directory, which outlives the shell's restarts
 // (RuntimeDirectoryPreserve=yes in the unit) and not a reboot: `shape-decoding`
-// names the insertion being decoded, `shape-cue` the one whose cue is spent.
+// names the insertion being decoded, `shape-skipped` the one a start skips
+// for it (decodingmarker.h), `shape-cue` the one whose cue is spent.
 // Without a runtime directory there are none.
 QString runtimeFile(const char *name)
 {
@@ -235,22 +236,30 @@ void ShapeLoader::load(quint64 token, const QVariantMap &request)
 
 Shape::Shape(QObject *parent) : QObject(parent)
 {
-    const QString marker = runtimeFile("shape-decoding");
-    if (QFileInfo(marker).isFile()) {
-        m_skip = readMarker(marker);
-        QFile::remove(marker);
+    // A decoding marker left by the last start names the insertion to skip.
+    // It is kept (`shape-skipped`) for the starts that follow: a clean stop,
+    // as around every game, removes the markers but not what is kept, so the
+    // image that ended the shell is not read again after every game.
+    const auto pathOf = [](const char *name) { return QFile::encodeName(runtimeFile(name)).toStdString(); };
+    const decodingmarker::Skip identity = decodingmarker::resume(pathOf("shape-decoding"), pathOf("shape-skipped"));
+    m_skip = QString::fromStdString(identity.insertion);
+    if (identity.found)
         qWarning("mun-shell: shape: the last start ended while decoding insertion %s; its identity is skipped",
                  qPrintable(m_skip));
-    }
+    else if (!m_skip.isEmpty())
+        qInfo("mun-shell: shape: decoding insertion %s ended an earlier start; its identity is still skipped",
+              qPrintable(m_skip));
     // The same for a motion's images (MotionScene's loader): that
     // insertion's motion is not played again, its v1 look is.
-    const QString motionMarker = runtimeFile("shape-decoding-motion");
-    if (QFileInfo(motionMarker).isFile()) {
-        m_skipMotion = readMarker(motionMarker);
-        QFile::remove(motionMarker);
+    const decodingmarker::Skip moving = decodingmarker::resume(pathOf("shape-decoding-motion"),
+                                                               pathOf("shape-skipped-motion"));
+    m_skipMotion = QString::fromStdString(moving.insertion);
+    if (moving.found)
         qWarning("mun-shell: shape: the last start ended while decoding the motion of insertion %s; its motion is "
                  "skipped, its v1 look shown", qPrintable(m_skipMotion));
-    }
+    else if (!m_skipMotion.isEmpty())
+        qInfo("mun-shell: shape: decoding the motion of insertion %s ended an earlier start; its motion is still "
+              "skipped, its v1 look shown", qPrintable(m_skipMotion));
     m_cueSpent = readMarker(runtimeFile("shape-cue"));
     // Every decode of the shell's (the card window, the cover, the world) has
     // this limit; set once, before any loader runs.

@@ -2,6 +2,7 @@
 
 import re
 import struct
+import unicodedata
 import zlib
 from dataclasses import dataclass, asdict
 from typing import Any, Dict, List, Optional
@@ -140,6 +141,10 @@ def validate_card(source) -> CardInfo:
     title = _field(card, "card", "title", str).strip()
     if not title or len(title) > TITLE_MAX_CHARS:
         raise CardError("manifest_field", "El título está vacío o es demasiado largo")
+    steering = _steering_character(title)
+    if steering is not None:
+        raise CardError("manifest_field", "El título contiene un carácter de control o de dirección del texto",
+                        steering)
 
     version = _field(content, "content", "version", str)
     if not _VERSION.fullmatch(version):
@@ -253,6 +258,25 @@ def _directory_saves(saves: Dict[str, Any], kind: str):
     if not 1024 <= max_bytes <= DIRECTORY_SAVES_MAX_BYTES:
         raise CardError("manifest_field", f"saves.max_bytes debe estar entre 1024 y {DIRECTORY_SAVES_MAX_BYTES}", str(max_bytes))
     return directory, list(units), list(checks), max_bytes
+
+
+# The characters that order text from right to left or back, by themselves
+# (Unicode's Bidi_Control): marks, embeddings, overrides and isolates. Among
+# other text they make it show in another order than it is written.
+_BIDI_CONTROLS = frozenset("\u061c\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069")
+
+
+def _steering_character(text: str) -> Optional[str]:
+    """The first character of `text` that is not text to show but an
+    instruction to whatever shows it, as U+XXXX, or None: a control
+    character (an escape sequence's, a bell, a tab, a line break), a line or
+    paragraph separator, a lone surrogate, or a bidirectional control. The
+    console, the tools and the journal print a card's title as it is.
+    Letters of any script, marks, symbols, emoji and their joiners are text."""
+    for char in text:
+        if unicodedata.category(char) in ("Cc", "Cs", "Zl", "Zp") or char in _BIDI_CONTROLS:
+            return f"U+{ord(char):04X}"
+    return None
 
 
 def _colour(table: Dict[str, Any], key: str) -> Optional[str]:

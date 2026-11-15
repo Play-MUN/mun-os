@@ -161,6 +161,25 @@ class ServiceLoopTests(unittest.TestCase):
         service.stop()
         self.assertEqual(service.result, [0])
 
+    def test_a_save_of_text_outside_ascii_goes_from_the_launcher_to_the_card(self):
+        # The launcher's own forwarding (launchd.stage_via_cardd) against the
+        # real service: 64 KiB of accented text is a save within its bound.
+        sys.path.insert(0, str(ROOT / "services" / "mun-launchd"))
+        import launchd
+        service = RunningService(self)
+        service.card()
+        data = {"name": "é" * 32000}
+        replies = []
+        with patch.object(launchd, "CARDD_CONTROL", service.control):
+            launchd.stage_via_cardd(service.save_request(payload=data), replies.append)
+            deadline = time.monotonic() + 20
+            while not replies and time.monotonic() < deadline:
+                time.sleep(0.02)
+        self.assertEqual((replies[0]["ok"], replies[0].get("error")), (True, None))
+        saved = json.loads((service.tmp / "cards" / "c1" / "saves" / "mun.collect" / "save.json").read_text(encoding="utf-8"))
+        self.assertEqual(saved["payload"], data)
+        self.assertEqual(service.tracebacks(), [])
+
     def test_lines_that_are_not_a_request_are_answered_and_the_service_goes_on(self):
         service = RunningService(self)
         insertion = service.card()["insertion"]

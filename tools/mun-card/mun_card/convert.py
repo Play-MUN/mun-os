@@ -32,7 +32,7 @@ from .source import DebugfsSource
 from .validate import MANIFEST_NAMES, SAVE_FORMATS, validate_card
 
 REGISTRY_NAME = "attached.json"          # vm/munvm.py: ATTACH_REGISTRY, under the same lock file
-RESERVATION = "mun-card convert"         # the holder a lab console sees in the registry
+RESERVATION = "mun-card"                 # with its purpose: the holder a lab console sees in the registry
 LOCK_TIMEOUT = 30.0
 SAVE_FILES = ("save.json", "save.json.prev")
 # Signs, in the entry executable, that a game knows only the earlier contract
@@ -101,10 +101,11 @@ def _save_registry(card_root: Path, registry: Dict[str, dict]) -> None:
 
 
 @contextlib.contextmanager
-def reserved(card_root: Path, names: List[str]) -> Iterator[None]:
+def reserved(card_root: Path, names: List[str], purpose: str = "convert") -> Iterator[None]:
     """Hold `names` in the attach registry, or refuse if a live guest (or
-    another conversion) holds one. Entries of dead processes are stale and
-    dropped, as the lab tool drops them."""
+    another run of this tool) holds one. Entries of dead processes are stale
+    and dropped, as the lab tool drops them. `purpose` is what the hold is
+    for, `convert` or `create`: the lab tool tells whoever asks for the card."""
     me = os.getpid()
     with _registry_lock(card_root):
         registry = _load_registry(card_root)
@@ -114,7 +115,7 @@ def reserved(card_root: Path, names: List[str]) -> Iterator[None]:
                 raise CardError("card_in_use", "La tarjeta está conectada a una consola o reservada",
                                 f"{name}: {holder.get('instance')} (pid {holder.get('pid')})")
         for name in names:
-            registry[name] = {"instance": RESERVATION, "pid": me, "purpose": "convert",
+            registry[name] = {"instance": f"{RESERVATION} {purpose}", "pid": me, "purpose": purpose,
                               "since": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "attachment": None}
         _save_registry(card_root, registry)
     try:

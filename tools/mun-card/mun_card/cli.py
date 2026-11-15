@@ -1,6 +1,7 @@
 """mun-card: create, inspect and hash lab Game Card images on the host (macOS or Linux)."""
 
 import argparse
+import contextlib
 import hashlib
 import json
 import shutil
@@ -28,11 +29,25 @@ def card_path(name_or_path: str) -> Path:
     return CARD_ROOT / f"{name_or_path}.img"
 
 
+def replacing(destination: Path):
+    """What to hold while an existing image is replaced. A lab card
+    (`<CARD_ROOT>/<name>.img`) is held in the attach registry, as a
+    conversion holds its cards: refused while a live guest has it attached,
+    and no guest can attach it until the new image is whole. The image is
+    replaced by rename, so a guest attached to the old one would go on
+    writing its saves to a file that no longer has a name. Any other path
+    is not a card the registry knows."""
+    if destination.exists() and destination.suffix == ".img" and not destination.name.startswith(".") \
+            and destination.parent.resolve() == CARD_ROOT.resolve():
+        return convert.reserved(CARD_ROOT, [destination.stem], purpose="create")
+    return contextlib.nullcontext()
+
+
 def cmd_create(args: argparse.Namespace) -> int:
     destination = card_path(args.name)
     if destination.exists() and not args.force:
         raise CardError("image_exists", f"{destination} ya existe; usa --force para sobrescribir")
-    with tempfile.TemporaryDirectory(prefix="mun-card-") as tmp:
+    with replacing(destination), tempfile.TemporaryDirectory(prefix="mun-card-") as tmp:
         staging = Path(tmp) / "card"
         staging.mkdir()
         saves = None

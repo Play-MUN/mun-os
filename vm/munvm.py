@@ -317,6 +317,10 @@ def registry_claim(name: str, attachment: Optional[str] = None) -> None:
                     # for the whole conversion (docs/game-cards.md).
                     raise LabError(f"{name} is reserved by a card conversion (pid {holder['pid']}); "
                                    "attach it when the conversion has finished")
+                if holder.get("purpose") == "create":
+                    # mun-card create --force holds the card while its image is replaced.
+                    raise LabError(f"{name} is being replaced by mun-card create (pid {holder['pid']}); "
+                                   "attach it when the new image is there")
                 raise LabError(f"{name} is attached to instance {holder['instance']} (QEMU pid {holder['pid']}); "
                                f"detach it there first: a card is never a writable medium in two guests")
             del registry[name]
@@ -992,7 +996,15 @@ def cmd_card_create(args: argparse.Namespace) -> None:
     if path.exists() and not args.force:
         raise LabError(f"{path} exists; use --force to overwrite")
     CARD_ROOT.mkdir(parents=True, exist_ok=True)
-    run([which("qemu-img"), "create", "-q", "-f", "raw", str(path), args.size])
+    # This guest's own state says nothing of the others: the registry is
+    # where every guest (and a card conversion) records the cards it holds.
+    # Held while the image is made, so none attaches a half-made one.
+    with registry_lock():
+        holder = load_registry().get(args.name)
+        if holder and pid_alive(int(holder.get("pid", 0) or 0)):
+            raise LabError(f"{args.name} is held by instance {holder.get('instance')} (pid {holder.get('pid')}); "
+                           "detach it there before replacing the image")
+        run([which("qemu-img"), "create", "-q", "-f", "raw", str(path), args.size])
     print(f"created {path} ({args.size}, unformatted)")
 
 

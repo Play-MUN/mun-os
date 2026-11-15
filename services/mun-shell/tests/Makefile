@@ -5,6 +5,8 @@
 # src/startupclock.h, src/playbackhealth.h, src/pngchunks.h,
 # src/decodingmarker.h):
 # any C++20 compiler, no Qt, no display, no device. The image build compiles the same files into the shell.
+# And of the logic the interface keeps in its QML files (qml_test.js), where
+# node is installed: the files' own functions, run against stand-ins.
 HOSTCXX ?= c++
 CXXFLAGS = -std=c++20 -O1 -Wall -Wextra -Wpedantic -I../src
 TESTS    = displaydevice_test gamepadmap_test motionclock_test startupclock_test playbackhealth_test \
@@ -18,6 +20,7 @@ test: $(TESTS)
 	./playbackhealth_test
 	./pngchunks_test
 	./decodingmarker_test
+	@if command -v node >/dev/null 2>&1; then node qml_test.js; else echo "no node: MUN Shell interface logic tests skipped"; fi
 
 displaydevice_test: displaydevice_test.cpp ../src/displaydevice.cpp ../src/displaydevice.h
 	$(HOSTCXX) $(CXXFLAGS) -o $@ displaydevice_test.cpp ../src/displaydevice.cpp

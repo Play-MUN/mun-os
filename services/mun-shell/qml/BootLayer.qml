@@ -62,6 +62,7 @@ Rectangle {
     readonly property int kWarm: 2000
     readonly property int kWarmLimit: 3000
     property bool warming: false
+    // When start() was called (the wall clock, in milliseconds).
     property double warmFrom: 0
     // Standby: the console on, before its start-up begins (the layer shown
     // at the first start of a boot, until the sound or the picture starts).
@@ -86,6 +87,9 @@ Rectangle {
         waiting = false
         t = -1
         ready_.restart()
+        // Before soundReady() is asked: it counts its wait for an open
+        // device from here, and from zero that wait would be over already.
+        warmFrom = Date.now()
         if (!ShellSettings.systemSounds) {
             before = false
             running = true
@@ -94,7 +98,6 @@ Rectangle {
             begin()
         } else {
             warming = true
-            warmFrom = Date.now()
             warm.start()
         }
     }

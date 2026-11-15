@@ -75,9 +75,10 @@ units and privileges.
 - **The game is sandboxed.** Unprivileged user, no capabilities, no network,
   a read-only system and only the devices of its runtime profile. It can
   write to its session's `work/` directory, to the private `/tmp` and
-  `/var/tmp` systemd gives its unit, and to the system's shared-memory file
-  systems ([runtime.md](runtime.md#what-the-game-gets)); nothing it writes
-  reaches the card except through the console's saves.
+  `/var/tmp` systemd gives its unit, and to a shared-memory file system of
+  its session's own ([runtime.md](runtime.md#what-the-game-gets)); nothing
+  it writes outlives the session or reaches the card except through the
+  console's saves.
 - **The shell holds no privileges.** It requests; the launcher and the card
   service decide. The shell and a game never own the display or the keyboard
   at the same time.

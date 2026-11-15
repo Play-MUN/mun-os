@@ -40,7 +40,8 @@ name: `dev2` here. Build names take 2 to 16 lowercase letters, digits and
 ```
 
 `BUILD-INFO.json` must say `"clean": true` and name the commit; a build of
-uncommitted changes is for local tests only (`./mun dev bundle` warns).
+uncommitted changes is for local tests only (`./mun dev bundle` warns, and
+its `release.json` says so).
 
 The image build runs the shell's behaviour regressions and fails with
 them, but it only records how long Home's transitions take (`--timing
@@ -78,6 +79,18 @@ Shape's motion, and `card-demo.img.xz`), `LICENSE`, `NOTICE`, `NAME-AND-LOGO.txt
 the typefaces' licences and `release.json`, which lists all of them with
 their sizes and SHA-256.
 
+The image and the game come from the build; the cards' MUN Shape packages,
+the card tool that makes them and the licence texts come from the checkout
+the command runs in, and `release.json` names the build's commit for all of
+it. So run it in a checkout at exactly the build's commit, with a clean
+working tree: for a build recorded clean, any other checkout is refused,
+saying which commit the build is of, and the game put on the cards must
+match the hash `BUILD-INFO.json` recorded for it. `release.json` then
+carries `"one_commit": true` in its `source`. A build of uncommitted
+changes is still bundled for a local test, with `"one_commit": false`,
+which `./mun get` remarks when it installs it; a release image is never
+bundled that way.
+
 ## 4. The corresponding source
 
 ```sh
@@ -90,8 +103,10 @@ tar -tf .local/mun/mun-os-v0.1.0-dev.2-sources.tar | grep -E '(^|/)\._'    # pri
 ```
 
 The first command fetches, verified, the Debian source of every package in
-the image, its initrd and its kernel, and of what they were built using
-(vm/sources.py; about 1.1 GB), and `SOURCES.json` names the build and lists
+the image, its initrd and its kernel, and of what they were built using,
+as their `Built-Using` and `Static-Built-Using` fields record it (the second
+is where Debian 13 names code linked statically, as in Go and Rust
+programs; vm/sources.py; about 1.1 GB), and `SOURCES.json` names the build and lists
 the sources with the binaries each built
 ([licensing](licensing.md#images-and-their-corresponding-source)). Running
 it again only fetches what is missing, and a copy of another build's
@@ -119,7 +134,10 @@ The second run, in a guest of its own with the card dressed in Reef (the
 bundle is installed already), also requires the shell to say it plays the
 card's motion, not the package's v1 look.
 The copy installs the image and the cards in its own `.local/`; remove
-`"$fresh"` afterwards.
+`"$fresh"` afterwards. Installing never replaces a card that exists, so in
+a copy that already had one the check would play that card: it says so
+before it starts the guest, when the card there is not the bundle's own
+(another card, or one with saves on it). A fresh copy has none.
 
 ## 6. Publish, then run the hosts
 

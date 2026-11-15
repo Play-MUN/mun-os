@@ -71,6 +71,15 @@ An interrupted download resumes when you run the same command again. A Game
 Card that already exists is never replaced (it may hold your saves). On
 Windows: `py mun get …`.
 
+Before it fetches anything it compares what is left to download and unpack
+with the free space on the disk, and says so if there is not enough. It
+refuses a download it cannot hold to its rules, naming the reason: an
+address that redirects from https to plain http; a `release.json` whose
+file names a computer would not keep apart or whose sizes no release has;
+an image that does not hold all of itself (one that would read another file
+of your computer as its disk). None of that happens with a release from the
+releases page.
+
 If you played an earlier preview, its console (`play`) stays on that image:
 a console keeps the image it was made from, and a new one is made from the
 most recently built image you have, which need not be this download. Start

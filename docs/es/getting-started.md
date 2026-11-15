@@ -77,6 +77,15 @@ interrumpida continúa si vuelves a ejecutar la misma orden. Una Game Card que
 ya existe nunca se sustituye (puede tener tus partidas). En Windows:
 `py mun get …`.
 
+Antes de traer nada compara lo que queda por descargar y descomprimir con
+el espacio libre del disco, y lo dice si no alcanza. Rechaza una descarga
+que no puede someter a sus reglas, diciendo el motivo: una dirección que
+redirige de https a http sin cifrar; un `release.json` con nombres de
+archivo que un ordenador no distinguiría o con tamaños que ninguna
+versión tiene; una imagen que no se contiene entera a sí misma (una que
+leería otro archivo de tu ordenador como su disco). Nada de eso ocurre con
+una versión de la página de versiones.
+
 Si jugaste una versión preliminar anterior, su consola (`play`) sigue con
 aquella imagen: una consola conserva la imagen con la que se creó, y una
 nueva se crea con la imagen construida más recientemente que tengas, que no

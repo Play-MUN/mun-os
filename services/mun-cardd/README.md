@@ -190,8 +190,9 @@ The root-only control socket accepts, besides `stage`:
 - `stage` also copies the current `save.json` (up to the bound, 112 KiB for a
   single-object save, one byte over
   so an oversized file reads as damaged) into `<dest>/work/save.json` owned by
-  the game user and readable by it alone (0600), written through the session
-  directory's descriptor without following a link, and reports
+  the game user and readable by it alone (0600), created exclusively through
+  a descriptor of that `work/` directory opened without following a link
+  (a name already there is removed, never opened), and reports
   `save: {present, copied, bytes, recovered}`. The
   copy is read through the same link-safe walk; only a regular file counts,
   and the type is checked by name before a non-blocking open, so a FIFO or a

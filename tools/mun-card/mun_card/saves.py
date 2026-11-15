@@ -12,7 +12,7 @@ import hashlib
 import re
 import zlib
 from typing import Optional
-from xml.etree import ElementTree
+from xml.parsers import expat
 
 SAVE_MAX_BYTES = 64 * 1024            # a game's payload, measured as compact JSON
 # The envelope on the card, and what staging copies back to the game. The
@@ -28,8 +28,14 @@ SAVE_FILE_MAX_BYTES = SAVE_MAX_BYTES * 3 // 2 + 16 * 1024
 # the envelope carries them in base64 (4/3) plus names and hashes.
 FILES_PAYLOAD_MAX_FILES = 64
 DIRECTORY_SAVE_SCHEMA = 1
-INFLATE_LIMIT = 64 * 1024 * 1024      # a unit that inflates beyond this is not a save
+# How far a unit may inflate and still be a save, as the console's launcher
+# bounds it: by a multiple of what the card declared for all its saves, and
+# absolutely. XML is also read in full, so it has a bound of its own.
+INFLATE_LIMIT = 64 * 1024 * 1024
+INFLATE_FACTOR = 64
+XML_INFLATE_LIMIT = 16 * 1024 * 1024
 _FILE_NAME = re.compile(r"[A-Za-z0-9._-]{1,128}")
+_XML_SPACE = re.compile(rb"[ \t\n\r\x0b\x0c]*")
 
 
 def _field(info, name):
@@ -45,18 +51,29 @@ def save_bounds(info) -> "tuple[int, int]":
     return payload, payload + 8 * 1024
 
 
-def unit_check(check: str, data: bytes) -> Optional[str]:
-    """Why `data` is not one complete unit under `check` (docs/saves.md), or None.
-    The launcher's rule, word for word."""
+def inflate_limit(max_bytes: int) -> int:
+    """How far a unit may inflate on a card that declares `max_bytes` for its saves."""
+    return min(INFLATE_LIMIT, INFLATE_FACTOR * max_bytes)
+
+
+def unit_check(check: str, data: bytes, limit: int = INFLATE_LIMIT) -> Optional[str]:
+    """Why `data` is not one complete unit under `check` (docs/saves.md), or
+    None. `limit` is how far it may inflate (inflate_limit()). The launcher's
+    rule, word for word: it never raises for what `data` holds, and its
+    memory is bounded by the limits, the inflated bytes of an XML unit once,
+    of any other unit a step at a time."""
     if check == "any":
         return None
     if check in ("zlib", "zlib-xml"):
+        if check == "zlib-xml":
+            limit = min(limit, XML_INFLATE_LIMIT)
+        # Inflate in bounded steps and keep the output only when XML follows.
         inflater, pending, total, parts = zlib.decompressobj(), data, 0, []
         try:
             while True:
                 chunk = inflater.decompress(pending, 1 << 20)
                 total += len(chunk)
-                if total > INFLATE_LIMIT:
+                if total > limit:
                     return "se descomprime más allá del límite"
                 if check == "zlib-xml":
                     parts.append(chunk)
@@ -72,23 +89,41 @@ def unit_check(check: str, data: bytes) -> Optional[str]:
         if check == "zlib":
             return None
         data = b"".join(parts)
-    if data.endswith(b"\0"):
-        data = data[:-1]
-    text, declaration = data, b""
-    if text.startswith(b"\xef\xbb\xbf"):
-        declaration, text = text[:3], text[3:]
-    if text.lstrip().startswith(b"<?xml"):
-        text = text.lstrip()
-        end = text.find(b"?>")
-        if end < 0:
+        del parts
+    # The document is read where it lies, by position: no second copy of it.
+    # Some engines write their XML with the C string terminator, a NUL at the
+    # very end; their own loaders stop there, so one final NUL is not part of
+    # the document. A NUL anywhere else still fails the parse.
+    end = len(data) - 1 if data.endswith(b"\0") else len(data)
+    # Some games' files have several top-level elements: they are wrapped in
+    # one root, after the XML declaration if there is one (it must stay first).
+    start = 3 if data.startswith(b"\xef\xbb\xbf") else 0
+    declared = _XML_SPACE.match(data, start, end).end()
+    body = start
+    if data.startswith(b"<?xml", declared, end):
+        body = data.find(b"?>", declared, end) + 2
+        if body < 2:
             return "declaración XML incompleta"
-        declaration, text = declaration + text[:end + 2], text[end + 2:]
-    if b"<!DOCTYPE" in text or b"<!ENTITY" in text:
+    if data.find(b"<!DOCTYPE", body, end) >= 0 or data.find(b"<!ENTITY", body, end) >= 0:
         return "XML con declaraciones no admitidas"
+    # Well-formedness only: the parser is given no handlers, so it builds
+    # nothing (a document tree of a unit made of millions of empty elements
+    # took gigabytes), and with the document inside a root element of ours
+    # no document type can be declared, so there are no entities to expand.
+    view, parser = memoryview(data), expat.ParserCreate(None, "}")
     try:
-        ElementTree.fromstring(declaration + b"<mun-unit>" + text + b"</mun-unit>")
-    except ElementTree.ParseError as exc:
+        for piece in (view[:start], view[declared:body] if body > start else b"", b"<mun-unit>", view[body:end]):
+            parser.Parse(piece, False)
+        parser.Parse(b"</mun-unit>", True)
+    except expat.ExpatError as exc:
         return f"XML incompleto o dañado ({exc})"
+    except (LookupError, ValueError) as exc:
+        # The declaration names an encoding the parser cannot read: it knows
+        # UTF-8, UTF-16, US-ASCII and ISO-8859-1 itself and takes any other
+        # single-byte encoding from Python's codecs; a name they do not have
+        # is a LookupError there and a multibyte encoding (Shift-JIS, EUC-JP)
+        # a ValueError. Such a unit cannot be shown to be complete.
+        return f"codificación XML no admitida ({exc})"
     return None
 
 
@@ -119,7 +154,7 @@ def envelope_problem(document: object, info, wanted_format: str) -> Optional[str
             check = next((c for pattern, c in patterns if fnmatch.fnmatchcase(name, pattern)), None)
             if check is None:
                 return f"{name} no es un archivo de partida declarado"
-            problem = unit_check(check, base64.b64decode(entry["data"]))
+            problem = unit_check(check, base64.b64decode(entry["data"]), inflate_limit(max_bytes))
             if problem:
                 return f"{name}: {problem}"
         return None

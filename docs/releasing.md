@@ -139,21 +139,36 @@ a copy that already had one the check would play that card: it says so
 before it starts the guest, when the card there is not the bundle's own
 (another card, or one with saves on it). A fresh copy has none.
 
-## 6. Publish, then run the hosts
+## 6. Check the hosts on a draft, then publish
+
+The hosts check the candidate's own bundle before anything is published. A
+draft release carries it: only the repository's members see a draft, and
+its tag is not created until it is published.
 
 ```sh
-gh release create v0.1.0-dev.2 --prerelease --target <commit> \
+gh release create v0.1.0-dev.2 --draft --prerelease --target <commit> \
     --title "MUN OS 0.1.0-dev.2 — development image for QEMU" --notes-file notes.md \
     .local/mun/bundles/dev2/* \
     .local/mun/mun-os-v0.1.0-dev.2-sources.tar .local/mun/mun-os-v0.1.0-dev.2-sources.tar.sha256
-gh workflow run hosts.yml -f release=v0.1.0-dev.2
+gh workflow run hosts.yml --ref <branch> -f draft=v0.1.0-dev.2
 ```
 
-`./mun get` downloads only what `release.json` lists: players never download
-the sources. The Hosts workflow downloads the release on macOS, Linux
-(x86_64, ARM64) and Windows (x86_64, ARM64) and runs the same check there.
-If it fails, the release is marked as such in its notes and the fix goes
-into the next one.
+The Hosts workflow takes the draft's bundle and, on macOS, Linux (x86_64,
+ARM64) and Windows (x86_64, ARM64), runs the same two checks as step 5 and,
+on Windows, those of the console's control channel. Only one job of it
+reads the draft, which needs write access; it hands the bundle to the
+others, which keep read-only access. When every host passes, publish the
+draft as it is, and its tag is created at `<commit>`:
+
+```sh
+gh release edit v0.1.0-dev.2 --draft=false
+```
+
+If a host fails, the draft is not published: the fix goes into a new
+commit, whose image, bundle and draft are made again from step 2.
+`./mun get` downloads only what `release.json` lists: players never
+download the sources. A published release can be checked again with
+`gh workflow run hosts.yml -f release=<tag>`.
 
 ## Release notes
 

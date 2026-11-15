@@ -255,6 +255,20 @@ actions on the menus only; alerts and system sounds stay MUN's.
   The largest side is 2048 for a backdrop, a layer or a light texture, 1024
   for the card window and 256 for a sprite, checked from `IHDR` before
   anything decodes the image.
+- **What a PNG carries besides its pixels** is bounded: at most 64 ancillary
+  chunks holding 256 KiB as stored; of them at most 16 text chunks (`tEXt`,
+  `zTXt`, `iTXt`) holding 32 KiB, and one colour profile (`iCCP`). The text
+  and the profile together may inflate to 1 MiB; the checker inflates them,
+  never past that bound, to know. A PNG reader keeps the text and the
+  profile it finds, and inflates them, before it decodes a pixel: a few KiB
+  of compressed text can become megabytes, hundreds of times over in one
+  small file. An image saved without metadata is far inside these bounds;
+  an animated PNG, whose frames are ancillary chunks, usually is not, nor
+  is one with more than 256 KiB of an application's own data (`shape_png`).
+- **What an image decodes to** is at most 16 MiB in the format the console
+  reads it into (`shape_png_dimensions`). Within its sides an image of 8
+  bits a channel always is; one of 16 bits a channel in colour takes 8 bytes
+  a pixel, so at most about 1448 × 1448: save it at 8 bits or smaller.
 - **Sounds**: WAV with exactly two chunks, `fmt ` (PCM, 48 kHz, 16-bit,
   stereo) and `data`, at most 1 MiB each; `move`, `enter` and `back` at most
   1 s, `insert` at most 3 s; peaks at or under −1 dBFS. A silent sound
@@ -267,16 +281,40 @@ actions on the menus only; alerts and system sounds stay MUN's.
 
 ## Limits
 
-**Enforced** by the checker, and by the console once it reads packages:
+**Enforced** by the checker: `mun-card` runs it on the host, and the
+console's card service runs the same one on the card before it exports
+anything, so the shell reads only what the checker accepted
+([how the console uses a package](#how-the-console-uses-a-package)).
 
 | Item | Limit |
 | --- | --- |
 | `shape.json` | 64 KiB, 6 levels, strings of 512 characters |
 | Package | 32 MiB of named files |
 | Image | 4 MiB; 2048 × 2048 (backdrop, layer, light), 1024 × 1024 (window), 256 × 256 (sprite) |
+| Image, besides its pixels | 64 ancillary chunks and 256 KiB as stored; of them 16 text chunks and 32 KiB, and one colour profile; text and profile inflating to 1 MiB in all |
+| Image, decoded | 16 MiB in the format it is read into (16 bits a channel in colour: about 1448 × 1448) |
 | World | 3 layers, 2 emitters with 128 sprites in all, 2 light textures, 10 or 20 fps |
 | Sound | 1 MiB; 1 s (`move`, `enter`, `back`), 3 s (`insert`); −1 dBFS |
 | Transition | 0.8–4 s |
+
+The shell does not lean on the card service alone for what could take it
+down. Before any image reader opens a file of an export, or the cover, it
+holds these again itself:
+
+- an image's ancillary chunks, counted from the chunk headers alone: the
+  numbers and the bytes stored, as above. It does not inflate anything, so
+  what text and profile inflate to is the checker's bound only;
+- an image's sides, from its header, before its pixels: 1024 for the card
+  window and the cover, 2048 and 256 in a world;
+- 16 MiB for any one decode, and the display's budget for a world
+  (*Objectives* below);
+- the exported document's 256 KiB, the cover's 1 MiB, and a sound's 1 MiB
+  and duration.
+
+The other limits (the package's 32 MiB, a file's 4 MiB, the PNG and WAV
+structure, a sound's peak, the counts of a world) are the checker's alone.
+An image the shell refuses is not shown, as one that does not decode
+([When something is wrong](#when-something-is-wrong)).
 
 **Objectives**, not yet measured, which the console is to meet when it renders
 packages: with a world in motion, navigation latency and menu frame pacing
@@ -357,7 +395,8 @@ what a release tells the player shows as with any card.
 | A named file missing, a link, not a regular file, over its size, not a well-formed PNG or WAV, over its dimensions, duration or peak; the package over its budget | The block that names it is dropped |
 | The palette's colours do not keep contrast (below) | The dressed surfaces use MUN's colours, text, plate and focus together; the palette still tones the world |
 | An unknown field, or a later minor version | Ignored, with a note; what is known is used |
-| An image that fails to decode in the console, or exceeds the display's budget | That block, at run time, falls back to MUN (the card object whole, its outline and light too) or to a lower level |
+| An image that fails to decode in the console, carries more ancillary data than the shell accepts, or exceeds the display's budget | That block, at run time, falls back to MUN (the card object whole, its outline and light too) or to a lower level |
+| The shell ended while it read an insertion's images | Its later starts skip that insertion's identity, until the card is put in again or the console restarts ([how the console uses a package](#how-the-console-uses-a-package)) |
 
 A block is taken or dropped whole, so what a player sees is either the
 block as designed or MUN's: one defective layer, emitter or light texture
@@ -504,9 +543,18 @@ The algorithm, exact so that the console and the checker agree:
 
 - It reads only the service's copy for the insertion in the card's record,
   decodes the window image, the cover and the world's images off the
-  interface thread with their dimensions checked first and an allocation
-  limit, and verifies the surfaces' colours again with the same rule,
-  falling back to MUN's set.
+  interface thread, and verifies the surfaces' colours again with the same
+  rule, falling back to MUN's set. Every image has its chunks scanned
+  before any reader opens it, then its dimensions checked from its header,
+  and is decoded under an allocation limit ([Limits](#limits)).
+- While it reads an insertion's images (the window, the cover, the world's)
+  a marker names that insertion, and they are read only if the marker could
+  be written. If reading one ends the shell, its next start finds the marker
+  and skips that insertion's identity, showing MUN's, instead of reading
+  the same image again at every restart, and so do its later starts, the
+  ones after each game included: the insertion stays skipped until the card
+  is put in again, which is another insertion, or the console restarts. The
+  shell ending for another reason while it reads has the same effect.
 - Dressed:
   - the world behind Home;
   - the main arc's entries, the game's panel and the bands of the status
@@ -775,8 +823,8 @@ around any of them stays valid.
 | `shape_path_type` | block | a named path is not a regular file |
 | `shape_file_too_large` | block | a file over its size |
 | `shape_budget` | block | the package over 32 MiB |
-| `shape_png` | block | not a well-formed PNG |
-| `shape_png_dimensions` | block | an image over its dimensions |
+| `shape_png` | block | not a well-formed PNG, or one carrying more ancillary data (text, profile) than the console accepts |
+| `shape_png_dimensions` | block | an image over its dimensions, or one whose decoding would take more than 16 MiB |
 | `shape_wav` | block | not PCM WAV at 48 kHz, 16-bit, stereo, with only `fmt ` and `data` |
 | `shape_wav_duration` | block | a sound too long |
 | `shape_wav_peak` | block | a peak over −1 dBFS |

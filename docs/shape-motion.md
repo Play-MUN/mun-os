@@ -211,17 +211,32 @@ Provisional, enforced by the checker:
 | Lights | 4 |
 | Beats | 12 |
 | Things a beat or a reaction moves | 4 |
+| What one frame draws | 24 screens: the area of everything the motion lists for a frame, each thing at its largest and counted for the whole screen at most, over the screen's area |
 | Images named by the motion | 32 MiB, apart from the v1 package's 32 MiB |
 | Images the player decodes (all but the poster), together | 64 MiB at 4 bytes a pixel |
 | One image while it is decoded | 16 MiB in the format it is read into (16-bit colour: 8 bytes a pixel, so at most about 1448 × 1448) |
 | The document the card service exports, normalised | 256 KiB, what the shell reads, measured with the card's insertion and content version as the service writes them; over it, the motion is dropped, and if what stays is over it too, the package is not used |
 | A plane or a light that drifts sideways | at least 240 canvas pixels wide (it repeats across the screen) |
 
-Every image is checked as v1 checks its images (PNG structure, at most
-4 MiB, its side read from the header before anything decodes it). What it
+Every image is checked as v1 checks its images (PNG structure, what it
+carries besides its pixels, at most 4 MiB, its side read from the header
+before anything decodes it; [shape.md](shape.md#files)). What it
 decodes to is worked out from the header too: the player decodes every
 image the motion draws once, keeps them while the card is in, and draws
 nothing until all of them are decoded.
+
+The counts above bound things, and things within every one of them can each
+cover the screen: 8 planes and 160 figures doing so are 168 screens blended
+on every frame of the display, which a console drawing in software showed
+at 4 to 5 frames a second, its navigation with it. So what a frame may draw
+is bounded too, from the document alone: a plane or an image light once, or
+across the whole width when it drifts sideways; a glow by its radius; every
+figure of an actor at the largest scale any of its states gives it, larger
+by perspective when the scene has depth and the actor comes nearer, twice
+when its sheet has a clip that dissolves frame into frame; every particle
+an emitter may hold, fully grown. The reef sample draws 8 screens. Over 24
+the motion is dropped (`shape_motion_count`): fewer figures or planes,
+smaller ones, or a smaller scale.
 
 ## Notes
 
@@ -263,13 +278,19 @@ not come after it. With *Reduce motion* it holds one still frame, and of
 the events that come meanwhile only where the focus is waits for it to
 move again.
 
-Its images decoded together stay within their budget (64 MiB); if one
+Each image is read as a PNG and nothing else, as every other image of a
+package: its chunks scanned before any reader opens it, then its header,
+its sides within 2048, and only then its pixels, within what the motion may
+still decode. Its images decoded together stay within their budget (64 MiB); if one
 does not decode, if they go over it, if the export is gone, or if the motion
 declares nothing to draw, nothing of the motion is drawn, the journal says why, and Home draws the package's v1
 world instead. If decoding takes the shell down, its next start skips that
 insertion's motion and shows its v1 look (a marker naming the insertion is
 written before decoding; if it cannot be written, nothing is decoded and
-the v1 world is drawn; a clean stop, as around a game, removes it). A
+the v1 world is drawn; a clean stop, as around a game, removes the marker
+of a motion that was only being decoded). The insertion's motion stays
+skipped over the shell's later starts, the ones after each game included,
+until the card is put in again or the console restarts. A
 frame lists 8,192 things at
 most (a package the checker accepts lists far fewer). MUN's panel sits on
 its plate over the motion, as over a world. The scene's time advances in

@@ -157,6 +157,26 @@ class CompositionTests(unittest.TestCase):
         self.assertRegex(syslog, r"(?m)^ForwardToSyslog=no$")
         self.assertNotIn("rsyslog", mkosi_list(MKOSI / "mkosi.conf", "Packages"))
 
+    def test_no_key_chord_restarts_the_console(self):
+        # Whoever can write key events (a keyboard, or a process that reaches
+        # an input device) must not be able to restart the console with them:
+        # systemd's burst action, the target the kernel's signal starts, and
+        # the kernel's own SysRq keys.
+        extra = MKOSI / "mkosi.extra"
+        manager = (extra / "usr" / "lib" / "systemd" / "system.conf.d" / "60-mun.conf").read_text()
+        self.assertRegex(manager, r"(?m)^\[Manager\]$")
+        self.assertRegex(manager, r"(?m)^CtrlAltDelBurstAction=none$")
+        target = extra / "etc" / "systemd" / "system" / "ctrl-alt-del.target"
+        self.assertTrue(target.is_symlink(), "ctrl-alt-del.target is not masked")
+        self.assertEqual(os.readlink(target), "/dev/null")
+        # reboot.target is the chord's target by an Alias=: enabling it, as
+        # the distribution's preset does for every unit, writes that alias
+        # over the mask when the image is composed.
+        preset = (extra / "usr" / "lib" / "systemd" / "system-preset" / "10-mun.preset").read_text()
+        self.assertRegex(preset, r"(?m)^disable reboot\.target$")
+        sysctl = (extra / "usr" / "lib" / "sysctl.d" / "60-mun.conf").read_text()
+        self.assertRegex(sysctl, r"(?m)^kernel\.sysrq = 0$")
+
     def test_package_translations_go_only_with_the_c_locale(self):
         # Removing them is safe only while no other locale is generated.
         text = (MKOSI / "mkosi.conf").read_text()

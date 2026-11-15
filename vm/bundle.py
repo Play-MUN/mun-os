@@ -53,6 +53,8 @@ MANIFEST_LIMIT = 1 << 20                       # bytes; a manifest is a few kilo
 # number is a mistake or a manifest written to fill the disk.
 SIZE_LIMIT = 1 << 36
 FILE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
+# Names Windows gives to devices, with any extension: a file cannot have one.
+DEVICE_NAME = re.compile(r"(con|prn|aux|nul|com[0-9]|lpt[0-9])(\..*)?", re.IGNORECASE)
 CARD_NAME = re.compile(r"[a-z0-9][a-z0-9_-]{0,15}")
 BUILD_NAME = re.compile(r"[a-z0-9][a-z0-9-]{1,15}")        # as vm/mundev.py names a build
 DIGEST = re.compile(r"[0-9a-f]{64}")
@@ -163,9 +165,12 @@ def check_manifest(data: Any) -> Dict[str, Any]:
         if not isinstance(entry, dict):
             raise BundleError("manifest file entry is not an object")
         name, kind = entry.get("name"), entry.get("kind")
-        if not isinstance(name, str) or not FILE_NAME.fullmatch(name) or ".." in name or name in seen:
+        # Seen without case: on a file system that ignores it, two names
+        # that differ only there are one file.
+        if not isinstance(name, str) or not FILE_NAME.fullmatch(name) or ".." in name or name.lower() in seen \
+                or DEVICE_NAME.fullmatch(name):
             raise BundleError(f"manifest file name not allowed: {name!r}")
-        seen.add(name)
+        seen.add(name.lower())
         if kind not in KINDS or (kind == "card") != name.startswith("card-"):
             raise BundleError(f"manifest file {name}: kind {kind!r} not allowed there")
         if not isinstance(entry.get("size"), int) or entry["size"] < 0:

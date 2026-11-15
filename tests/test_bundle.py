@@ -367,6 +367,31 @@ class ManifestTests(Fixture):
         self.assertIn("manifest is not JSON", str(refused.exception))
         self.assertFalse((self.root / "installed").exists())
 
+    def test_names_a_host_would_not_keep_as_distinct_files_are_refused(self):
+        good = self.manifest()
+        licence = lambda d: next(e for e in d["files"] if e["kind"] == "licence")  # noqa: E731
+        image = lambda d: next(e for e in d["files"] if e["kind"] == "image")  # noqa: E731
+        changes = {
+            # Windows gives these names to devices, whatever follows the dot.
+            "con.txt": lambda d: licence(d).update(name="con.txt"),
+            "NUL.txt": lambda d: licence(d).update(name="NUL.txt"),
+            "COM1.txt": lambda d: licence(d).update(name="COM1.txt"),
+            "lpt9.notes.txt": lambda d: licence(d).update(name="lpt9.notes.txt"),
+            "aux.qcow2": lambda d: image(d).update(name="aux.qcow2"),
+            # One file on a file system that ignores case (macOS, Windows).
+            "a.txt and A.txt": lambda d: d["files"].extend([dict(licence(d), name="a.txt"), dict(licence(d), name="A.txt")]),
+        }
+        for what, change in changes.items():
+            with self.subTest(what):
+                data = json.loads(json.dumps(good))
+                change(data)
+                with self.assertRaises(bundle.BundleError):
+                    bundle.check_manifest(data)
+        for name in ("console.txt", "com.txt", "nullable.txt", "OFL-1.1.txt"):
+            data = json.loads(json.dumps(good))
+            licence(data).update(name=name)
+            bundle.check_manifest(data)
+
     def test_locations_are_directories_manifests_or_web_addresses(self):
         self.assertFalse(bundle.Source("/some/dir").remote)
         self.assertEqual(bundle.Source("/some/dir").url("card-a.img.xz"), "/some/dir/card-a.img.xz")

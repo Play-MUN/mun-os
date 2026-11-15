@@ -1307,7 +1307,17 @@ class DirectorySync:
         or no way to tell), which abandons the capture."""
         found: Dict[str, Optional[bytes]] = {}
         total = 0
-        for name in sorted(os.listdir(self.dir_fd)):
+        # Listed through a descriptor opened for this listing. A directory
+        # descriptor remembers what it listed, and on overlayfs the one held
+        # for the whole session went on serving an earlier listing: a unit
+        # created since was not seen. "." from the held descriptor is that
+        # same directory, with no path resolved again and nothing to follow.
+        listing = os.open(".", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC, dir_fd=self.dir_fd)
+        try:
+            names = sorted(os.listdir(listing))
+        finally:
+            os.close(listing)
+        for name in names:
             if self.unit_pattern(name) is None:
                 continue
             if len(found) >= MAX_UNIT_FILES:

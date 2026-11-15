@@ -226,6 +226,35 @@ class CaptureRuleTests(SyncCase):
         self.answer(); self.sync.poll()
         self.assertEqual(self.files_sent(), {"save-0000.sav": SLOT2})
 
+    def test_units_are_listed_through_a_descriptor_opened_for_that_listing(self):
+        # On overlayfs a directory descriptor that has listed once keeps
+        # serving that listing: through the descriptor held for the whole
+        # session, a unit created later was never seen.
+        served, real_listdir, real_close = {}, os.listdir, os.close
+
+        def listdir(target="."):
+            if not isinstance(target, int):
+                return real_listdir(target)
+            if target not in served:
+                served[target] = real_listdir(target)
+            return list(served[target])
+
+        def close(fd):
+            served.pop(fd, None)             # a closed descriptor's number may be given out again
+            real_close(fd)
+
+        self.prepare()
+        with unittest.mock.patch.object(os, "listdir", listdir), unittest.mock.patch.object(os, "close", close):
+            self.game_writes("save-0000.sav", SLOT)
+            self.sync.poll()
+            self.assertEqual(self.files_sent(), {"save-0000.sav": SLOT})
+            self.answer()
+            self.game_writes("save-0001.sav", SLOT2)
+            self.sync.poll()
+            self.assertEqual(self.files_sent(), {"save-0000.sav": SLOT, "save-0001.sav": SLOT2},
+                             "the unit created after the first capture is in the second")
+            self.assertNotIn(self.sync.dir_fd, served, "the held descriptor is never the one listed through")
+
     def test_the_directory_itself_moved_is_reported(self):
         self.prepare()
         self.watch.events.append((launchd.IN_MOVE_SELF, ""))

@@ -11,6 +11,7 @@ import http.server
 import io
 import json
 import lzma
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -76,6 +77,23 @@ class Fixture(unittest.TestCase):
 
     def get(self, location, name=None):
         return bundle.get(str(location), self.root / "installed", self.root / "cards", name, report=self.report)
+
+    def rewrite(self, source, change):
+        """Change a bundle's manifest in place: `change(manifest)`."""
+        manifest = json.loads((source / "release.json").read_text())
+        change(manifest)
+        (source / "release.json").write_text(json.dumps(manifest))
+
+    def replace_file(self, source, name, data, new_name=None):
+        """Give the bundle's file `name` other bytes (and another name),
+        with the manifest saying exactly that: only what the file is differs."""
+        (source / name).unlink()
+        (source / (new_name or name)).write_bytes(data)
+
+        def change(manifest):
+            entry = next(e for e in manifest["files"] if e["name"] == name)
+            entry.update(name=new_name or name, size=len(data), sha256=hashlib.sha256(data).hexdigest())
+        self.rewrite(source, change)
 
 
 class MakeTests(Fixture):
@@ -220,6 +238,27 @@ class GetTests(Fixture):
         with self.assertRaises(bundle.BundleError) as refused:
             self.get(source)
         self.assertIn("larger", str(refused.exception))
+
+    def test_the_build_record_is_build_info_json_and_a_json_object(self):
+        record = lambda source: (source / "BUILD-INFO.json").read_bytes()  # noqa: E731
+        cases = {
+            "under another name": lambda source: self.replace_file(source, "BUILD-INFO.json", record(source), "x.json"),
+            "not JSON": lambda source: self.replace_file(source, "BUILD-INFO.json", b"not json {"),
+            "not an object": lambda source: self.replace_file(source, "BUILD-INFO.json", b"[1, 2]"),
+            "nested too deep": lambda source: self.replace_file(source, "BUILD-INFO.json", b"[" * 200000),
+            "artifacts not an object": lambda source: self.replace_file(
+                source, "BUILD-INFO.json", json.dumps({"build_id": BUILD_ID, "artifacts": [IMAGE]}).encode()),
+        }
+        for what, damage in cases.items():
+            with self.subTest(what):
+                shutil.rmtree(self.root)
+                self.root.mkdir()
+                source = self.bundle()
+                damage(source)
+                with self.assertRaises(bundle.BundleError):
+                    self.get(source)
+                self.assertFalse((self.root / "installed" / "d0929-123647").exists())
+                self.assertFalse((self.root / "cards").exists())
 
     def test_a_name_in_use_by_another_image_is_refused(self):
         source = self.bundle()

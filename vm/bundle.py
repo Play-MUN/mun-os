@@ -168,6 +168,8 @@ def check_manifest(data: Any) -> Dict[str, Any]:
             raise BundleError(f"manifest file {name}: no size")
         if not isinstance(entry.get("sha256"), str) or not DIGEST.fullmatch(entry["sha256"]):
             raise BundleError(f"manifest file {name}: no SHA-256")
+        if kind == "build-info" and name != "BUILD-INFO.json":
+            raise BundleError(f"manifest build record {name} is not BUILD-INFO.json")
         if kind == "image" and not name.endswith(".qcow2"):
             raise BundleError(f"manifest image {name} is not a qcow2 file")
         if kind == "licence" and not (name in ("LICENSE", "NOTICE") or name.endswith(".txt")):
@@ -377,10 +379,15 @@ def get(location: str, builds_root: Path, cards_root: Path, name: Optional[str] 
             continue
         report(f"downloading {entry['name']} ({entry['size'] / 1e6:.1f} MB) from {source.url(entry['name'])}")
         fetch_file(source, entry, target, report)
-    info = json.loads((staging / "BUILD-INFO.json").read_text())
+    try:
+        info = json.loads((staging / "BUILD-INFO.json").read_bytes())
+    except (ValueError, RecursionError) as exc:
+        raise BundleError("the bundle's BUILD-INFO.json is not JSON") from exc
     image = next(entry for entry in manifest["files"] if entry["kind"] == "image")
-    if info.get("build_id") != manifest["build_id"] or \
-            info.get("artifacts", {}).get(image["name"], {}).get("sha256") != image["sha256"]:
+    recorded = info.get("artifacts") if isinstance(info, dict) else None
+    recorded = recorded.get(image["name"]) if isinstance(recorded, dict) else None
+    if not isinstance(recorded, dict) or info.get("build_id") != manifest["build_id"] \
+            or recorded.get("sha256") != image["sha256"]:
         raise BundleError("the image and its BUILD-INFO.json do not belong together")
     cards = []
     for entry in manifest["files"]:

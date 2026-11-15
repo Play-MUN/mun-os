@@ -317,6 +317,25 @@ def pid_alive(pid: int) -> bool:
     return host.process_alive(HOST, pid)
 
 
+def holder_alive(holder: Dict[str, Any]) -> bool:
+    """Whether the process the registry names as a card's holder still is
+    that holder. A pid alone is no proof (read_pid): a guest's QEMU names its
+    instance's pidfile on its command line, and a card tool's reservation is
+    a run of mun-card. Where the command line cannot be read (vm/host.py), a
+    live pid counts as the holder, as it always did."""
+    pid = int(holder.get("pid", 0) or 0)
+    if not pid_alive(pid):
+        return False
+    command = host.process_command(HOST, pid)
+    if command is None:
+        return True
+    command = command.casefold()
+    if holder.get("purpose") in ("convert", "create"):
+        return "card" in command and "mun" in command
+    pidfile = GUESTS_ROOT / str(holder.get("instance", "")) / "qemu.pid"
+    return str(pidfile).casefold() in command
+
+
 def load_registry() -> Dict[str, Any]:
     try:
         return json.loads(ATTACH_REGISTRY.read_text())
@@ -339,7 +358,7 @@ def registry_claim(name: str, attachment: Optional[str] = None) -> None:
         registry = load_registry()
         holder = registry.get(name)
         if holder and holder.get("instance") != INSTANCE:
-            if pid_alive(int(holder.get("pid", 0) or 0)):
+            if holder_alive(holder):
                 if holder.get("purpose") == "convert":
                     # mun-card convert holds its source and destination here
                     # for the whole conversion (docs/game-cards.md).
@@ -1056,7 +1075,7 @@ def cmd_card_create(args: argparse.Namespace) -> None:
     # Held while the image is made, so none attaches a half-made one.
     with registry_lock():
         holder = load_registry().get(args.name)
-        if holder and pid_alive(int(holder.get("pid", 0) or 0)):
+        if holder and holder_alive(holder):
             raise LabError(f"{args.name} is held by instance {holder.get('instance')} (pid {holder.get('pid')}); "
                            "detach it there before replacing the image")
         run([which("qemu-img"), "create", "-q", "-f", "raw", str(path), args.size])

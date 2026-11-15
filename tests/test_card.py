@@ -967,6 +967,12 @@ class ConvertTests(unittest.TestCase):
         vm.ATTACH_REGISTRY = self.root / "attached.json"
         vm.INSTANCE = "a"
         vm.read_pid = lambda: os.getpid() + 1
+        # The reservation's pid is this test's own process, standing in for
+        # the run of mun-card that holds it.
+        from unittest.mock import patch as patch_host
+        stand_in = patch_host.object(vm.host, "process_command", lambda host, pid: "python3 ./mun card convert old new")
+        stand_in.start()
+        self.addCleanup(stand_in.stop)
         refused = []
         original = self.convert._eligibility
         def attach_meanwhile(*args, **kwargs):

@@ -495,7 +495,7 @@ class RuntimeProfileTests(unittest.TestCase):
 
     def test_framebuffer_profile_keeps_the_v0_unit(self):
         props = launchd.unit_properties("linux-arm64-v0", "s1", Path("/run/mun/launch/s1"))
-        self.assertIn("DeviceAllow=/dev/fb0 rw", props); self.assertIn("DeviceAllow=char-input rw", props)
+        self.assertIn("DeviceAllow=/dev/fb0 rw", props); self.assertIn("DeviceAllow=char-input r", props)
         self.assertNotIn("DeviceAllow=char-drm rw", props); self.assertNotIn("SupplementaryGroups=audio", props)
         self.assertIn("MemoryMax=512M", props); self.assertIn("DevicePolicy=closed", props)
         env = launchd.unit_environment("linux-arm64-v0", "s1", {"card_id": "mun.collect", "version": "0.1.0"}, Path("/x/s1"))
@@ -556,7 +556,7 @@ class RuntimeProfileTests(unittest.TestCase):
     def test_gl_profile_opens_drm_alsa_and_input_only_and_points_sdl_at_them(self):
         props = launchd.unit_properties("linux-arm64-gl-v0", "s2", Path("/run/mun/launch/s2"))
         allowed = [p for p in props if p.startswith("DeviceAllow=")]
-        self.assertEqual(sorted(allowed), sorted(["DeviceAllow=char-drm rw", "DeviceAllow=char-alsa rw", "DeviceAllow=char-input rw"]))
+        self.assertEqual(sorted(allowed), sorted(["DeviceAllow=char-drm rw", "DeviceAllow=char-alsa rw", "DeviceAllow=char-input r"]))
         for common in ("CapabilityBoundingSet=", "PrivateNetwork=yes", "ProtectSystem=strict", "NoNewPrivileges=yes",
                        "DevicePolicy=closed", "ReadWritePaths=/run/mun/launch/s2/work"):
             self.assertIn(common, props)
@@ -564,6 +564,16 @@ class RuntimeProfileTests(unittest.TestCase):
         env = launchd.unit_environment("linux-arm64-gl-v0", "s2", {}, Path("/x/s2"))
         self.assertEqual((env["SDL_VIDEODRIVER"], env["SDL_AUDIODRIVER"], env["ALSOFT_DRIVERS"]), ("kmsdrm", "alsa", "alsa"))
         self.assertEqual(env["HOME"], "/x/s2/work")
+
+    def test_input_devices_can_be_read_and_never_written_in_any_profile(self):
+        # A descriptor open for writing on an event device injects events for
+        # the whole console: a game wrote Ctrl+Alt+Del and the console rebooted.
+        for profile in launchd.PROFILES:
+            with self.subTest(profile):
+                props = launchd.unit_properties(profile, "s1", Path("/run/mun/launch/s1"))
+                self.assertIn("DevicePolicy=closed", props)
+                inputs = [p for p in props if p.startswith("DeviceAllow=") and "input" in p]
+                self.assertEqual(inputs, ["DeviceAllow=char-input r"])
 
     def test_shared_memory_and_ipc_are_the_sessions_own_and_bounded_in_both_profiles(self):
         def size(text):
@@ -621,7 +631,8 @@ class ContentAccessTests(unittest.TestCase):
         reply = h.m.launch({"slot": "c1", "serial": "NPT-game", "version": "0.1.0"}); h.pump()
         self.assertIsNone(h.m.session["content"])
         props = launchd.unit_properties("linux-arm64-v0", reply["session"], Path("/x"), None)
-        self.assertFalse(any(p.startswith("MountImages=") or p.endswith(" r") for p in props))
+        self.assertFalse(any(p.startswith("MountImages=") or (p.startswith("DeviceAllow=/dev/") and p.endswith(" r"))
+                             for p in props), "no mount of the card and no access to its device")
         env = launchd.unit_environment("linux-arm64-v0", reply["session"], h.m.session, Path("/x"))
         self.assertNotIn("MUN_CONTENT_DIR", env); self.assertNotIn("NEPTUNE_CONTENT_DIR", env)
 

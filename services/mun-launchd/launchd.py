@@ -1568,6 +1568,11 @@ def _write_all(fd: int, data: bytes) -> None:
 # node for Mesa, ALSA for audio, evdev for input; SDL is pointed at KMSDRM and
 # ALSA and OpenAL Soft at ALSA, because the console runs no display or sound
 # server and their probing would otherwise burn time before falling back.
+# Input devices are read-only in every profile: what is written to an event
+# device is delivered to the whole console as if a key had been pressed, so a
+# game with write access could type on the console's keyboard (Ctrl+Alt+Del
+# reboots it). Reading, and grabbing a device (an ioctl), need no write
+# access; force feedback and keyboard LEDs do, and games do not get them.
 # Memory and task ceilings are provisional lab figures for a software-rendered
 # 2D game, not console specifications. `shm_max` bounds the session's own
 # /dev/shm (unit_properties()), well inside its memory ceiling.
@@ -1576,13 +1581,13 @@ GL_PROFILE = "linux-arm64-gl-v0"
 PROFILES = {
     FRAMEBUFFER_PROFILE: {
         "groups": ("video", "input"),
-        "devices": ("/dev/fb0 rw", "char-input rw"),
+        "devices": ("/dev/fb0 rw", "char-input r"),
         "memory_max": "512M", "tasks_max": "32", "shm_max": "128M",
         "environment": {},
     },
     GL_PROFILE: {
         "groups": ("video", "render", "audio", "input"),
-        "devices": ("char-drm rw", "char-alsa rw", "char-input rw"),
+        "devices": ("char-drm rw", "char-alsa rw", "char-input r"),
         "memory_max": "2G", "tasks_max": "64", "shm_max": "512M",
         "environment": {"SDL_VIDEODRIVER": "kmsdrm", "SDL_AUDIODRIVER": "alsa", "ALSOFT_DRIVERS": "alsa"},
     },

@@ -102,7 +102,7 @@ SHA-256.
 ./mun play --card mycollect
 ```
 
-The console starts in a window and the card goes in: the Game Card entry says
+The console starts in a window and the card goes in: the MUN Disk entry says
 "My Collect", in your accent colour. **Enter, Enter** plays. Move the square
 with the arrows and collect a disc or two, then press **S**: "GUARDADO EN LA
 GAME CARD". The console has written your progress to the card's `saves/`,

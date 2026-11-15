@@ -121,12 +121,12 @@ Home has four entries on its orbit, each with its panel on the right:
 - **Turn off**: shuts the console down cleanly and closes the window; closing
   the window yourself is pulling the plug.
 
-![Settings in the virtual console, on Display: the six sections on the orbit and the display's settings on the panel](images/settings.en.jpg)
+![Home in the virtual console with the slot empty: MUN Disk, Universe, Settings and Turn off on an orbit, and MUN Disk's panel asking for a disk](images/home.en.jpg)
 
 The line at the top says which card is in, the network (*Offline*: the
 console needs none), the moon's phase and the time.
 
-![Home in the virtual console with the slot empty: MUN Disk, Universe, Settings and Turn off on an orbit, and MUN Disk's panel asking for a disk](images/home.en.jpg)
+![Settings in the virtual console, on Display: the six sections on the orbit and the display's settings on the panel](images/settings.en.jpg)
 
 ## 5. Insert a Game Card and play
 

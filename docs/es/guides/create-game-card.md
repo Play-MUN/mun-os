@@ -107,7 +107,7 @@ archivo de la tarjeta con su SHA-256.
 ./mun play --card mycollect
 ```
 
-La consola arranca en una ventana y la tarjeta entra: la entrada *Game Card*
+La consola arranca en una ventana y la tarjeta entra: la entrada *MUN Disk*
 dice «My Collect», con tu color de acento. **Intro, Intro** juega. Mueve el
 cuadrado con las flechas, recoge un disco o dos y pulsa **S**: «GUARDADO EN
 LA GAME CARD». La consola ha escrito tu progreso en `saves/` de la tarjeta,

@@ -42,7 +42,7 @@
       "source": "docs/getting-started.md",
       "language": "es",
       "reviewed": "2026-11-14",
-      "source_sha256": "44b05529d50486c445c3cea80a179bf60e4fca69358ce72f7cd2891d61f97d11"
+      "source_sha256": "67b0db5617efa6a1c6af4e76a2d1f72d9c04f3fd85f33b9906e9ecb36ee6470f"
     },
     {
       "translation": "docs/es/glossary.md",
@@ -56,7 +56,7 @@
       "source": "docs/guides/create-game-card.md",
       "language": "es",
       "reviewed": "2026-11-14",
-      "source_sha256": "96845ee0187de35011300f41690426f4e70ab92403c77565bdfc20eb4b60f648"
+      "source_sha256": "dc40d76c790f0601932d666589fe04380ebeffbcd32418212cffa057c5d96723"
     },
     {
       "translation": "docs/es/guides/port-a-game.md",

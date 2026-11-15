@@ -135,12 +135,12 @@ panel a la derecha:
 - **Apagar**: apaga la consola limpiamente y cierra la ventana; cerrar tú la
   ventana es como desenchufarla.
 
-![Configuración en la consola virtual, en Pantalla: las seis secciones en la órbita y los ajustes de la pantalla en el panel](../images/settings.es.jpg)
+![La pantalla principal en la consola virtual con la ranura vacía: MUN Disk, Universo, Configuración y Apagar en una órbita, y el panel de MUN Disk pidiendo un disco](../images/home.es.jpg)
 
 La línea de arriba dice qué tarjeta hay dentro, la red (*Sin conexión*: la
 consola no la necesita), la fase de la luna y la hora.
 
-![La pantalla principal en la consola virtual con la ranura vacía: MUN Disk, Universo, Configuración y Apagar en una órbita, y el panel de MUN Disk pidiendo un disco](../images/home.es.jpg)
+![Configuración en la consola virtual, en Pantalla: las seis secciones en la órbita y los ajustes de la pantalla en el panel](../images/settings.es.jpg)
 
 ## 5. Inserta una Game Card y juega
 

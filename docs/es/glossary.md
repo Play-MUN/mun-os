@@ -61,7 +61,6 @@ español usa las de la columna derecha.
 | Time format / Set time | Formato de hora / Ajuste de hora |
 | Resolution | Resolución |
 | System sounds | Sonidos del sistema |
-| Startup sound | Sonido de arranque |
 | Auto power off | Apagado automático |
 | Network / System | Red / Sistema |
 | Reset settings | Restablecer ajustes |

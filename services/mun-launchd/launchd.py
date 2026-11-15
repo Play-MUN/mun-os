@@ -1611,7 +1611,12 @@ def unit_properties(profile: Optional[str], sid: str, dest: Path, content: Optio
         # node's root:disk 0660 mode still keeps the game itself away from it.
         # The leading "-" makes a vanished device non-fatal for namespace
         # set-up; the launcher ends the session on removal anyway.
-        properties.append(f"MountImages=-{content['device']}:{CONTENT_MOUNT}:root:ro,nosuid,nodev,noexec")
+        # errors=remount-ro: without an error policy of the mount's own,
+        # ext4 takes the one written in the card's superblock, and a card
+        # may say "panic": the first damaged inode a game reads would then
+        # stop the kernel. The card service's mount fixes the policy the same
+        # way; this one must not be the mount that leaves it to the card.
+        properties.append(f"MountImages=-{content['device']}:{CONTENT_MOUNT}:root:ro,nosuid,nodev,noexec,errors=remount-ro")
     properties += [f"SupplementaryGroups={group}" for group in spec["groups"]]
     properties += [
         "NoNewPrivileges=yes", "CapabilityBoundingSet=", "ProtectSystem=strict", "ProtectHome=yes", "PrivateTmp=yes",

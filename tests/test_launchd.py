@@ -619,12 +619,24 @@ class ContentAccessTests(unittest.TestCase):
         self.assertEqual(h.m.state, "starting")
         self.assertEqual(h.m.session["content"], self.GRANT)
         props = launchd.unit_properties("linux-arm64-gl-v0", sid, Path("/run/mun/launch") / sid, h.m.session["content"])
-        self.assertIn("MountImages=-/dev/vdc:/run/mun/card:root:ro,nosuid,nodev,noexec", props)
+        self.assertIn("MountImages=-/dev/vdc:/run/mun/card:root:ro,nosuid,nodev,noexec,errors=remount-ro", props)
         self.assertIn("DeviceAllow=/dev/vdc r", props)
         self.assertIn("DevicePolicy=closed", props)
         env = launchd.unit_environment("linux-arm64-gl-v0", sid, h.m.session, Path("/x"))
         self.assertEqual(env["MUN_CONTENT_DIR"], "/run/mun/card/content")
         self.assertEqual(env["NEPTUNE_CONTENT_DIR"], env["MUN_CONTENT_DIR"])
+
+    def test_the_games_mount_of_the_card_never_takes_its_error_policy_from_the_card(self):
+        # ext4 acts on a file system error as the card's own superblock says
+        # unless the mount says otherwise, and a card can say "panic".
+        for profile in launchd.PROFILES:
+            with self.subTest(profile):
+                props = launchd.unit_properties(profile, "s1", Path("/run/mun/launch/s1"), self.GRANT)
+                (mount,) = [p for p in props if p.startswith("MountImages=")]
+                options = mount.rsplit(":", 1)[1].split(",")
+                self.assertEqual([o for o in options if o.startswith("errors=")], ["errors=remount-ro"])
+                for kept in ("ro", "nosuid", "nodev", "noexec"):
+                    self.assertIn(kept, options)
 
     def test_copy_access_has_no_mount_and_no_content_variable(self):
         h = Harness(game_card())
@@ -895,7 +907,7 @@ class CleanupUnitTests(unittest.TestCase):
         self.assertFalse([p for p in props if p.startswith("ExecStopPost")], "nothing runs in the game's mount namespace at stop")
         self.assertIn("OnSuccess=mun-launch-cleanup@s9.service", props)
         self.assertIn("OnFailure=mun-launch-cleanup@s9.service", props)
-        for kept in ("MountImages=-/dev/vdc:/run/mun/card:root:ro,nosuid,nodev,noexec", "NoNewPrivileges=yes",
+        for kept in ("MountImages=-/dev/vdc:/run/mun/card:root:ro,nosuid,nodev,noexec,errors=remount-ro", "NoNewPrivileges=yes",
                      "CapabilityBoundingSet=", "ProtectSystem=strict", "PrivateNetwork=yes", "DevicePolicy=closed",
                      "DeviceAllow=/dev/vdc r", "ReadWritePaths=/run/mun/launch/s9/work", "RestrictNamespaces=yes"):
             self.assertIn(kept, props)

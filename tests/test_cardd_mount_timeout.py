@@ -19,8 +19,11 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "services" / "mun-cardd"))
 sys.path.insert(0, str(ROOT / "tools" / "mun-card"))
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 import cardd  # noqa: E402
 from mun_card.errors import CardError  # noqa: E402
+from test_cardd import Harness, RealDirMounter, game_info  # noqa: E402
 
 
 class Card:
@@ -136,6 +139,98 @@ class MountTimeoutTests(unittest.TestCase):
         self.assertIsNone(card.mount)
         self.assertEqual([call.split()[0] for call in self.calls()], ["mount", "umount"])
         self.assertEqual(getattr(self.mounter, "stalled", {}), {})
+
+
+class LateRemountTests(unittest.TestCase):
+    """A save's remount that ends after its bound may still take effect: the
+    card service then follows what the kernel did, never what the failed
+    save believed. The stand-in `mount` keeps the card's read-only or
+    read-write state in a file, as the kernel's table would."""
+
+    def setUp(self):
+        self.bin = Path(tempfile.mkdtemp())
+        self.state = self.bin / "state"
+        self.state.write_text("ro")
+        self.log = self.bin / "calls.log"
+        self.delay = self.bin / "delay"          # "rw" or "ro": that remount takes 0.6 s
+        program = self.bin / "mount"
+        program.write_text(f'''#!/bin/sh
+echo "mount $*" >> "{self.log}"
+case "$*" in
+  *remount,rw*) [ "$(cat "{self.delay}" 2>/dev/null)" = rw ] && sleep 0.6; echo rw > "{self.state}" ;;
+  *remount,ro*) [ "$(cat "{self.delay}" 2>/dev/null)" = ro ] && sleep 0.6; echo ro > "{self.state}" ;;
+esac
+exit 0
+''')
+        program.chmod(program.stat().st_mode | stat.S_IXUSR)
+        state = self.state
+        real_dir = RealDirMounter(Path(tempfile.mkdtemp()))
+
+        class Mounter(cardd.Mounter):
+            def mount(self, card, path):
+                return real_dir.mount(card, path)
+
+            def unmount(self, card, strict=False):
+                card.mount = None
+
+            def mounted(self, target):
+                return True
+
+            def read_only(self, target):
+                return state.read_text().strip() == "ro"
+
+        for p in (patch.dict(os.environ, {"PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}"}),
+                  patch.object(cardd, "MOUNT_TIMEOUT", 0.3, create=True)):
+            p.start()
+            self.addCleanup(p.stop)
+        info = game_info(naming="mun")
+        self.h = Harness(mounter=Mounter(), validator=lambda mount: dict(info))
+        self.h.manager.device_added("vdc", "NPT-game", "/dev/vdc")
+        self.h.pump()
+        self.card = self.h.manager.cards["vdc"]
+        self.addCleanup(self.finish)
+
+    def finish(self):
+        for _, proc in self.h.manager.mounter.stalled.values():
+            proc.kill()
+            proc.wait()
+
+    def save(self):
+        replies = []
+        insertion = self.h.manager.snapshot()["cards"][0]["insertion"]
+        self.h.manager.save({"type": "save", "slot": "c1", "insertion": insertion, "serial": "NPT-game",
+                             "version": "0.1.0", "game": "mun.collect", "session": "s1", "schema": 1,
+                             "payload": {"x": 1}}, replies.append)
+        self.h.pump()
+        return replies[-1]
+
+    def remounts(self):
+        return [line.split(",")[0].split()[-1] for line in self.log.read_text().splitlines()]
+
+    def test_a_late_remount_to_read_write_is_returned_to_read_only(self):
+        self.delay.write_text("rw")
+        reply = self.save()
+        self.assertEqual((reply["ok"], reply["error"]["code"]), (False, "write_failed"))
+        self.assertTrue(self.card.writable, "the card may become writable: it counts as such")
+        self.assertTrue(self.card.closing, "and its return to read-only is due")
+        self.assertFalse(self.h.manager._close_card(self.card), "nothing is decided while the remount runs")
+        time.sleep(0.8)                              # the remount to read-write ends after all
+        self.assertEqual(self.state.read_text().strip(), "rw")
+        self.assertTrue(self.h.manager._close_card(self.card))
+        self.assertEqual(self.state.read_text().strip(), "ro", "the card was left writable")
+        self.assertFalse(self.card.writable)
+
+    def test_a_late_remount_to_read_only_is_not_done_twice(self):
+        self.delay.write_text("ro")
+        reply = self.save()
+        self.assertEqual((reply["ok"], reply["error"]["code"]), (False, "sync_failed"))
+        self.assertTrue(self.card.writable)
+        time.sleep(0.8)                              # the remount to read-only ends after all
+        self.assertEqual(self.state.read_text().strip(), "ro")
+        before = self.remounts()
+        self.assertTrue(self.h.manager._close_card(self.card))
+        self.assertFalse(self.card.writable)
+        self.assertEqual(self.remounts(), before, "a card already read-only was remounted again")
 
 
 if __name__ == "__main__":

@@ -407,8 +407,8 @@ class CardManager:
                else "failed: " + outcome["error"]["code"] + (" (" + outcome["error"].get("detail", "") + ")" if outcome["error"].get("detail") else "")))
         reply({"type": "saved", "session": request.get("session"), **outcome})
         if card.writable and self.cards.get(card.device) is card:
-            log(f"{card.slot} ({card.serial}) is still mounted read-write after the save: the remount to read-only "
-                f"was refused; trying again every {READ_ONLY_RETRY:g} s and before any release")
+            log(f"{card.slot} ({card.serial}) may still be writable after the save: returning it to read-only "
+                f"is tried again every {READ_ONLY_RETRY:g} s and before any release")
             self._close_later(card)
         self._advance_release(card)
 
@@ -424,15 +424,22 @@ class CardManager:
         then, the card would need a recovery the console never performs. So
         the remount is owed, and tried again here: by a timer, and before a
         release. Never under a save in flight, which needs the card writable
-        and ends with this same remount."""
+        and ends with this same remount.
+
+        A remount that did not end in time may still take effect: a late
+        remount to read-write leaves the card writable although its save
+        failed, a late remount to read-only leaves it closed although its
+        save reported otherwise. So nothing is decided while one still runs
+        on the card, and then the kernel's table says which it is."""
         if not card.writable or not card.mount:
             return True
-        if card.saving:
+        if card.saving or not self.mounter.settled(card.mount):
             return False
-        try:
-            self.mounter.remount(card, rw=False)
-        except CardError:
-            return False
+        if self.mounter.read_only(card.mount) is not True:
+            try:
+                self.mounter.remount(card, rw=False)
+            except CardError:
+                return False
         card.writable = False
         log(f"{card.slot} ({card.serial}) is read-only again")
         return True
@@ -1012,11 +1019,14 @@ def _write_save(mounter: "Mounter", card: "Card", info: dict, data: bytes, gener
         raise CardError("card_removed", "La tarjeta se retiró antes de guardar")
     mount = Path(card.mount)
     target = save_path(mount, info)
-    mounter.remount(card, rw=True)
-    # Writable from here until a remount to read-only succeeds. If the one
-    # that ends this save is refused, the flag stays and the manager tries
-    # again (CardManager._close_card): the card is never left writable.
+    # Writable from before the remount to read-write until a remount to
+    # read-only succeeds. Set first: a remount to read-write that does not
+    # end in time fails the save but may still take effect afterwards, and
+    # the card must then count as writable. If the remount that ends this
+    # save is refused, the flag stays and the manager tries again
+    # (CardManager._close_card): the card is never left writable.
     card.writable = True
+    mounter.remount(card, rw=True)
     dir_fd = -1
 
     def read_only_again() -> None:
@@ -1408,6 +1418,36 @@ class Mounter:
                            for line in table if line.count(b" ") >= 5)
         except OSError:
             return True
+
+    @staticmethod
+    def read_only(target: str) -> Optional[bool]:
+        """Whether the filesystem mounted at `target` is read-only: its
+        superblock's options in the kernel's table (after the " - "), which
+        every mount of the device shares. None when the table cannot be read
+        or does not hold `target`."""
+        state = None
+        try:
+            with open("/proc/self/mountinfo", "rb") as table:
+                for line in table:
+                    fields = line.rstrip(b"\n").split(b" ")
+                    if len(fields) < 10 or fields[4].decode("unicode_escape", "replace") != target:
+                        continue
+                    try:
+                        separator = fields.index(b"-", 6)
+                    except ValueError:
+                        continue
+                    if len(fields) > separator + 3:
+                        # The last line wins: a later mount on the same point covers the earlier.
+                        state = fields[separator + 3].split(b",")[0] == b"ro"
+        except OSError:
+            return None
+        return state
+
+    def settled(self, target: str) -> bool:
+        """No command started on `target` is still running."""
+        self.reap()
+        with self.stalled_lock:
+            return target not in self.stalled
 
     def reap(self) -> None:
         """Forget stalled commands that have ended. A mount that succeeded

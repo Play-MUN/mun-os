@@ -44,6 +44,14 @@ class FakeMounter:
     def device_path(self, device):
         return f"/dev/{device}"
 
+    # Nothing is ever left running, and the kernel's table is not consulted:
+    # unknown, so closing a card remounts it, as the service does then.
+    def settled(self, target):
+        return True
+
+    def read_only(self, target):
+        return None
+
     def mount(self, card, path):
         if card.device in self.fail_for:
             raise CardError("image_needs_recovery", "El sistema de archivos necesita recuperación y no se monta")

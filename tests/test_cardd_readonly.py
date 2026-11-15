@@ -99,7 +99,7 @@ class WritableCardTests(unittest.TestCase):
         self.assertEqual(self.remounts()[-1], "remount:ro")
         self.assertEqual(self.timers, [], "converged: nothing left to retry")
         self.assertIn("read-only again", self.journal.getvalue())
-        self.assertEqual(self.journal.getvalue().count("still mounted read-write"), 1, "said once, not at every attempt")
+        self.assertEqual(self.journal.getvalue().count("may still be writable after the save"), 1, "said once, not at every attempt")
 
     def test_two_refused_saves_keep_a_single_retry_running(self):
         self.mounter.refuse_read_only = True

@@ -186,11 +186,23 @@ def accelerator() -> str:
 
 
 def read_pid() -> Optional[int]:
+    """The pid of this guest's running QEMU, or None.
+
+    The pid file outlives a host that went down, and its number is then
+    given to another process: alive, and not this guest. QEMU is started
+    with `-pidfile <this file>`, so a live process is the guest only if its
+    command line names the file. Where the command line cannot be read
+    (vm/host.py), a live pid counts as the guest, as it always did."""
     try:
         pid = int(PATHS["pidfile"].read_text().strip())
     except (OSError, ValueError):
         return None
-    return pid if pid_alive(pid) else None
+    if not pid_alive(pid):
+        return None
+    command = host.process_command(HOST, pid)
+    if command is not None and str(PATHS["pidfile"]) not in command:
+        return None
+    return pid
 
 
 # ------------------------------------------------------------------- lab locks
@@ -382,7 +394,11 @@ class Qmp:
         address = control_address(path)
         if address is None:
             raise LabError("QMP socket missing; is the VM running? (./mun vm status)")
-        self.sock = host.connect(address, timeout)
+        try:
+            self.sock = host.connect(address, timeout)
+        except OSError as exc:
+            raise LabError(f"QEMU's control socket does not answer ({exc}); is the VM running? "
+                           "(./mun vm status)") from exc
         self.buf = b""
         self.events: List[Dict[str, Any]] = []
         self._read()  # greeting
@@ -895,6 +911,10 @@ def cmd_stop(args: argparse.Namespace) -> None:
         clear_cards()
         finalize_capture()
         print("VM is not running")
+        if PATHS["pidfile"].exists():
+            # Left by a QEMU that did not end by itself (the host went down).
+            PATHS["pidfile"].unlink()
+            print(f"removed {PATHS['pidfile'].name}, left by an earlier run")
         return
     qmp = Qmp(PATHS["qmp"])
     try:
@@ -1596,6 +1616,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     except subprocess.CalledProcessError as exc:
         print(f"error: command failed ({exc.returncode}): {' '.join(map(str, exc.cmd))}", file=sys.stderr)
         return exc.returncode or 1
+    except (ConnectionError, socket.timeout) as exc:
+        # QEMU went away, or stopped answering, in the middle of a command.
+        print(f"error: the connection to QEMU's control socket was lost: {exc}", file=sys.stderr)
+        return 1
     return 0
 
 

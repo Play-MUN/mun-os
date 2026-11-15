@@ -400,6 +400,26 @@ def process_alive(host: Host, pid: int) -> bool:
     return True
 
 
+def process_command(host: Host, pid: int) -> Optional[str]:
+    """The command line of process `pid` as one string, or None where it
+    cannot be read: on Windows, or when the system does not show it. A pid
+    alone does not say whose process it is: a number left in a file is
+    handed to another process once its own has gone."""
+    if host.system == "linux":
+        try:
+            return Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\0", b" ").decode("utf-8", "replace")
+        except OSError:
+            return None
+    if host.system == "macos":
+        try:
+            listed = subprocess.run(["/bin/ps", "-ww", "-o", "command=", "-p", str(pid)], capture_output=True,
+                                    text=True, errors="replace", timeout=10, check=False)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return listed.stdout.strip() or None
+    return None
+
+
 def _windows_process_alive(pid: int) -> bool:
     import ctypes
     from ctypes import wintypes

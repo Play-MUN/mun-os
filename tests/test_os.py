@@ -537,7 +537,7 @@ class BuildInfoTests(unittest.TestCase):
         self.tmp = Path(directory.name)
 
     def build_info(self, image_name="mun-os-0.1.0-dev-qemu-arm64.qcow2", image_format="qcow2", pinned=(),
-                   kernel=DEBIAN_KERNEL, check=True):
+                   kernel=DEBIAN_KERNEL, check=True, config=MKOSI, clean=True):
         """BUILD-INFO of a fake build of the qemu-dev profile's configuration,
         as build_info.py writes it, or the finished process with check=False."""
         tmp = self.tmp
@@ -564,7 +564,7 @@ class BuildInfoTests(unittest.TestCase):
         initrd = tmp / "initrd.cpio.zst"
         initrd.write_bytes(b"cpio")
         source = tmp / "source.json"
-        source.write_text(json.dumps({"commit": "c" * 40, "clean": True}))
+        source.write_text(json.dumps({"commit": "c" * 40, "clean": clean}))
         record = tmp / "pinned.json"
         record.write_text(json.dumps(list(pinned)))
         result = subprocess.run([sys.executable, str(OS / "builder" / "build_info.py"),
@@ -574,12 +574,27 @@ class BuildInfoTests(unittest.TestCase):
                                  "--pinned", str(record), "--manifest", str(manifest),
                                  "--initrd-manifest", str(initrd_manifest), "--initrd", str(initrd),
                                  "--builder-packages", str(builder), "--toolchain", str(toolchain),
-                                 "--config", str(MKOSI), "--out", str(tmp)],
+                                 "--config", str(config), "--out", str(tmp)],
                                 capture_output=True, text=True)
         if not check:
             return result
         self.assertEqual(result.returncode, 0, result.stderr)
         return json.loads(result.stdout)
+
+    def test_a_release_is_never_recorded_for_uncommitted_changes(self):
+        # No profile is a release profile today; the day one is, a build of
+        # a tree with uncommitted changes must not come out saying "release".
+        config = self.tmp / "config"
+        profile = config / "mkosi.profiles" / "qemu-dev"
+        profile.mkdir(parents=True)
+        text = QEMU_DEV.read_text()
+        self.assertIn("MUN_RELEASE=false", text)
+        (profile / "mkosi.conf").write_text(text.replace("MUN_RELEASE=false", "MUN_RELEASE=true"))
+        refused = self.build_info(config=config, clean=False, check=False)
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("uncommitted", refused.stderr)
+        self.assertTrue(self.build_info(config=config, clean=True)["release"])
+        self.assertFalse(self.build_info(clean=False)["release"], "a development build of changes is still made")
 
     def test_build_info_names_identity_inputs_and_absences(self):
         (self.tmp / "games" / "mygame").mkdir(parents=True)

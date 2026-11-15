@@ -145,6 +145,12 @@ def main(argv: list) -> int:
         if recipe["name"] in games:
             games[recipe["name"]]["recipe"] = recipe
 
+    # A release is one commit: a tree with uncommitted changes can be built
+    # for development, never recorded as a release.
+    if environment.get("MUN_RELEASE") == "true" and not source.get("clean"):
+        print("build_info: a release profile cannot build uncommitted changes", file=sys.stderr)
+        return 1
+
     info = {
         "format": FORMAT,
         "name": inputs["name"],

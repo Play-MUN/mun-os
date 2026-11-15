@@ -223,7 +223,8 @@ class CardManager:
         due = [entry for entry in self._due if entry[0] <= now]
         self._due = [entry for entry in self._due if entry[0] > now]
         for _, fn in due:
-            fn()
+            # Each on its own: one that fails must not cost the others theirs.
+            guarded("a timer run by the loop", fn)
 
     # --- events from the platform ---------------------------------------------
     def device_added(self, device: str, serial: str, path: str) -> None:
@@ -1449,7 +1450,13 @@ def _remove_in_background(path: Path) -> None:
     try:
         threading.Thread(target=_remove_tree, args=(path,), name="shape-remove", daemon=True).start()
     except RuntimeError:
-        _remove_tree(path)      # no thread to be had: the export is in RAM, removed here
+        # No thread to be had: the export is in RAM and is removed here. If
+        # even that fails it stays until the service's next start, which
+        # clears every export (clear_shape_root); the caller goes on.
+        try:
+            _remove_tree(path)
+        except OSError as exc:
+            log(f"could not remove the export {path.name} ({exc}); the service's next start clears it")
 
 
 def clear_shape_root(root: Path) -> None:

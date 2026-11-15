@@ -1403,6 +1403,30 @@ class UnmountWithoutProcessesTests(unittest.TestCase):
         self.wake()
         self.assertEqual(ran, [True], "a timer that had no thread still runs")
 
+    def test_a_timer_that_fails_costs_the_others_nothing(self):
+        ran = []
+
+        def broken():
+            raise OSError("broken")
+
+        self.processes = False
+        for fn in (broken, lambda: ran.append(True)):
+            try:
+                self.h.manager.later(1.0, fn)
+            except Exception as exc:  # noqa: BLE001
+                self.failures.append(exc)
+        self.processes = True
+        try:                                    # as main's guard runs the loop's step
+            self.wake()
+        except Exception as exc:  # noqa: BLE001
+            self.failures.append(exc)
+        self.assertEqual(ran, [True], "the timer after the failing one still runs")
+
+    def test_an_export_that_cannot_be_removed_inline_does_not_stop_its_caller(self):
+        self.processes = False
+        with patch.object(cardd, "_remove_tree", side_effect=OSError(30, "Read-only file system")):
+            cardd._remove_in_background(Path("/run/mun/shape/0000000000000000.1"))
+
     def test_an_export_removed_without_a_thread_is_removed_at_once(self):
         import tempfile
         export = Path(tempfile.mkdtemp()) / "insertion.1"

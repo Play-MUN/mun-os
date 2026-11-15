@@ -15,8 +15,9 @@ For each binary package and version, snapshot.debian.org names its source
 package and version (/mr/binary/NAME/); for each source, its files and their
 SHA-1 (/mr/package/SOURCE/VERSION/srcfiles?fileinfo=1), each file fetched by
 digest (/file/SHA1) and checked. A binary can also incorporate other
-packages' code, which Debian records in its Built-Using field: the signed
-kernel's own source holds only signatures, and the kernel's is `linux`. The
+packages' code, which Debian records in its Built-Using field (and, for
+statically linked code, Static-Built-Using): the signed kernel's own source
+holds only signatures, and the kernel's is `linux`. The
 package indexes of the snapshot the image was built from (every binary must
 be in them) give those sources, and they are fetched too. DIR/SOURCES.json
 lists what was fetched and which binaries each source built. Running it
@@ -100,9 +101,19 @@ def indexes(info: dict) -> List[str]:
     return urls
 
 
+# The fields in which a binary names the other sources built into it:
+# Built-Using, and since Debian 13 Static-Built-Using (statically linked
+# code, as Go and Rust programs carry).
+USING_FIELDS = ("Built-Using", "Static-Built-Using")
+
+
 def stanzas(url: str, opener: Callable = urllib.request.urlopen, tries: int = 4) -> List[Tuple[str, str, str]]:
-    """(Package, Version, Built-Using) of every stanza of one package index,
-    read as it downloads; retried whole."""
+    """(Package, Version, built using) of every stanza of one package index,
+    read as it downloads; retried whole. The third is the stanza's
+    USING_FIELDS together, as one comma-separated list."""
+    def using(fields: Dict[str, str]) -> str:
+        return ", ".join(fields[name].strip().strip(",") for name in USING_FIELDS if fields.get(name, "").strip())
+
     for attempt in range(tries):
         try:
             found, fields, last = [], {}, ""
@@ -111,16 +122,16 @@ def stanzas(url: str, opener: Callable = urllib.request.urlopen, tries: int = 4)
                     line = line.rstrip("\n")
                     if not line:
                         if "Package" in fields and "Version" in fields:
-                            found.append((fields["Package"], fields["Version"], fields.get("Built-Using", "")))
+                            found.append((fields["Package"], fields["Version"], using(fields)))
                         fields, last = {}, ""
                     elif line[0] in " \t":
-                        if last == "Built-Using":
+                        if last in USING_FIELDS:
                             fields[last] += " " + line.strip()
                     elif ":" in line:
                         last, value = line.split(":", 1)
                         fields[last] = value.strip()
             if "Package" in fields and "Version" in fields:
-                found.append((fields["Package"], fields["Version"], fields.get("Built-Using", "")))
+                found.append((fields["Package"], fields["Version"], using(fields)))
             return found
         except urllib.error.HTTPError as exc:
             if exc.code == 404:

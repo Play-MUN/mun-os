@@ -33,6 +33,12 @@ Package: linux-image-6.1-arm64
 Version: 6.1-1
 Built-Using: linux
  (= 6.1-1)
+
+Package: gotool
+Version: 1.0-1
+Built-Using: gobase (= 1.24-1)
+Static-Built-Using: golang-x (= 0.5-1),
+ rust-y (= 1.2-3)
 """
 
 
@@ -59,7 +65,11 @@ class Snapshot:
         if url.endswith("/mr/binary/linux-image-6.1-arm64/"):
             return {"result": [{"name": "linux-image-6.1-arm64", "binary_version": "6.1-1",
                                 "source": "linux-signed-arm64", "version": "6.1+1"}]}
-        for source, version, dsc in (("linux-signed-arm64", "6.1+1", b"signatures"), ("linux", "6.1-1", KDSC)):
+        if url.endswith("/mr/binary/gotool/"):
+            return {"result": [{"name": "gotool", "binary_version": "1.0-1", "source": "gotool", "version": "1.0-1"}]}
+        for source, version, dsc in (("linux-signed-arm64", "6.1+1", b"signatures"), ("linux", "6.1-1", KDSC),
+                                     ("gotool", "1.0-1", b"gotool"), ("gobase", "1.24-1", b"gobase"),
+                                     ("golang-x", "0.5-1", b"golang-x"), ("rust-y", "1.2-3", b"rust-y")):
             if url.endswith(f"/mr/package/{source}/{version}/srcfiles?fileinfo=1"):
                 self.files[sha1(dsc)] = dsc
                 return {"fileinfo": {sha1(dsc): [{"name": f"{source}_{version}.dsc", "size": len(dsc),
@@ -121,6 +131,17 @@ class SourcesTests(unittest.TestCase):
         self.assertEqual(found[("linux", "6.1-1")], ["linux-image-6.1-arm64 6.1-1 (Built-Using)"],
                          "the signed kernel's source holds only signatures: the kernel's own source is linux")
         self.assertEqual((self.out / "linux_6.1-1" / "linux_6.1-1.dsc").read_bytes(), KDSC)
+
+    def test_the_sources_a_binary_was_statically_built_using_come_too(self):
+        # Debian 13 records the Go and Rust code linked into a binary in
+        # Static-Built-Using, beside Built-Using.
+        info = dict(self.INFO, packages=self.INFO["packages"] + [{"name": "gotool", "version": "1.0-1", "architecture": "arm64"}])
+        manifest = self.collect(info)
+        found = {(entry["source"], entry["version"]): entry["binaries"] for entry in manifest["sources"]}
+        self.assertEqual(found[("gotool", "1.0-1")], ["gotool 1.0-1"])
+        for source in (("gobase", "1.24-1"), ("golang-x", "0.5-1"), ("rust-y", "1.2-3")):
+            self.assertEqual(found.get(source), ["gotool 1.0-1 (Built-Using)"], source)
+        self.assertEqual((self.out / "rust-y_1.2-3" / "rust-y_1.2-3.dsc").read_bytes(), b"rust-y")
 
     def test_a_binary_the_package_indexes_do_not_have_stops_the_collection(self):
         info = dict(self.INFO, kernel={"packages": {"linux-image-6.1-arm64": "6.1-2"}})

@@ -191,7 +191,7 @@ function startUpChecks() {
 // shown. Here Main.qml's and BootLayer.qml's own functions hand the screen
 // over to each other, and `seen` holds every value the binding takes as they
 // write those two, one write at a time, as QML evaluates it.
-function handOver({ powered, shown, systemSounds = true }) {
+function handOver({ powered, shown, systemSounds = true, deviceOpen = true }) {
     const main = qml("Main.qml");
     const layer = qml("BootLayer.qml");
     const state = { powered: powered, shown: shown };
@@ -201,6 +201,7 @@ function handOver({ powered, shown, systemSounds = true }) {
     const window = {
         modal: "a dialog",
         ShellSettings: { systemSounds: systemSounds },
+        SystemSounds: { deviceOpen: () => deviceOpen },
         PowerControl: { lastError: "it failed", busy: false, lastAction: "off", lastStatus: 0,
                         powerOff: note("PowerControl.powerOff"), resetConsole: note("PowerControl.resetConsole") },
         shutdownSound: { start: note("shutdownSound.start") },
@@ -280,6 +281,12 @@ function awakeChecks() {
           h.seen.every((value) => value === false) && h.calls.join() === "PowerControl.powerOff", h.calls.join());
     h = handOver({ powered: false, shown: false });
     check("neither Home nor the start-up's layer: not awake", h.awake() === false);
+
+    // Turning off waits for its sound only where there is a device to play it.
+    h = handOver({ powered: true, shown: false, deviceOpen: false });
+    h.window.powerOff();
+    check("turning off with no sound device open: the console goes down at once, no sound asked for",
+          h.boot.shown && !h.window.powered && h.calls.join() === "PowerControl.powerOff", h.calls.join());
 }
 
 // ---------------------------------------------------------------- what the panels say

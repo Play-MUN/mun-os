@@ -593,12 +593,14 @@ Window {
     }
     function askPowerOff() { openModal(panels.powerOff()) }
     // Turning off sounds "shutdown" and lets it play out (the screen dark)
-    // before the system goes down.
+    // before the system goes down. Without a sound device open there is
+    // nothing to wait for: the interface's sounds on, the device is kept
+    // open while Home is shown, so one that is not open now would not play.
     function powerOff() {
         modal = null
         boot.powerOff()
         powered = false
-        if (ShellSettings.systemSounds) {
+        if (ShellSettings.systemSounds && SystemSounds.deviceOpen()) {
             sound("shutdown")
             shutdownSound.start()
         } else {

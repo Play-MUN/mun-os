@@ -226,6 +226,8 @@ class Source:
             raise BundleError("manifest too large")
         try:
             return check_manifest(json.loads(raw))
+        except RecursionError as exc:              # brackets nested past what the parser follows
+            raise BundleError("manifest is not JSON: nested too deep") from exc
         except ValueError as exc:
             raise BundleError(f"manifest is not JSON: {exc}") from exc
 

@@ -278,6 +278,15 @@ class ManifestTests(Fixture):
             with self.assertRaises(bundle.BundleError, msg=str(data)[:120]):
                 bundle.check_manifest(data)
 
+    def test_a_manifest_nested_deeper_than_the_parser_goes_is_refused_like_any_other(self):
+        deep = self.root / "deep"
+        deep.mkdir()
+        (deep / "release.json").write_text("[" * 200000)
+        with self.assertRaises(bundle.BundleError) as refused:
+            self.get(deep)
+        self.assertIn("manifest is not JSON", str(refused.exception))
+        self.assertFalse((self.root / "installed").exists())
+
     def test_locations_are_directories_manifests_or_web_addresses(self):
         self.assertFalse(bundle.Source("/some/dir").remote)
         self.assertEqual(bundle.Source("/some/dir").url("card-a.img.xz"), "/some/dir/card-a.img.xz")

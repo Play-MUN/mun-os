@@ -1,5 +1,6 @@
 #include "shapeworld.h"
 
+#include "pngchunks.h"
 #include "sceneclock.h"
 #include "shapefront.h"
 
@@ -59,9 +60,15 @@ struct Header {
     QImage::Format format = QImage::Format_Invalid;
 };
 
+// Nothing (no size, no format) for a file whose chunks are over their bounds
+// (pngchunks.h), as for one that cannot be read: reading a header already
+// makes the reader keep, and inflate, every text chunk in the file.
 Header headerOf(const QString &path)
 {
-    QImageReader reader(path, "png");
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly) || !pngchunks::withinBounds(file))
+        return {};
+    QImageReader reader(&file, "png");
     return {reader.size(), reader.imageFormat()};
 }
 
@@ -389,6 +396,7 @@ bool WorldPainter::take(qint64 bytes, const QString &what, QString *why, bool *o
 }
 
 // Decodes one of the package's images (`what` names it in the journal) once
+// its chunks are within their bounds (pngchunks.h, before any reader) and
 // its header says it may be: within `maxSide`, and its decoding within what
 // the level has left, which is taken (*scratch) for the caller to give back
 // once the image is used. Qt's allocation limit (set once by Shape) holds too.
@@ -400,6 +408,10 @@ QImage WorldPainter::decode(const QVariant &name, int maxSide, const QString &wh
     QFile file(path);
     if (path.isEmpty() || !file.open(QIODevice::ReadOnly)) {
         *why = QStringLiteral("%1 cannot be read").arg(what);
+        return {};
+    }
+    if (!pngchunks::withinBounds(file)) {
+        *why = QStringLiteral("%1 has more ancillary data (text, profile) than the console accepts").arg(what);
         return {};
     }
     QImageReader reader(&file, "png");

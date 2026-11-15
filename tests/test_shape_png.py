@@ -255,5 +255,41 @@ class PackageTests(unittest.TestCase):
                 self.assertNotIn("shape_png", result.codes())
 
 
+class ShellAgreementTests(unittest.TestCase):
+    """The shell scans a PNG's chunks itself before it opens it (it does not
+    lean on the card service alone): its bounds are the checker's."""
+
+    SOURCE = ROOT / "services" / "mun-shell" / "src"
+
+    def test_the_shell_holds_the_same_bounds(self):
+        header = (self.SOURCE / "pngchunks.h").read_text(encoding="utf-8")
+        for name, value in (("kAncillaryMaxChunks", str(validate.PNG_ANCILLARY_MAX_CHUNKS)),
+                            ("kAncillaryMaxBytes", f"{validate.PNG_ANCILLARY_MAX_BYTES // KIB} * 1024"),
+                            ("kTextMaxChunks", str(validate.PNG_TEXT_MAX_CHUNKS)),
+                            ("kTextMaxBytes", f"{validate.PNG_TEXT_MAX_BYTES // KIB} * 1024"),
+                            ("kProfileMaxChunks", str(validate.PNG_PROFILE_MAX_CHUNKS))):
+            self.assertIn(f"{name} = {value};", header, name)
+
+    def test_every_image_reader_of_the_shell_is_behind_the_scan(self):
+        readers = {}
+        for path in sorted(self.SOURCE.glob("*.cpp")):
+            text = path.read_text(encoding="utf-8")
+            if "QImageReader" in text:
+                readers[path.name] = (text.count("QImageReader reader("), text.count("pngchunks::withinBounds("))
+        self.assertEqual(readers, {"shape.cpp": (1, 1), "shapeworld.cpp": (2, 2), "motionscene.cpp": (1, 1)})
+        for name in readers:
+            # the scan first, the reader after it, on the same open device
+            text = (self.SOURCE / name).read_text(encoding="utf-8")
+            pieces = text.split("QImageReader reader(")
+            for before, after in zip(pieces, pieces[1:]):
+                self.assertIn("pngchunks::withinBounds(", before[-700:], name)
+                self.assertRegex(after, r"\A(&file|device)\b", name)
+
+    def test_the_scan_is_built_and_run_with_the_host_checks(self):
+        recipe = (ROOT / "services" / "mun-shell" / "tests" / "Makefile").read_text(encoding="utf-8")
+        self.assertIn("\t./pngchunks_test\n", recipe)
+        self.assertIn("pngchunks_test: pngchunks_test.cpp ../src/pngchunks.h", recipe)
+
+
 if __name__ == "__main__":
     unittest.main()

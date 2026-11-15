@@ -1,5 +1,7 @@
 #include "motionscene.h"
 
+#include "pngchunks.h"
+
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -544,7 +546,20 @@ void MotionScene::reload()
                 failure = QStringLiteral("%1 is not in its export").arg(name);
                 break;
             }
-            QImageReader reader(path);
+            // Its chunks before any reader (pngchunks.h): a reader keeps,
+            // and inflates, every text chunk it meets, which no limit of
+            // Qt's covers.
+            QFile file(path);
+            if (!file.open(QIODevice::ReadOnly)) {
+                failure = QStringLiteral("%1 could not be decoded (%2)").arg(name, file.errorString());
+                break;
+            }
+            if (!pngchunks::withinBounds(file)) {
+                failure = QStringLiteral("%1 could not be decoded (more ancillary data, text or profile, than the "
+                                         "console accepts)").arg(name);
+                break;
+            }
+            QImageReader reader(&file);
             QImage image = reader.read();
             if (image.isNull()) {
                 failure = QStringLiteral("%1 could not be decoded (%2)").arg(name, reader.errorString());

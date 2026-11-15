@@ -1,6 +1,7 @@
 #include "shape.h"
 
 #include "contrast.h"
+#include "pngchunks.h"
 #include "readpalette.h"
 #include "shapefront.h"
 
@@ -75,10 +76,18 @@ QColor colourOf(const QVariant &value)
     return isColour(value) ? QColor(value.toString()) : QColor();
 }
 
-// Decodes an image with its dimensions checked first and Qt's allocation
-// limit in force; null if it is not a decodable image within the limits.
+// Decodes an image with its chunks scanned and its dimensions checked first
+// and Qt's allocation limit in force; null if it is not a decodable image
+// within the limits. The scan comes before the reader: asked for a size, the
+// reader already keeps, and inflates, every text chunk in the file
+// (pngchunks.h), which no limit of Qt's covers.
 QImage decode(QIODevice *device, const QString &what)
 {
+    if (!pngchunks::withinBounds(*device)) {
+        qWarning("mun-shell: shape: %s has more ancillary data (text, profile) than the console accepts; not shown",
+                 qPrintable(what));
+        return {};
+    }
     QImageReader reader(device, "png");
     const QSize size = reader.size();
     if (!size.isValid() || size.width() < 1 || size.height() < 1 || size.width() > kWindowMaxSide

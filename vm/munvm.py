@@ -975,8 +975,16 @@ def cmd_status(args: argparse.Namespace) -> None:
     print(json.dumps(info, indent=2))
 
 
+SCREENSHOT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
+
+
 def cmd_screenshot(args: argparse.Namespace) -> None:
     """Dump the guest framebuffer (virtio-gpu console) to a PNG for evidence."""
+    # QEMU writes the file itself, wherever the name leads: it is a name in
+    # this guest's screens directory, never a path.
+    if args.name and (not SCREENSHOT_NAME.fullmatch(args.name) or ".." in args.name):
+        raise LabError("screenshot name must be a file name of letters, digits, '.', '_' or '-' (it is written in "
+                       f"{PATHS['screens']})")
     if read_pid() is None:
         raise LabError("VM is not running")
     PATHS["screens"].mkdir(parents=True, exist_ok=True)

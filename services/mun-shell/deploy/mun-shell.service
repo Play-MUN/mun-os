@@ -80,6 +80,18 @@ RestartSec=5
 # not load (src/main.cpp).
 SuccessExitStatus=1 75
 RestartForceExitStatus=75
+# A ceiling on the shell's memory. By itself the shell holds 150 to 250 MiB,
+# and what a Game Card may add is bounded (a world's 200 MiB at most, a
+# motion's 64 MiB of decoded images; services/mun-shell/README.md): 2 GiB is
+# about four times all of that together, so only a fault reaches it. Without
+# a ceiling such a fault took all the console's memory before the kernel
+# chose, among every process, one to kill. With it the shell alone is
+# killed, which is a failure as any other: the unit starts again and the
+# decoding markers stay (ExecStopPost), naming what the next start skips.
+# No MemoryHigh: slowed down instead of stopped, the interface would stay on
+# screen, frozen.
+MemoryMax=2G
+OOMPolicy=stop
 
 # Hardening that does not interfere with fb/evdev access.
 NoNewPrivileges=no

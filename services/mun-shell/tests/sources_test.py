@@ -39,5 +39,30 @@ class SoundDeviceTests(unittest.TestCase):
         self.assertIn("snd_lib_error_set_handler(alsaMessage);", player)
 
 
+class UnitTests(unittest.TestCase):
+    def test_the_shell_has_a_memory_ceiling_far_above_what_it_may_hold(self):
+        # Without one, a fault that keeps allocating takes the console's
+        # memory until the kernel picks a process to kill among them all.
+        unit = source("deploy/mun-shell.service")
+        ceiling = re.search(r"(?m)^MemoryMax=(\d+)([MG])$", unit)
+        self.assertIsNotNone(ceiling, "the unit bounds the shell's memory")
+        ceiling_mib = int(ceiling.group(1)) * (1024 if ceiling.group(2) == "G" else 1)
+        # What the shell holds by itself (measured, at most about 250 MiB)
+        # and what a Game Card may add, as the sources bound it: a world's
+        # budget at the largest mode offered, and a motion's decoded images.
+        world = re.search(r"if \(pixels <= 2560LL \* 1440\)\s+return (\d+) \* kMiB;", source("src/shapeworld.cpp"))
+        motion = re.search(r"kMotionDecodedMaxBytes = (\d+) \* 1024 \* 1024;", source("src/motionscene.cpp"))
+        healthy = 250 + int(world.group(1)) + int(motion.group(1))
+        self.assertGreaterEqual(ceiling_mib, 3 * healthy, "a healthy shell never comes near it")
+        self.assertLessEqual(ceiling_mib, 2048, "and it is reached long before the console's memory is gone")
+        # Reaching it ends the shell as any failure does: started again, the
+        # decoding markers kept. Nothing may slow it down instead: a ceiling
+        # that only throttles would leave the interface on screen, frozen.
+        self.assertNotRegex(unit, r"(?m)^MemoryHigh=")
+        self.assertRegex(unit, r"(?m)^OOMPolicy=stop$")
+        self.assertRegex(unit, r"(?m)^Restart=on-failure$")
+        self.assertRegex(unit, r'(?m)^ExecStopPost=.*"\$\$SERVICE_RESULT" = success')
+
+
 if __name__ == "__main__":
     unittest.main()

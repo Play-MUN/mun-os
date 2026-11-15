@@ -1,5 +1,6 @@
 #include "shapeworld.h"
 
+#include "decodingmarker.h"
 #include "pngchunks.h"
 #include "sceneclock.h"
 #include "shapefront.h"
@@ -468,6 +469,30 @@ void WorldPainter::prepare(quint64 generation, const QVariantMap &world, const Q
         wake();
         return;
     }
+    // The crash guard, as the card window's and the cover's (ShapeLoader::load):
+    // while this world's images are read (their headers by estimateFor, their
+    // pixels by load) the marker names its insertion, so that if reading one
+    // takes the shell down, its next start skips the insertion's identity
+    // (Shape) instead of reading the same image again at every restart. The
+    // insertion is the one the export's folder is named for; a root that is
+    // no export's (the laboratory's scenes) has no marker, nor has a shell
+    // without a runtime directory. A marker that cannot be written leaves
+    // nothing to guard the reading, so nothing is read.
+    const std::string insertion = decodingmarker::insertionOf(root.section(QLatin1Char('/'), -1).toStdString());
+    const QString runtime = qEnvironmentVariable("XDG_RUNTIME_DIR");
+    const QString marker = insertion.empty() || runtime.isEmpty() ? QString()
+                                                                  : runtime + QStringLiteral("/shape-decoding");
+    if (!marker.isEmpty()) {
+        std::string unwritten;
+        if (!decodingmarker::write(QFile::encodeName(marker).toStdString(), insertion, &unwritten)) {
+            m_detail = 4;
+            emit prepared(generation, false, 4, 0,
+                          QStringLiteral("is not read: the marker that guards its decoding could not be written (%1)")
+                              .arg(QString::fromStdString(unwritten)));
+            wake();
+            return;
+        }
+    }
     // The richest level the headers say fits. A level whose images would then
     // take more than that (a format the header did not foretell) is given up
     // before the memory is taken, and the next one is tried.
@@ -485,6 +510,9 @@ void WorldPainter::prepare(quint64 generation, const QVariantMap &world, const Q
         if (ok || !over)
             break;
     }
+    // Every header is read and every image decoded: what follows reads no file.
+    if (!marker.isEmpty())
+        QFile::remove(marker);
     if (!ok) {
         clearPrepared();
         m_detail = 4;

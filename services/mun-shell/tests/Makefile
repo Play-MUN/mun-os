@@ -1,13 +1,14 @@
 # Host-side checks of the shell's display and gamepad rules, of Shape
-# motion's clock, of the start-up's clock, of the sound device's health and
-# of the scan of a PNG's chunks
+# motion's clock, of the start-up's clock, of the sound device's health, of
+# the scan of a PNG's chunks and of the marker that guards decoding
 # (src/displaydevice.*, src/gamepadmap.*, src/motionclock.h,
-# src/startupclock.h, src/playbackhealth.h, src/pngchunks.h):
+# src/startupclock.h, src/playbackhealth.h, src/pngchunks.h,
+# src/decodingmarker.h):
 # any C++20 compiler, no Qt, no display, no device. The image build compiles the same files into the shell.
 HOSTCXX ?= c++
 CXXFLAGS = -std=c++20 -O1 -Wall -Wextra -Wpedantic -I../src
 TESTS    = displaydevice_test gamepadmap_test motionclock_test startupclock_test playbackhealth_test \
-           pngchunks_test
+           pngchunks_test decodingmarker_test
 
 test: $(TESTS)
 	./displaydevice_test
@@ -16,6 +17,7 @@ test: $(TESTS)
 	./startupclock_test
 	./playbackhealth_test
 	./pngchunks_test
+	./decodingmarker_test
 
 displaydevice_test: displaydevice_test.cpp ../src/displaydevice.cpp ../src/displaydevice.h
 	$(HOSTCXX) $(CXXFLAGS) -o $@ displaydevice_test.cpp ../src/displaydevice.cpp
@@ -34,6 +36,9 @@ playbackhealth_test: playbackhealth_test.cpp ../src/playbackhealth.h
 
 pngchunks_test: pngchunks_test.cpp ../src/pngchunks.h
 	$(HOSTCXX) $(CXXFLAGS) -o $@ pngchunks_test.cpp
+
+decodingmarker_test: decodingmarker_test.cpp ../src/decodingmarker.h
+	$(HOSTCXX) $(CXXFLAGS) -o $@ decodingmarker_test.cpp
 
 clean:
 	rm -f $(TESTS)

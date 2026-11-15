@@ -382,7 +382,7 @@ class CommandLineTests(Fixture):
                     patch.object(ctypes, "WinDLL", return_value=ws2, create=True), \
                     patch.object(ctypes, "get_last_error", return_value=error, create=True):
                 with self.assertRaises(OSError) as refused:
-                    host._windows_unix_connect(Path("C:/Users/x/AppData/Local/mun/sockets/a/qmp.sock"), 3.0)
+                    host._windows_unix_connect(Path("D:/mun/sockets/a/qmp.sock"), 3.0)
                 self.assertIs(type(refused.exception), expected)
                 self.assertEqual(refused.exception.errno, error)
                 ws2.closesocket.assert_called_once_with(5)

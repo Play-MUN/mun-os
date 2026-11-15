@@ -390,6 +390,10 @@ def verify(folder: Path, expect: Optional[str] = None) -> List[str]:
         manifest = json.loads(raw)
     except (OSError, ValueError) as exc:
         return [f"{MANIFEST}: {exc}"]
+    except RecursionError:
+        # Nested deeper than the JSON reader goes: not a manifest, and not
+        # this tool's failure.
+        return [f"{MANIFEST}: nested too deeply to be an export's manifest"]
     problems = _shape_problems(manifest)
     if problems:
         return problems
@@ -442,7 +446,7 @@ def verify(folder: Path, expect: Optional[str] = None) -> List[str]:
         problems.append(f"{path}: in the export, not used by the package")
     try:
         document = json.loads((folder / "package" / shape.MANIFEST).read_bytes())
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, RecursionError) as exc:
         return problems + [f"package/{shape.MANIFEST}: {exc}"]
     if not isinstance(document, dict) or document.get("format") != manifest["package"]["format"] \
             or document.get("motion_draft") != manifest["package"].get("motion_draft"):

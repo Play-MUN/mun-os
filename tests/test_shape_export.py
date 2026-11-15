@@ -338,6 +338,31 @@ class ExportTests(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(cli.main(["shape", "verify-export", str(target)]), 2)
 
+    def test_a_manifest_nested_too_deeply_is_not_an_export_not_a_failure(self):
+        # A manifest of nothing but opening brackets, deeper than the JSON
+        # reader goes: the answer is "not an export" (status 2), as for any
+        # manifest that is not JSON, never a traceback.
+        from mun_card import cli
+        target = self.export()
+        for deep in (b"[" * 200000, b'{"a":' * 100000 + b"1" + b"}" * 100000):
+            (target / "export.json").write_bytes(deep)
+            problems = shapeexport.verify(target)
+            self.assertEqual(len(problems), 1, problems)
+            self.assertTrue(problems[0].startswith("export.json: "), problems)
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+                self.assertEqual(cli.main(["shape", "verify-export", str(target)]), 2)
+            self.assertNotIn("Traceback", out.getvalue())
+        # The package's own document is read by the checker's strict
+        # profile, which refuses depth before it parses: the same answer.
+        target = self.export(self.tmp / "deep-package")
+        manifest = self.manifest(target)
+        data = b'{"format": "mun-shape/1.1", "scene": ' + b"[" * 30000 + b"]" * 30000 + b"}"
+        (target / "package" / "shape.json").write_bytes(data)
+        manifest["files"]["package/shape.json"] = {"sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data)}
+        (target / "export.json").write_text(json.dumps(manifest))
+        self.assertEqual(shapeexport.verify(target), ["package: a console would not use it (unused)"])
+
     def test_verify_takes_only_what_export_writes(self):
         target = self.export()
         whole = self.manifest(target)

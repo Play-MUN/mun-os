@@ -104,7 +104,10 @@ SHAPE_DELAY = float(os.environ.get("MUN_CARDD_SHAPE_DELAY", "0") or 0)
 
 
 def log(message: str) -> None:
-    print(message, flush=True)
+    # A line may quote a card or a request, and JSON can spell a code point
+    # that UTF-8 cannot carry (a lone surrogate): it is written as "?", so
+    # that saying what happened never raises.
+    print(message.encode("utf-8", "replace").decode("utf-8"), flush=True)
 
 
 # ------------------------------------------------------------------ state model
@@ -306,8 +309,11 @@ class CardManager:
             if not isinstance(request.get("payload"), dict):
                 return fail("save_invalid", "La partida no es un objeto JSON")
             payload_obj = request["payload"]
-            payload = json.dumps(payload_obj, ensure_ascii=False, separators=(",", ":"))
-            if len(payload.encode("utf-8")) > payload_max:
+            try:
+                size = len(_save_bytes(payload_obj, separators=(",", ":")))
+            except CardError as exc:
+                return fail(exc.code, exc.message, exc.detail)
+            if size > payload_max:
                 return fail("save_too_large", "La partida supera el tamaño permitido", f"máximo {payload_max} bytes")
         else:
             return fail("save_invalid", "Tipo de partida desconocido", str(kind)[:40])
@@ -322,7 +328,10 @@ class CardManager:
                     "session": request.get("session"), "insertion": card.insertion, "payload": payload_obj}
         if kind == "files":
             envelope["payload_kind"] = "files"
-        data = (json.dumps(envelope, ensure_ascii=False) + "\n").encode("utf-8")
+        try:
+            data = _save_bytes(envelope) + b"\n"
+        except CardError as exc:       # a directory save's payload, or the session's name
+            return fail(exc.code, exc.message, exc.detail)
         generation = card.generation
         card.saving = True
 
@@ -623,6 +632,20 @@ def _copy_bounded(source: Path, dest_dir: Path, generation: int, current_generat
         raise
     finally:
         os.close(fd)
+
+
+def _save_bytes(value: object, **options) -> bytes:
+    """`value` as the UTF-8 JSON a save is measured and stored in.
+
+    JSON can spell, as an escape in plain ASCII, a code point that UTF-8
+    cannot carry (a lone surrogate). A save holding one is refused
+    (CardError "save_invalid") rather than altered: the card would not keep
+    what the game sent."""
+    try:
+        return json.dumps(value, ensure_ascii=False, **options).encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise CardError("save_invalid", "La partida contiene texto que no se puede guardar como UTF-8",
+                        f"U+{ord(exc.object[exc.start]):04X}")
 
 
 def save_path(mount: Path, info: dict) -> Path:
@@ -1346,11 +1369,17 @@ def encode_frame(message: dict) -> bytes:
     Covers are size-checked before they are attached, so a frame over budget
     should not happen; if it does, the card state still travels, without the
     picture, instead of a line no consumer will accept.
+
+    A frame is always valid UTF-8. Its strings may quote a card (a note
+    about a card's file) or a request, and JSON can spell a code point that
+    UTF-8 cannot carry (a lone surrogate): each is sent as "?", so that
+    nothing a card or a request holds can make a frame fail to encode, and
+    no consumer is handed text it cannot decode.
     """
-    data = (json.dumps(message, ensure_ascii=False) + "\n").encode("utf-8")
+    data = (json.dumps(message, ensure_ascii=False) + "\n").encode("utf-8", "replace")
     if len(data) > MAX_FRAME_BYTES:
         log(f"warning: frame of {len(data)} bytes exceeds {MAX_FRAME_BYTES}; cover omitted")
-        data = (json.dumps(_without_cover(message), ensure_ascii=False) + "\n").encode("utf-8")
+        data = (json.dumps(_without_cover(message), ensure_ascii=False) + "\n").encode("utf-8", "replace")
     return data
 
 

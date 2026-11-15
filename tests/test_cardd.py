@@ -752,6 +752,20 @@ class SaveRequestTests(unittest.TestCase):
         self.assertEqual(self.save(schema=True)["error"]["code"], "save_invalid")
         self.assertEqual(self.save(payload={"big": "x" * (64 * 1024)})["error"]["code"], "save_too_large")
 
+    def test_text_that_utf8_cannot_carry_is_refused_before_any_write(self):
+        # JSON spells a lone surrogate in plain ASCII ("\\ud800"); no file can hold it as UTF-8.
+        for payload in ({"n": "\ud800"}, {"\udfff": 1}, {"deep": [{"name": "ok\ud83d"}]}):
+            reply = self.save(payload=payload)
+            self.assertEqual((reply["ok"], reply["error"]["code"]), (False, "save_invalid"), payload)
+        self.assertEqual(self.save(session="s\ud800")["error"]["code"], "save_invalid")
+        self.assertFalse((self.tmp / "c1" / "saves" / "mun.collect").exists())
+        self.assertNotIn(("remount", "c1", "rw"), self.mounter.log)
+        # Text UTF-8 does carry is saved as before, and the card is not left busy.
+        reply = self.save(payload={"name": "ñ 収集 \U0001f642"})
+        self.assertTrue(reply["ok"], reply)
+        saved = json.loads((self.tmp / "c1" / "saves" / "mun.collect" / "save.json").read_text(encoding="utf-8"))
+        self.assertEqual(saved["payload"], {"name": "ñ 収集 \U0001f642"})
+
     def test_one_save_at_a_time_and_release_waits_for_it(self):
         gate = threading.Event()
         original = cardd._write_save
@@ -910,6 +924,13 @@ class DirectorySaveCardTests(unittest.TestCase):
         big = self.payload({"a.sav": b"x" * (1024 * 1024 + 1)})
         self.assertIn(self.save_files(payload=big)["error"]["code"], ("save_invalid", "save_too_large"))
         self.assertFalse((self.save_dir() / "save.json").exists())
+
+    def test_a_files_payload_with_text_utf8_cannot_carry_is_refused(self):
+        payload = self.payload({"save-0000.sav": b"abc"}); payload["captured_at"] = "\ud800"
+        reply = self.save_files(payload=payload)      # in the payload file it is the ASCII escape
+        self.assertEqual((reply["ok"], reply["error"]["code"]), (False, "save_invalid"))
+        self.assertFalse((self.save_dir() / "save.json").exists())
+        self.assertTrue(self.save_files({"save-0000.sav": b"abc"})["ok"])
 
     def test_single_object_saves_are_refused_on_a_directory_card(self):
         before = len(self.replies)

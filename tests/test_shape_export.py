@@ -332,11 +332,14 @@ class ExportTests(unittest.TestCase):
         target = self.export(self.tmp / "again")
         (target / "sources" / "studio" / "make.py").chmod(0)
         self.addCleanup((target / "sources" / "studio" / "make.py").chmod, 0o600)
-        if not os.access(target / "sources" / "studio" / "make.py", os.R_OK):
+        # A user who reads any file (root) reads this one too: for that user
+        # the export is whole.
+        unreadable = not os.access(target / "sources" / "studio" / "make.py", os.R_OK)
+        if unreadable:
             self.assertIn("sources/studio/make.py: unreadable (Permission denied)", shapeexport.verify(target))
         from mun_card import cli
         with contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(cli.main(["shape", "verify-export", str(target)]), 2)
+            self.assertEqual(cli.main(["shape", "verify-export", str(target)]), 2 if unreadable else 0)
 
     def test_a_manifest_nested_too_deeply_is_not_an_export_not_a_failure(self):
         # A manifest of nothing but opening brackets, deeper than the JSON

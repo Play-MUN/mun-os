@@ -10,6 +10,7 @@ import hashlib
 import os
 import re
 import shutil
+import stat
 import struct
 import subprocess
 import sys
@@ -65,14 +66,17 @@ def create_image(destination: Path, staging: Path, size_mib: int = DEFAULT_SIZE_
     if destination.exists() and not destination.is_file():
         raise CardError("image_path", "El destino existe y no es un archivo normal", str(destination))
     mke2fs = find_tool("mke2fs")
+    _normalise_modes(staging)
     _normalise_times(staging)
     destination.parent.mkdir(parents=True, exist_ok=True)
     partial = destination.with_suffix(destination.suffix + ".part")
     if partial.exists():
         partial.unlink()
-    # A fixed uuid, hash seed and epoch, and the pinned times of the staging
-    # tree, make two builds of the same tree with the same e2fsprogs
-    # byte-identical, whatever second each one runs in.
+    # A fixed uuid, hash seed and epoch, and the pinned times and modes of
+    # the staging tree, make two builds of the same tree with the same
+    # e2fsprogs byte-identical, whatever second each one runs in and whoever
+    # runs it. root_owner covers the root directory only: `mke2fs -d` copies
+    # every other entry's owner from the staging tree, and _pin_inodes sets it.
     env = dict(os.environ, E2FSPROGS_FAKE_TIME=str(FIXED_EPOCH), SOURCE_DATE_EPOCH=str(FIXED_EPOCH))
     cmd = [mke2fs, "-q", "-F", "-t", "ext4", "-L", label[:16], "-d", str(staging),
            "-E", "root_owner=0:0,hash_seed=6d756e63-6172-6430-8000-000000000001",
@@ -83,7 +87,7 @@ def create_image(destination: Path, staging: Path, size_mib: int = DEFAULT_SIZE_
             partial.unlink()
         raise CardError("mke2fs_failed", "mke2fs no pudo crear la imagen", (result.stderr or result.stdout).strip())
     try:
-        _pin_ctimes(partial, env)
+        _pin_inodes(partial, env)
     except CardError:
         partial.unlink()
         raise
@@ -92,6 +96,21 @@ def create_image(destination: Path, staging: Path, size_mib: int = DEFAULT_SIZE_
 
 
 FIXED_EPOCH = 1700000000
+
+
+def _normalise_modes(staging: Path) -> None:
+    """Give every staged directory 0755 and every file 0644, or 0755 when
+    its owner may execute it. A staged file's mode is what the tool asked
+    for less the packager's umask, and `mke2fs -d` copies it into the image:
+    the same card would differ between a host with umask 022 and one with
+    002, and under 077 the console's game user could not read it. Links
+    and special files are left as they are."""
+    for path in [staging, *staging.rglob("*")]:
+        mode = os.lstat(path).st_mode
+        if stat.S_ISDIR(mode):
+            os.chmod(path, 0o755)
+        elif stat.S_ISREG(mode):
+            os.chmod(path, 0o755 if mode & stat.S_IXUSR else 0o644)
 
 
 def _normalise_times(staging: Path) -> None:
@@ -142,8 +161,15 @@ def allocated_inodes(report: str) -> List[int]:
     return [inode for inode in range(first, count + 1) if inode not in free]
 
 
-def _pin_ctimes(image_path: Path, env: Dict[str, str]) -> None:
-    """Give every inode `mke2fs -d` populated the ctime FIXED_EPOCH.
+def _pin_inodes(image_path: Path, env: Dict[str, str]) -> None:
+    """Give every inode `mke2fs -d` populated the owner 0:0 and the ctime
+    FIXED_EPOCH.
+
+    mke2fs copies each staged file's uid and gid into its inode: the
+    packager's, another number on another machine, so the same source gave
+    another image there. Nothing on a card belongs to a user of the host
+    that made it; the console's card service is root and reads modes, not
+    owners.
 
     mke2fs before 1.47.1 (Ubuntu 24.04 ships 1.47.0) copies each staged
     file's ctime into its inode as it is. _normalise_times pins atime and
@@ -162,13 +188,14 @@ def _pin_ctimes(image_path: Path, env: Dict[str, str]) -> None:
                             check=False, env=env)
     if report.returncode != 0:
         raise CardError("dumpe2fs_failed", "dumpe2fs no pudo leer la imagen nueva", report.stderr.strip())
-    requests = "".join(f"set_inode_field <{inode}> ctime @{FIXED_EPOCH}\n"
+    requests = "".join(f"set_inode_field <{inode}> uid 0\nset_inode_field <{inode}> gid 0\n"
+                       f"set_inode_field <{inode}> ctime @{FIXED_EPOCH}\n"
                        for inode in allocated_inodes(report.stdout))
     result = subprocess.run([find_tool("debugfs"), "-w", "-f", "-", str(image_path)], input=requests,
                             capture_output=True, text=True, check=False, env=env)
     problems = [line for line in result.stderr.splitlines() if line.strip() and not _DEBUGFS_BANNER.match(line)]
     if result.returncode != 0 or problems:
-        raise CardError("debugfs_failed", "debugfs no pudo fijar las fechas de la imagen",
+        raise CardError("debugfs_failed", "debugfs no pudo fijar el propietario y las fechas de la imagen",
                         "\n".join(problems) or result.stderr.strip())
 
 

@@ -105,7 +105,7 @@ candidato es aquí aquel del que se hace la versión de esta página.
 
 | Qué | Estado |
 | --- | --- |
-| Llegada de una tarjeta, navegación, jugar a MUN Collect y volver, un guardado escrito en la tarjeta física, retirada segura y brusca | Comprobado el 13 de noviembre de 2026, con una construcción anterior de esta rama instalada entera en la eMMC |
+| Llegada de una tarjeta, navegación, jugar a MUN Collect y volver, un guardado escrito en la tarjeta física, retirada segura y brusca | Comprobado el 13 de noviembre de 2026, con una construcción anterior de esta versión preliminar instalada entera en la eMMC |
 | Reef detrás de los menús (el movimiento de MUN Shape), atenuación a los diez minutos, *Reducir movimiento* | Comprobado el mismo día: 33,6 minutos en marcha sin ningún reinicio del shell ni de los servicios, con la pantalla atenuada a los diez. En esa prueba no se registraron los tiempos de fotograma y no dice nada de una tasa de fotogramas: lo medido en esta placa, donde el movimiento no mantiene 60 fotogramas por segundo, está en [dónde está el movimiento](../shape-motion.md#where-it-stands), en inglés |
 | Arranque: un solo cambio de imagen tras el del firmware, imagen de espera, sonido desde su primera nota | Comprobado el 14 de noviembre de 2026 en tres tipos de arranque (tras desenchufar, tras un corte de corriente, con el botón), con un televisor; con el shell y los archivos de placa del candidato puestos sobre la instalación anterior |
 | La imagen del candidato instalada entera, y el recorrido completo sobre ella | Pendiente |

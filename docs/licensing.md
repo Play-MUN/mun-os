@@ -59,7 +59,14 @@ and fetches those sources, checked against their digests, from
 [snapshot.debian.org](https://snapshot.debian.org) into one directory with a
 `SOURCES.json` index. That directory is published beside the release as one
 archive with its SHA-256, never in Git
-([releasing](releasing.md#4-the-corresponding-source)). Debian's own
+([releasing](releasing.md#4-the-corresponding-source)).
+
+The Game Cards of a release carry MUN Collect, and that program is linked
+statically with the GNU C Library (LGPL-2.1-or-later), of the same Debian
+version as the image's own `libc6`, so its source is in that same archive.
+MUN Collect's own source is in this repository (`examples/mun-collect`,
+Apache-2.0), which is what lets anyone build it again against another
+version of the library. Debian's own
 guidance on distributing derived images:
 [Debian for vendors](https://www.debian.org/CD/vendors/legal).
 

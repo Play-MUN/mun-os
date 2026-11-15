@@ -330,9 +330,14 @@ and the render loop. On a graphics API:
   the rates above stay. Rest and *Reduce motion* stop the motion as before,
   and a still screen draws nothing.
 
-Measured on an ARM64 development board (OpenGL ES 3.2 on Mesa's freedreno,
-1920×1080 at 60 Hz, the threaded render loop; percent of one core used by
-the shell, sampled while a virtual keyboard played the same keys): Home at
+Measured once, on 31 October 2026, on the Radxa Dragon Q6A we develop on
+([MUN Dev](../../docs/mun-dev.md)), with Home's earlier design (the network
+and the gear below are that design's) and before MUN Shape's motion
+existed. It has not been measured again with the orbital Home, and it is
+what that day's runs gave, not a frame rate the console promises (OpenGL ES
+3.2 on Mesa's freedreno, 1920×1080 at 60 Hz, the threaded render loop;
+percent of one core used by the shell, sampled while a virtual keyboard
+played the same keys): Home at
 rest with the network drifting, 60 frames/s for about 18 %; moving through
 Home's menu, about 60 frames/s, 99 % of frames within 25 ms and none over
 40 ms in four runs, for about 60 %; moving through Settings' sections

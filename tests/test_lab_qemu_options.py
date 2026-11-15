@@ -57,5 +57,58 @@ class ScreenshotNameTests(Fixture):
         self.assertRegex(dumped.name, r"^screen-\d{8}-\d{6}\.png$")
 
 
+class CommaTests(Fixture):
+    """QEMU reads a comma as the end of a field of an option, so a path with
+    one would be cut there and the rest read as further fields."""
+
+    def setUp(self):
+        super().setUp()
+        self.stack.enter_context(patch.object(vm, "which", side_effect=lambda name: name))
+        self.stack.enter_context(patch.object(vm, "firmware_path", return_value=Path("/firmware.fd")))
+        self.stack.enter_context(patch.object(vm, "accelerator", return_value="tcg"))
+        self.stack.enter_context(patch.object(vm, "guest_timezone", return_value="UTC"))
+        self.stack.enter_context(patch.object(vm, "HOST", vm.host.Host("linux", "arm64")))
+
+    def test_a_guest_under_a_path_with_a_comma_is_refused_with_the_reason(self):
+        self.guest(self.root / "my,checkout" / "guests" / "one")
+        with self.assertRaises(vm.LabError) as refused:
+            vm.qemu_command("none")
+        self.assertIn("comma", str(refused.exception))
+        self.assertIn("my,checkout", str(refused.exception))
+
+    def test_a_firmware_or_capture_path_with_a_comma_is_refused(self):
+        self.guest(self.root / "guests" / "one")
+        with patch.object(vm, "firmware_path", return_value=Path("/opt/qemu,11/edk2-aarch64-code.fd")), \
+                self.assertRaises(vm.LabError) as refused:
+            vm.qemu_command("none")
+        self.assertIn("comma", str(refused.exception))
+        vm.PATHS["audio"] = self.root / "a,b" / "audio.wav"
+        with self.assertRaises(vm.LabError):
+            vm.qemu_command("none", audio="wav")
+
+    def test_a_path_without_one_goes_into_the_options_as_it_is(self):
+        self.guest(self.root / "guests" / "one")
+        command = vm.qemu_command("none", audio="wav")
+        self.assertIn(f"if=pflash,format=raw,file={vm.PATHS['efivars']}", command)
+        self.assertIn(f"unix:{vm.PATHS['qmp']},server,nowait", command)
+        self.assertIn(f"wav,id=snd0,path={vm.PATHS['audio']}", command)
+
+    def test_the_builder_is_held_to_the_same_rule(self):
+        sys.path.insert(0, str(ROOT / "vm"))
+        import mundev
+        for where, refused in (("my,checkout", True), ("checkout", False)):
+            with self.subTest(where=where), patch.object(mundev, "BUILDERS_ROOT", self.root / where / "builders"), \
+                    patch.object(mundev.vm, "which", side_effect=lambda name: name), \
+                    patch.object(mundev.vm, "firmware_path", return_value=Path("/firmware.fd")), \
+                    patch.object(mundev.vm, "accelerator", return_value="tcg"):
+                builder = mundev.Builder("b1")
+                if refused:
+                    with self.assertRaises(mundev.vm.LabError) as error:
+                        builder.qemu_command()
+                    self.assertIn("comma", str(error.exception))
+                else:
+                    self.assertIn(f"if=pflash,format=raw,file={builder.efivars}", builder.qemu_command())
+
+
 if __name__ == "__main__":
     unittest.main()

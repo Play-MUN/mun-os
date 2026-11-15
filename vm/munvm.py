@@ -555,6 +555,17 @@ AUDIO_BACKENDS = ("none", "wav", "off") + AUDIBLE_BACKENDS
 SOUND_DEVICE_QEMU = (8, 2)
 
 
+def option_path(path: Any) -> str:
+    """`path` as it goes into a QEMU option made of comma-separated fields
+    (`-drive`, `-chardev`, `-qmp`, `-audiodev`, `-serial`). QEMU ends a
+    field at a comma, so a path holding one would be cut there and its rest
+    read as more fields: it is refused before QEMU is started."""
+    if "," in str(path):
+        raise LabError(f"{path} has a comma in it, and a comma separates the fields of QEMU's options: keep the "
+                       "checkout, QEMU and the temporary directory in paths without one")
+    return str(path)
+
+
 def audio_arguments(backend: Optional[str]) -> List[str]:
     if backend is None or backend == "off":
         return []
@@ -566,7 +577,7 @@ def audio_arguments(backend: Optional[str]) -> List[str]:
             raise LabError(f"this QEMU has no {backend} sound backend; it offers {', '.join(offered)}")
     audiodev = f"{backend},id=snd0"
     if backend == "wav":
-        audiodev += f",path={PATHS['audio']}"
+        audiodev += f",path={option_path(PATHS['audio'])}"
     # streams=1: playback only. The lab has no use for guest capture and the
     # wav/none backends have no input side to offer anyway.
     return ["-audiodev", audiodev, "-device", "virtio-sound-pci,audiodev=snd0,streams=1"]
@@ -626,8 +637,8 @@ def qemu_command(display: str, audio: Optional[str] = None, ports: Optional[Dict
     ports of a host without UNIX sockets."""
     qemu = which("qemu-system-aarch64")
     if HOST.unix_sockets:
-        qmp: "host.Address" = PATHS["qmp"]
-        qga: "host.Address" = PATHS["qga"]
+        qmp: "host.Address" = Path(option_path(PATHS["qmp"]))
+        qga: "host.Address" = Path(option_path(PATHS["qga"]))
     else:
         ports = ports or control_ports()
         qmp, qga = (host.LOOPBACK, ports["qmp"]), (host.LOOPBACK, ports["qga"])
@@ -648,8 +659,8 @@ def qemu_command(display: str, audio: Optional[str] = None, ports: Optional[Dict
         # The host's time zone for the development image's clock and light
         # (its unit mun-lab-timezone reads it; os/mkosi, profile qemu-dev).
         "-fw_cfg", f"name=opt/mun/timezone,string={guest_timezone()}",
-        "-drive", f"if=pflash,format=raw,readonly=on,file={firmware_path()}",
-        "-drive", f"if=pflash,format=raw,file={PATHS['efivars']}",
+        "-drive", f"if=pflash,format=raw,readonly=on,file={option_path(firmware_path())}",
+        "-drive", f"if=pflash,format=raw,file={option_path(PATHS['efivars'])}",
         "-blockdev", json.dumps({"driver": "qcow2", "node-name": "sys",
                                  "file": {"driver": "file", "filename": str(PATHS["system_disk"])}}),
         # Not NPT-: the card service only ever considers NPT- serials.
@@ -665,7 +676,7 @@ def qemu_command(display: str, audio: Optional[str] = None, ports: Optional[Dict
         "-device", "virtio-serial-pci,id=vser0",
         "-chardev", host.chardev_socket("qga0", qga),
         "-device", "virtserialport,bus=vser0.0,chardev=qga0,name=org.qemu.guest_agent.0",
-        "-serial", f"file:{PATHS['console_log']}",
+        "-serial", f"file:{option_path(PATHS['console_log'])}",
         "-monitor", "none",
         "-qmp", host.qmp_option(qmp),
         "-pidfile", str(PATHS["pidfile"]),

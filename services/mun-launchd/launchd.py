@@ -1560,20 +1560,21 @@ def _write_all(fd: int, data: bytes) -> None:
 # ALSA and OpenAL Soft at ALSA, because the console runs no display or sound
 # server and their probing would otherwise burn time before falling back.
 # Memory and task ceilings are provisional lab figures for a software-rendered
-# 2D game, not console specifications.
+# 2D game, not console specifications. `shm_max` bounds the session's own
+# /dev/shm (unit_properties()), well inside its memory ceiling.
 FRAMEBUFFER_PROFILE = "linux-arm64-v0"
 GL_PROFILE = "linux-arm64-gl-v0"
 PROFILES = {
     FRAMEBUFFER_PROFILE: {
         "groups": ("video", "input"),
         "devices": ("/dev/fb0 rw", "char-input rw"),
-        "memory_max": "512M", "tasks_max": "32",
+        "memory_max": "512M", "tasks_max": "32", "shm_max": "128M",
         "environment": {},
     },
     GL_PROFILE: {
         "groups": ("video", "render", "audio", "input"),
         "devices": ("char-drm rw", "char-alsa rw", "char-input rw"),
-        "memory_max": "2G", "tasks_max": "64",
+        "memory_max": "2G", "tasks_max": "64", "shm_max": "512M",
         "environment": {"SDL_VIDEODRIVER": "kmsdrm", "SDL_AUDIODRIVER": "alsa", "ALSOFT_DRIVERS": "alsa"},
     },
 }
@@ -1604,6 +1605,17 @@ def unit_properties(profile: Optional[str], sid: str, dest: Path, content: Optio
         "ProtectControlGroups=yes", "RestrictNamespaces=yes", "RestrictRealtime=yes",
         "LockPersonality=yes", "RestrictSUIDSGID=yes", f"MemoryMax={spec['memory_max']}", f"TasksMax={spec['tasks_max']}",
         "DevicePolicy=closed",
+        # Shared memory and IPC of the session's own. In the system's
+        # /dev/shm a game's files outlived it: their memory was no longer
+        # counted against any session (MemoryMax= bounds one), it added up
+        # from session to session, and the next card's game could read them;
+        # System V IPC objects and POSIX message queues stayed the same way.
+        # The unit gets a tmpfs of its own on /dev/shm, world-writable with
+        # the sticky bit like the system's so that shm_open() works for the
+        # game user, bounded, charged to the unit's memory like anything the
+        # game writes, and gone with the unit's mount namespace; and an IPC
+        # namespace of its own, which also brings its own /dev/mqueue.
+        "PrivateIPC=yes", f"TemporaryFileSystem=/dev/shm:nosuid,nodev,size={spec['shm_max']},mode=1777",
     ]
     properties += [f"DeviceAllow={device}" for device in spec["devices"]]
     if content is not None:

@@ -535,6 +535,23 @@ class RuntimeProfileTests(unittest.TestCase):
         self.assertEqual((env["SDL_VIDEODRIVER"], env["SDL_AUDIODRIVER"], env["ALSOFT_DRIVERS"]), ("kmsdrm", "alsa", "alsa"))
         self.assertEqual(env["HOME"], "/x/s2/work")
 
+    def test_shared_memory_and_ipc_are_the_sessions_own_and_bounded_in_both_profiles(self):
+        def size(text):
+            return int(text[:-1]) * {"M": 1 << 20, "G": 1 << 30}[text[-1]]
+        for profile in launchd.PROFILES:
+            with self.subTest(profile):
+                props = launchd.unit_properties(profile, "s1", Path("/run/mun/launch/s1"))
+                self.assertIn("PrivateIPC=yes", props, "System V IPC and POSIX message queues end with the session")
+                (shm,) = [p for p in props if p.startswith("TemporaryFileSystem=")]
+                path, _, options = shm[len("TemporaryFileSystem="):].partition(":")
+                options = dict(option.partition("=")[::2] for option in options.split(","))
+                self.assertEqual(path, "/dev/shm")
+                self.assertEqual(options["mode"], "1777", "the game user must be able to shm_open")
+                self.assertIn("nosuid", options); self.assertIn("nodev", options)
+                self.assertNotIn("noexec", options, "as the system's own /dev/shm: engines map code from it")
+                (memory,) = [p[len("MemoryMax="):] for p in props if p.startswith("MemoryMax=")]
+                self.assertLess(size(options["size"]), size(memory), "fills up before the session's memory does")
+
     def test_unknown_profile_is_refused_before_a_unit_exists(self):
         with self.assertRaises(RuntimeError):
             launchd.unit_properties("windows-v9", "s3", Path("/x/s3"))

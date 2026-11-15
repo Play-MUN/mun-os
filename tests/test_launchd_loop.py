@@ -159,8 +159,10 @@ class RunningLauncher:
         conn = self.connect(path)
         try:
             conn.sendall(line)
-        except (BrokenPipeError, ConnectionResetError):
-            pass                             # answered and closed before the whole line was taken
+        except OSError:
+            # Answered and closed before the whole line was taken: a broken
+            # pipe or a reset on Linux, "socket is not connected" on macOS.
+            pass
         return next(_lines(conn))
 
 

@@ -24,24 +24,50 @@ SPEC.loader.exec_module(vm)
 WINDOWS = sys.platform == "win32"
 
 
-def listen_unix(path: Path):
-    """A listening AF_UNIX socket at `path` made through Winsock, as QEMU
-    makes its own; returns the listening socket object."""
-    import ctypes
-    ws2 = ctypes.WinDLL("ws2_32", use_last_error=True)
-    ws2.socket.restype = ctypes.c_size_t
-    ws2.socket.argtypes = (ctypes.c_int, ctypes.c_int, ctypes.c_int)
-    ws2.bind.argtypes = (ctypes.c_size_t, ctypes.c_void_p, ctypes.c_int)
-    ws2.listen.argtypes = (ctypes.c_size_t, ctypes.c_int)
+class UnixListener:
+    """A listening AF_UNIX socket at `path`, made and served through Winsock
+    as QEMU's is. CPython has no AF_UNIX on Windows: its socket.accept
+    cannot read the peer's address ("getsockaddrlen: bad family"), so the
+    connection is accepted here and handed to a socket object, which sends
+    and receives on it without looking at addresses (as vm/host.py does
+    with the connections it makes)."""
 
-    class SockaddrUn(ctypes.Structure):
-        _fields_ = [("sun_family", ctypes.c_ushort), ("sun_path", ctypes.c_char * 108)]
+    def __init__(self, path: Path):
+        import ctypes
+        self.ws2 = ws2 = ctypes.WinDLL("ws2_32", use_last_error=True)
+        ws2.socket.restype = ctypes.c_size_t
+        ws2.socket.argtypes = (ctypes.c_int, ctypes.c_int, ctypes.c_int)
+        ws2.bind.argtypes = (ctypes.c_size_t, ctypes.c_void_p, ctypes.c_int)
+        ws2.listen.argtypes = (ctypes.c_size_t, ctypes.c_int)
+        ws2.accept.restype = ctypes.c_size_t
+        ws2.accept.argtypes = (ctypes.c_size_t, ctypes.c_void_p, ctypes.c_void_p)
+        ws2.closesocket.argtypes = (ctypes.c_size_t,)
+        self.invalid = ctypes.c_size_t(-1).value
 
-    handle = ws2.socket(1, 1, 0)
-    address = SockaddrUn(1, str(path).encode("utf-8"))
-    if ws2.bind(handle, ctypes.byref(address), ctypes.sizeof(address)) != 0 or ws2.listen(handle, 4) != 0:
-        raise OSError(ctypes.get_last_error(), f"cannot listen on {path}")
-    return socket.socket(fileno=handle)
+        class SockaddrUn(ctypes.Structure):
+            _fields_ = [("sun_family", ctypes.c_ushort), ("sun_path", ctypes.c_char * 108)]
+
+        self.handle = ws2.socket(1, 1, 0)
+        address = SockaddrUn(1, str(path).encode("utf-8"))
+        if ws2.bind(self.handle, ctypes.byref(address), ctypes.sizeof(address)) != 0 \
+                or ws2.listen(self.handle, 4) != 0:
+            error = ctypes.get_last_error()
+            ws2.closesocket(self.handle)
+            raise OSError(error, f"cannot listen on {path}")
+        self.get_last_error = ctypes.get_last_error
+
+    def accept(self):
+        conn = self.ws2.accept(self.handle, None, None)
+        if conn == self.invalid:
+            raise OSError(self.get_last_error(), "accept failed")
+        return socket.socket(fileno=conn), None
+
+    def close(self):
+        self.ws2.closesocket(self.handle)
+
+
+def listen_unix(path: Path) -> UnixListener:
+    return UnixListener(path)
 
 
 @unittest.skipUnless(WINDOWS, "a Windows host")

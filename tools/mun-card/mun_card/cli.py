@@ -112,7 +112,10 @@ def cmd_inspect(args: argparse.Namespace) -> int:
     report = {"image": str(path), "sha256": image.sha256_file(path)}
     try:
         fs = ext4.check_mountable(path)
-        report["filesystem"] = {"label": fs["label"], "uuid": fs["uuid"], "block_size": fs["block_size"]}
+        # errors_policy: what the superblock asks of a kernel on errors
+        # ("continue", "remount-ro" or "panic"), when the check names it.
+        report["filesystem"] = {"label": fs["label"], "uuid": fs["uuid"], "block_size": fs["block_size"],
+                                "errors_policy": fs.get("errors_policy")}
         source = DebugfsSource(path, image.find_tool("debugfs"))
         info = validate_card(source)
         report["valid"] = True
@@ -142,6 +145,11 @@ def cmd_inspect(args: argparse.Namespace) -> int:
         else:
             err = report["error"]
             print(f"  INVÁLIDA  [{err['code']}] {err['message']}" + (f" — {err['detail']}" if err["detail"] else ""))
+        if report.get("filesystem", {}).get("errors_policy") == "panic":
+            # Said only for this one: the console mounts every card with its
+            # own policy, but another system would honour the card's.
+            print("  aviso: el sistema de archivos pide detener el sistema ante un error (errors=panic); "
+                  "la consola lo ignora, otros sistemas pueden no hacerlo")
         print(f"  sha256 {report['sha256'][:16]}… · sin cambios tras inspección: {'sí' if report['unchanged'] else 'NO'}")
     return 0 if report["valid"] else 2
 

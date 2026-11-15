@@ -34,11 +34,11 @@ class DecodingGuardTests(unittest.TestCase):
         world = self.source("shapeworld.cpp")
         self.assertTrue('#include "decodingmarker.h"' in world, "the painter does not use the marker")
         prepare = function(world, "void WorldPainter::prepare(")
-        written = prepare.index("decodingmarker::write(")
+        written = prepare.index("decodingmarker::hold(")
         refused = prepare.index("return;", written)
         headers = prepare.index("estimateFor(")
         pixels = prepare.index("load(detail")
-        removed = prepare.index("QFile::remove(marker)")
+        removed = prepare.index("decodingmarker::release(")
         self.assertLess(written, refused)
         self.assertLess(refused, headers, "a marker that cannot be written ends the preparation before any read")
         self.assertLess(headers, pixels)
@@ -63,16 +63,16 @@ class DecodingGuardTests(unittest.TestCase):
         # must know the marker is there before it decodes, and decode
         # nothing when it is not.
         loader = function(self.source("shape.cpp"), "void ShapeLoader::load(")
-        self.assertTrue("decodingmarker::write(" in loader, "the marker's write is not checked")
+        self.assertTrue("decodingmarker::hold(" in loader, "the marker's write is not checked")
         self.assertNotIn("writeMarker(marker", loader)
-        written = loader.index("decodingmarker::write(")
+        written = loader.index("decodingmarker::hold(")
         decodes = [match.start() for match in re.finditer(r"= decode\(&", loader)]
         self.assertEqual(len(decodes), 2, "the card window and the cover")
         for at in decodes:
             self.assertLess(written, at)
             condition = loader[loader.rindex("if (", 0, at):at]
             self.assertIn("guarded", condition, condition)
-        self.assertLess(max(decodes), loader.index("QFile::remove(marker)"))
+        self.assertLess(max(decodes), loader.index("decodingmarker::release("))
 
     def test_an_insertion_skipped_after_a_crash_stays_skipped_over_clean_restarts(self):
         # The launcher stops the shell around every game: a skip held in

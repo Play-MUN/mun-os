@@ -165,8 +165,8 @@ void ShapeLoader::load(quint64 token, const QVariantMap &request)
     // (Without a runtime directory there is no marker to write.)
     const QString marker = runtimeFile("shape-decoding");
     std::string unwritten;
-    const bool guarded = marker.isEmpty() || decodingmarker::write(QFile::encodeName(marker).toStdString(),
-                                                                   insertion.toStdString(), &unwritten);
+    const bool guarded = marker.isEmpty() || decodingmarker::hold(QFile::encodeName(marker).toStdString(),
+                                                                  insertion.toStdString(), &unwritten);
     if (!guarded)
         qWarning("mun-shell: shape: the decoding marker could not be written (%s); no image of insertion %s is decoded",
                  unwritten.c_str(), qPrintable(insertion));
@@ -227,8 +227,8 @@ void ShapeLoader::load(quint64 token, const QVariantMap &request)
     if (readLevel && !cover.isNull())
         result.insert("read", readPalette(cover));
 
-    if (!marker.isEmpty())
-        QFile::remove(marker);
+    if (!marker.isEmpty() && guarded)
+        decodingmarker::release(QFile::encodeName(marker).toStdString());
     emit loaded(token, result, window);
 }
 

@@ -484,7 +484,7 @@ void WorldPainter::prepare(quint64 generation, const QVariantMap &world, const Q
                                                                   : runtime + QStringLiteral("/shape-decoding");
     if (!marker.isEmpty()) {
         std::string unwritten;
-        if (!decodingmarker::write(QFile::encodeName(marker).toStdString(), insertion, &unwritten)) {
+        if (!decodingmarker::hold(QFile::encodeName(marker).toStdString(), insertion, &unwritten)) {
             m_detail = 4;
             emit prepared(generation, false, 4, 0,
                           QStringLiteral("is not read: the marker that guards its decoding could not be written (%1)")
@@ -512,7 +512,7 @@ void WorldPainter::prepare(quint64 generation, const QVariantMap &world, const Q
     }
     // Every header is read and every image decoded: what follows reads no file.
     if (!marker.isEmpty())
-        QFile::remove(marker);
+        decodingmarker::release(QFile::encodeName(marker).toStdString());
     if (!ok) {
         clearPrepared();
         m_detail = 4;

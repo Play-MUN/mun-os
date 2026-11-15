@@ -20,6 +20,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <mutex>
 #include <string>
 
 namespace decodingmarker {
@@ -49,6 +50,49 @@ inline bool write(const std::string &path, const std::string &insertion, std::st
         return false;
     }
     return true;
+}
+
+// Two readers of one identity's images can overlap: the card's window and
+// cover, and its world, are read by different threads. Each holds the marker
+// while it reads: the first writes it, a second reader of the same insertion
+// only counts itself, and the last one done removes it, so one reader
+// finishing first never leaves the other unguarded. A reader whose hold()
+// is false holds nothing and must not release().
+struct Holders {
+    std::mutex lock;
+    int count = 0;
+    std::string insertion;
+};
+
+inline Holders &holders()
+{
+    static Holders shared;
+    return shared;
+}
+
+inline bool hold(const std::string &path, const std::string &insertion, std::string *why)
+{
+    Holders &h = holders();
+    std::lock_guard<std::mutex> guard(h.lock);
+    if (h.count > 0 && h.insertion == insertion) {
+        ++h.count;
+        return true;
+    }
+    if (!write(path, insertion, why))
+        return false;
+    ++h.count;
+    h.insertion = insertion;
+    return true;
+}
+
+inline void release(const std::string &path)
+{
+    Holders &h = holders();
+    std::lock_guard<std::mutex> guard(h.lock);
+    if (h.count > 0 && --h.count == 0) {
+        std::remove(path.c_str());
+        h.insertion.clear();
+    }
 }
 
 // The insertion an export's folder is of, from the folder's name: the card

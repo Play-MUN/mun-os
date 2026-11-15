@@ -184,6 +184,28 @@ void resuming(const fs::path &runtime)
 
 } // namespace
 
+void sharing(const fs::path &runtime)
+{
+    // The card's window and cover, and its world, are read by two threads
+    // that can overlap: the marker stays until the last of them is done.
+    std::string why;
+    const fs::path marker = runtime / "shape-decoding";
+    check("a first reader holds the marker", decodingmarker::hold(marker.string(), kInsertion, &why)
+                                                 && contents(marker) == kInsertion, why);
+    check("a second reader of the same insertion holds it too", decodingmarker::hold(marker.string(), kInsertion, &why),
+          why);
+    decodingmarker::release(marker.string());
+    check("the first one done leaves it while the other reads", fs::exists(marker) && contents(marker) == kInsertion);
+    decodingmarker::release(marker.string());
+    check("the last one done removes it", !fs::exists(marker));
+    decodingmarker::release(marker.string());
+    check("a release with no holder removes nothing it should not", !fs::exists(marker));
+    check("and the marker can be held again", decodingmarker::hold(marker.string(), kInsertion, &why), why);
+    decodingmarker::release(marker.string());
+    check("a reader that could not write it holds nothing",
+          !decodingmarker::hold((runtime / "absent" / "shape-decoding").string(), kInsertion, &why));
+}
+
 int main()
 {
     const fs::path runtime = fs::temp_directory_path() / ("mun-decodingmarker-" + std::to_string(getpid()));
@@ -192,6 +214,7 @@ int main()
     writing(runtime);
     exportNames();
     resuming(runtime);
+    sharing(runtime);
     fs::remove_all(runtime);
     std::printf("decoding marker: %d passed, %d failed\n", g_passed, g_failed);
     return g_failed == 0 ? 0 : 1;

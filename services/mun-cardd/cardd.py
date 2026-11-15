@@ -102,6 +102,10 @@ SHAPE_NOTES_MAX = 32              # notes carried in the card record; all are in
 # Lab hook: seconds of pause before each chunk, so removal and release during
 # a copy can be exercised. The pause ends at once if the copy is cancelled.
 SHAPE_DELAY = float(os.environ.get("MUN_CARDD_SHAPE_DELAY", "0") or 0)
+# Seconds between attempts to return to read-only a card that a save had to
+# leave writable (CardManager._close_card). One `mount` call each, for as
+# long as the card is in and writable.
+READ_ONLY_RETRY = 5.0
 
 
 def log(message: str) -> None:
@@ -152,6 +156,11 @@ class Card:
     release_reply: Optional[Callable[[dict], None]] = None
     release_timer: int = 0       # bumps per release; a deadline for an earlier one does nothing
     release_armed: bool = False  # this release's deadline for the Shape copy is set
+    # Mounted read-write: set by a save for its write and cleared by the
+    # remount to read-only that ends it. Still set once the save is over, that
+    # remount was refused and is owed (CardManager._close_card).
+    writable: bool = False
+    closing: bool = False        # a retry of that remount is scheduled
     # MUN Shape: the record published with the card, and this insertion's copy.
     shape: Optional[dict] = None
     export: Optional["ShapeExport"] = None
@@ -382,7 +391,48 @@ class CardManager:
             + ("ok, " + str(outcome.get("bytes")) + " bytes" if outcome.get("ok")
                else "failed: " + outcome["error"]["code"] + (" (" + outcome["error"].get("detail", "") + ")" if outcome["error"].get("detail") else "")))
         reply({"type": "saved", "session": request.get("session"), **outcome})
+        if card.writable and self.cards.get(card.device) is card:
+            log(f"{card.slot} ({card.serial}) is still mounted read-write after the save: the remount to read-only "
+                f"was refused; trying again every {READ_ONLY_RETRY:g} s and before any release")
+            self._close_later(card)
         self._advance_release(card)
+
+    def _close_card(self, card: Card) -> bool:
+        """Return to read-only a card that a save had to leave writable.
+        True when the card is read-only.
+
+        The kernel refuses that remount (EBUSY) while a file removed from the
+        card is still open, and a save removes one: the previous copy it
+        replaces. A game with mount access reads the card through its own
+        mount of the same device and can hold that file open. Until it closes
+        it the filesystem stays writable and is not marked clean: pulled
+        then, the card would need a recovery the console never performs. So
+        the remount is owed, and tried again here: by a timer, and before a
+        release. Never under a save in flight, which needs the card writable
+        and ends with this same remount."""
+        if not card.writable or not card.mount:
+            return True
+        if card.saving:
+            return False
+        try:
+            self.mounter.remount(card, rw=False)
+        except CardError:
+            return False
+        card.writable = False
+        log(f"{card.slot} ({card.serial}) is read-only again")
+        return True
+
+    def _close_later(self, card: Card) -> None:
+        if not card.closing:
+            card.closing = True
+            self.later(READ_ONLY_RETRY, lambda: self._close_due(card))
+
+    def _close_due(self, card: Card) -> None:
+        card.closing = False
+        if self.cards.get(card.device) is not card or card.saving:
+            return      # gone; or a save is writing, which closes the card itself or asks again
+        if not self._close_card(card):
+            self._close_later(card)
 
     def release(self, request: dict, reply: Callable[[dict], None]) -> None:
         """Safe removal: no new writes, finish the one in flight, stop the
@@ -441,6 +491,12 @@ class CardManager:
     def _release_now(self, card: Card) -> None:
         reply, card.release_reply = card.release_reply, None
         try:
+            if not self._close_card(card):
+                # Unmounting here would detach this service's mount and leave
+                # the filesystem writable under whoever holds it: not a card
+                # that is safe to pull.
+                raise CardError("card_busy", "La tarjeta sigue en uso; no la retires",
+                                "sigue montada para escritura: un programa mantiene abierta una partida anterior")
             self.mounter.unmount(card, strict=True)
         except CardError as exc:
             # Not released: the card keeps its state and mount, writes are
@@ -914,12 +970,20 @@ def _write_save(mounter: "Mounter", card: "Card", info: dict, data: bytes, gener
     mount = Path(card.mount)
     target = save_path(mount, info)
     mounter.remount(card, rw=True)
+    # Writable from here until a remount to read-only succeeds. If the one
+    # that ends this save is refused, the flag stays and the manager tries
+    # again (CardManager._close_card): the card is never left writable.
+    card.writable = True
     dir_fd = -1
+
+    def read_only_again() -> None:
+        mounter.remount(card, rw=False)
+        card.writable = False
 
     def back_to_read_only() -> None:
         # Best effort on the failure path: the card may already be gone.
         try:
-            mounter.remount(card, rw=False)
+            read_only_again()
         except CardError as exc:
             log(f"could not remount {card.slot} read-only after a failed save: {exc.detail or exc.message}")
 
@@ -984,8 +1048,15 @@ def _write_save(mounter: "Mounter", card: "Card", info: dict, data: bytes, gener
             os.close(dir_fd)
     # Read-only again: this flushes the journal and marks the filesystem clean,
     # which is what the next console will find. It is part of "saved"; if it
-    # fails the player is told, even though the bytes may be on the card.
-    mounter.remount(card, rw=False)
+    # fails the player is told, even though the bytes are on the card: a card
+    # pulled while writable is one the console would refuse to mount.
+    try:
+        read_only_again()
+    except CardError as exc:
+        if exc.code != "sync_failed":
+            raise
+        raise CardError("sync_failed", "La partida se escribió, pero la tarjeta no pudo cerrarse; no la retires todavía",
+                        exc.detail or exc.message)
     return {"ok": True, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest(), "path": str(target)}
 
 

@@ -48,9 +48,17 @@ class FakeMounter:
             self.log.append(("umount", card.slot))
             card.mount = None
 
+    # The kernel refuses a remount to read-only while a file removed from the
+    # card is still open (docs/saves.md); tests turn this on and off.
+    refuse_read_only = False
+
     def remount(self, card, rw):
         if not card.mount:
             raise CardError("card_removed", "La tarjeta ya no está montada")
+        if not rw and self.refuse_read_only:
+            self.log.append(("remount-refused", card.slot, "ro"))
+            raise CardError("sync_failed", "No se pudo cambiar el modo de la tarjeta",
+                            f"mount: {card.mount}: mount point is busy.")
         self.log.append(("remount", card.slot, "rw" if rw else "ro"))
 
 

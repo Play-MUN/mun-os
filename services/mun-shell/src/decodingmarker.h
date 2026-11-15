@@ -58,6 +58,13 @@ inline bool write(const std::string &path, const std::string &insertion, std::st
 // only counts itself, and the last one done removes it, so one reader
 // finishing first never leaves the other unguarded. A reader whose hold()
 // is false holds nothing and must not release().
+//
+// Readers of two different insertions can overlap too (a card pulled while
+// its world is still read, and another put in): the marker then names the
+// later one. A crash in the earlier one's images skips the later, which
+// shows no Shape until it is put in again, and the earlier is no longer in
+// the slot; put in again it is a new insertion, read alone, so a crash then
+// names it. Each crash still skips something: no restart loop.
 struct Holders {
     std::mutex lock;
     int count = 0;

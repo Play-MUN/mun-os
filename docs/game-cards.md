@@ -19,14 +19,21 @@ belongs to the hardware integration, which is not selected yet.
   directory, `saves/` by default.
 - `mun-card` ([tools/mun-card](../tools/mun-card/README.md)) builds images on
   the host with e2fsprogs (`mke2fs -d`), fixed timestamps, a null UUID and a
-  fixed hash seed. The image also records each file's permissions, user and
-  group, so the same content yields the same bytes when those, and the
-  e2fsprogs version and configuration, are the same too. Label `MUNCARD`,
-  64 MiB unless a size is given.
+  fixed hash seed. Every entry belongs to user and group 0, every directory
+  is 0755 and every file 0644, or 0755 when it is executable, whoever makes
+  the card and under whatever umask: the same content yields the same bytes
+  when the e2fsprogs version and configuration are the same too. Label
+  `MUNCARD`, 64 MiB unless a size is given.
 - Before mounting, the console requires a whole-image ext4 with a clean
   superblock: an image that needs journal recovery (`image_needs_recovery`)
   or is marked with errors (`image_has_errors`) is refused and never
   repaired by the console.
+- What a file system does when the kernel finds it damaged is the console's
+  decision, never the card's. The superblock's own setting (`continue`,
+  `remount-ro` or `panic`) is ignored: the console mounts every card with
+  `errors=remount-ro`. `mun-card inspect --json` reports the card's setting
+  as `filesystem.errors_policy`, and `inspect` warns about `panic`, which
+  another system would obey.
 
 ## Manifest
 
@@ -65,18 +72,18 @@ background = "#BFD9F2"
 | --- | --- | --- |
 | `card.schema` | yes | integer; `1` is the only accepted value |
 | `card.id` | yes | `[a-z0-9][a-z0-9._-]{2,63}`; also names the card's save directory |
-| `card.title` | yes | 1–120 characters |
+| `card.title` | yes | 1–120 characters of text in any script; no control character, line or paragraph separator, or bidirectional control (`manifest_field`) |
 | `content.version` | yes | `N(.N){0,3}` with an optional `-`/`+` suffix; the content's own version, independent of `card.schema` |
 | `content.kind` | yes | `test` (described, never executed) or `game` |
 | `content.arch` | yes | `aarch64` |
 | `content.profile` | yes | `linux-arm64-v0` or `linux-arm64-gl-v0` ([runtime.md](runtime.md)) |
 | `content.root` | yes | a directory |
 | `content.entry` | for `game` | a regular file: the executable |
-| `content.cover` | no | a PNG of at most 1 MiB and 1024×1024 |
+| `content.cover` | no | a PNG of at most 1 MiB and 1024×1024 (`cover_too_large`), carrying no more besides its pixels than any image of a MUN Shape package may ([shape.md](shape.md#limits); `cover_invalid`) |
 | `content.access` | no | `copy` (default: only the entry is staged) or `mount` (the content is also mounted read-only for the game; [runtime.md](runtime.md)) |
 | `presentation.accent` | no | `#RRGGBB`: while the card is the active one, the focus of Home's main arc and of the game's panel takes it, if it keeps its contrast there ([shape.md](shape.md#contrast)); Settings and dialogs keep MUN's |
 | `presentation.background` | no | `#RRGGBB`: likewise for the ambient light at Home's orb. The card lends colours, never layout or structure; a MUN Shape palette takes precedence |
-| `saves.location` | no | default `saves`; if present on the card it must be a directory |
+| `saves.location` | no | default `saves`; if present on the card it must be a directory, and if absent the console makes it at the first save |
 | `saves.directory`, `saves.units`, `saves.checks`, `saves.max_bytes` | no, all four or none | directory saves for a game that writes its own files ([saves.md](saves.md)) |
 
 The directory `mun-shape/` at the root of the content is reserved for MUN
@@ -110,9 +117,11 @@ inside the game's unit ([runtime.md](runtime.md#content-during-play)).
   reader, named by the card's own CID (`NPT-sd-<cid>`; the Dragon Q6A's
   microSD slot in the `q6a-dev` profile). The system disk and anything else
   are never inspected or mounted.
-- **Mount.** `ro,nosuid,nodev,noexec`, with the journal loaded, inside the
-  service's private mount namespace. The card is written only for a save, in a
-  short read-write window ([saves.md](saves.md)).
+- **Mount.** `ro,nosuid,nodev,noexec,errors=remount-ro`, with the journal
+  loaded, inside the service's private mount namespace. The card is written
+  only for a save, in a short read-write window ([saves.md](saves.md)); an
+  inconsistency the kernel finds there stops every write, so the save fails
+  and says so.
 - **States.** `reading`, `valid`, `invalid`, `waiting`. One card is active at
   a time, the first inserted; a second card waits unmounted and is evaluated
   when the first is removed. Each insertion gets a random token that consumers
@@ -165,6 +174,11 @@ after, on success and on failure).
   hold no special files (pipes, devices, sockets) and carry only saves the
   console would restore: a damaged save is recovered explicitly on another
   copy first, never made to look valid by a new format name.
+- Everything is decided from the image, which the tool reads entry by entry
+  by inode number: no file of the card is extracted to the host, and no name
+  the image holds becomes a path there. An image whose directory entries
+  are not unique file names (a name with a `/`, one name twice in a
+  directory, one directory under two names) is refused (`entry_name`).
 - It changes exactly this: the manifest is renamed to `mun.toml`, and the
   `format` of `save.json` and `save.json.prev` becomes `mun-save/1`. Every
   other file is byte-identical, which the tool verifies before it publishes

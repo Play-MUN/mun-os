@@ -112,6 +112,15 @@ JSON_MAX_DEPTH = 64
 SAVE_MAX_BYTES = 64 * 1024
 SAVE_LINE_MAX = SAVE_MAX_BYTES + 4096
 SAVE_TIMEOUT = 20.0                   # the card service must answer a save within this
+# A session's save socket takes one request per connection. A connection has
+# this long to send its line, and only so many are held at once: connections
+# that never ask would otherwise use up the launcher's descriptors, which it
+# needs to run systemctl at every tick.
+SAVE_REQUEST_TIMEOUT = 10.0
+SAVE_CLIENTS_MAX = 8
+# Clients of the launcher's own socket held at once: the shell and, for a
+# moment, the safe-removal command.
+CLIENTS_MAX = 16
 # Save envelope formats by the card's naming generation (docs/game-cards.md), as the
 # card service validated it: "earlier" for cards with neptune.toml, "mun" for
 # cards with mun.toml. A session record without it is from before and is earlier.
@@ -1984,6 +1993,9 @@ class Server:
 
     def accept(self) -> Optional[socket.socket]:
         conn, _ = self.listener.accept()
+        if len(self.clients) >= CLIENTS_MAX:
+            conn.close()         # the ones already served stay
+            return None
         conn.setblocking(False)
         self.clients[conn] = LineReader(limit=CLIENT_LINE_MAX)
         self._send(conn, self.manager.snapshot())
@@ -2296,7 +2308,9 @@ def main(argv=None) -> int:
     selector.register(wake_r, selectors.EVENT_READ, "wake")
 
     # Per-session save socket (docs/saves.md): opened right before the game starts,
-    # closed with the session. Each connection carries one bounded request line.
+    # closed with the session. Each connection carries one bounded request line;
+    # "clients" maps it to its line reader, the time by which the line must
+    # have come, and whether it has (the connection then waits for its answer).
     gate = {"listener": None, "sid": None, "clients": {}}
 
     def gate_send(conn: socket.socket, message: dict) -> None:
@@ -2334,11 +2348,36 @@ def main(argv=None) -> int:
     manager.gate_open, manager.gate_close = gate_open, gate_close
     faults: set = server.faults
 
+    def save_accept() -> None:
+        try:
+            conn, _ = gate["listener"].accept()
+        except OSError:
+            return
+        if len(gate["clients"]) >= SAVE_CLIENTS_MAX:
+            # Room is made by the connection that has kept silent longest, so
+            # that a save always gets in; one waiting for its answer stays.
+            silent = [held for held, client in gate["clients"].items() if not client["asked"]]
+            if not silent:
+                conn.close()
+                return
+            gate_drop(silent[0])
+        conn.setblocking(False)
+        gate["clients"][conn] = {"reader": LineReader(limit=SAVE_LINE_MAX), "asked": False,
+                                 "deadline": time.monotonic() + SAVE_REQUEST_TIMEOUT}
+        selector.register(conn, selectors.EVENT_READ, "save-client")
+
+    def save_expire() -> None:
+        now = time.monotonic()
+        for conn, client in list(gate["clients"].items()):
+            if not client["asked"] and now > client["deadline"]:
+                gate_drop(conn)
+
     def save_line(conn: socket.socket) -> None:
-        reader = gate["clients"].get(conn)
+        client = gate["clients"].get(conn)
         try:
             data = conn.recv(65536)
-            requests = reader.feed(data) if (data and reader) else []
+            # Anything after the request line is read and dropped.
+            requests = client["reader"].feed(data) if (data and client and not client["asked"]) else []
         except (OSError, FrameTooLarge):
             data = b""
             requests = []
@@ -2346,6 +2385,7 @@ def main(argv=None) -> int:
             gate_drop(conn)
             return
         for request in requests[:1]:   # one request per connection
+            client["asked"] = True
             if not run_step(faults, "save request", manager.save_request, gate["sid"], request,
                             lambda message, c=conn: gate_send(c, message)):
                 gate_send(conn, {"type": "saved", "ok": False, "error": {
@@ -2389,13 +2429,7 @@ def main(argv=None) -> int:
         elif key.data == "client":
             server.handle(key.fileobj)   # drop() unregisters on close
         elif key.data == "save-accept":
-            try:
-                conn, _ = gate["listener"].accept()
-            except OSError:
-                return
-            conn.setblocking(False)
-            gate["clients"][conn] = LineReader(limit=SAVE_LINE_MAX)
-            selector.register(conn, selectors.EVENT_READ, "save-client")
+            save_accept()
         elif key.data == "save-client":
             save_line(key.fileobj)
         elif key.data == "wake":
@@ -2426,6 +2460,7 @@ def main(argv=None) -> int:
                 time.sleep(0.05)
         if time.monotonic() - last_tick >= POLL_INTERVAL:
             run_step(faults, "tick", manager.tick)
+            save_expire()
             last_tick = time.monotonic()
 
     try:

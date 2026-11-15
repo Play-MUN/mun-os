@@ -35,8 +35,9 @@ class RunningLauncher:
     """launchd.main() in a thread. `units` are the session ids systemd lists as
     running game units when the launcher starts."""
 
-    def __init__(self, case: unittest.TestCase, units=()):
+    def __init__(self, case: unittest.TestCase, units=(), **settings):
         self.case, self.units = case, list(units)
+        self.settings = {"POLL_INTERVAL": 0.02, "READER_GRACE": 60.0, **settings}     # launchd's own constants
         self.folder = Path(tempfile.mkdtemp(prefix="ml"))
         self.root = self.folder / "lr"
         self.root.mkdir()
@@ -81,8 +82,8 @@ class RunningLauncher:
         with patch(launchd, "LAUNCH_ROOT", self.root), patch(launchd, "RESULT_FILE", self.root / "last-result.json"), \
                 patch(launchd, "CARDD_SOCKET", self.folder / "no-cardd.sock"), \
                 patch(launchd, "CARDD_CONTROL", self.folder / "no-control.sock"), \
-                patch(launchd, "CONTENT_MOUNT", self.folder / "cm"), patch(launchd, "POLL_INTERVAL", 0.02), \
-                patch(launchd, "READER_GRACE", 60.0), patch(launchd, "log", self.lines.append), \
+                patch(launchd, "CONTENT_MOUNT", self.folder / "cm"), patch(launchd, "log", self.lines.append), \
+                unittest.mock.patch.multiple(launchd, **self.settings), \
                 patch(launchd.subprocess, "run", self.systemctl), patch(launchd.Runner, "__init__", runner_init), \
                 patch(launchd.os, "chown", lambda *a, **k: None), \
                 patch(launchd.signal, "signal", self.handlers.__setitem__), \
@@ -124,8 +125,15 @@ class RunningLauncher:
         conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.case.addCleanup(conn.close)
         conn.settimeout(5)
-        conn.connect(str(path))
-        return conn
+        deadline = time.monotonic() + 5
+        while True:
+            try:
+                conn.connect(str(path))
+                return conn
+            except ConnectionRefusedError:      # the listener's queue is full for a moment
+                if time.monotonic() > deadline:
+                    raise
+                time.sleep(0.01)
 
     def shell_request(self, request) -> dict:
         """One shell client: its snapshot, or the answer to `request` after it."""
@@ -219,6 +227,65 @@ class LoopSurvivalTests(unittest.TestCase):
             launcher.alive()
             self.assertEqual(launcher.manager.results.current()["reason"], "interrupted")
             self.assertFalse((launcher.root / "sbroken").exists())
+
+
+def still_open(conn: socket.socket) -> bool:
+    """Whether the launcher still holds its end of `conn` (nothing was sent to it)."""
+    conn.setblocking(False)
+    try:
+        return conn.recv(1) != b""
+    except BlockingIOError:
+        return True
+    except OSError:
+        return False
+
+
+class ConnectionBoundTests(unittest.TestCase):
+    SAVE = b'{"type":"save","schema":1,"data":{"n":1}}\n'
+
+    def test_idle_connections_to_a_save_socket_are_bounded_and_a_save_still_gets_in(self):
+        with RunningLauncher(self) as launcher:
+            gate = launcher.open_gate("s1")
+            idle = [launcher.connect(gate) for _ in range(60)]
+            self.assertEqual(launcher.save(gate, self.SAVE)["type"], "saved")
+            launcher.alive()
+            self.assertLessEqual(sum(still_open(conn) for conn in idle), launchd.SAVE_CLIENTS_MAX)
+
+    def test_a_connection_that_never_sends_its_request_is_closed(self):
+        with RunningLauncher(self, SAVE_REQUEST_TIMEOUT=0.2) as launcher:
+            gate = launcher.open_gate("s1")
+            silent, slow = launcher.connect(gate), launcher.connect(gate)
+            slow.sendall(self.SAVE[:10])                       # a line that never ends is no request either
+            started = time.monotonic()
+            self.assertEqual((silent.recv(1), slow.recv(1)), (b"", b""), "closed by the launcher, nothing sent")
+            self.assertLess(time.monotonic() - started, 3)
+            self.assertEqual(launcher.save(gate, self.SAVE)["type"], "saved")
+
+    def test_a_connection_gets_one_answer(self):
+        with RunningLauncher(self) as launcher:
+            conn = launcher.connect(launcher.open_gate("s1"))
+            conn.sendall(self.SAVE)
+            answers = _lines(conn)
+            self.assertEqual(next(answers)["type"], "saved")
+            try:
+                conn.sendall(self.SAVE)
+            except OSError:
+                pass
+            self.assertEqual(list(answers), [])
+
+    def test_clients_of_the_shell_socket_are_bounded_and_the_first_ones_stay(self):
+        with RunningLauncher(self) as launcher:
+            first = launcher.connect(launcher.socket)
+            answers = _lines(first)
+            self.assertEqual(next(answers)["type"], "snapshot")
+            crowd = [launcher.connect(launcher.socket) for _ in range(launchd.CLIENTS_MAX + 20)]
+            first.sendall(b'{"type":"status"}\n')
+            self.assertEqual(next(answers)["type"], "snapshot", "an established client is still served")
+            time.sleep(0.2)
+            self.assertLessEqual(sum(still_open(conn) for conn in crowd), launchd.CLIENTS_MAX - 1)
+            for conn in crowd:
+                conn.close()
+            launcher.alive()                                   # and there is room again once they leave
 
 
 class StepFailureTests(unittest.TestCase):

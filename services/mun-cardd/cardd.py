@@ -764,9 +764,13 @@ def open_save_dir(mount: Path, info: dict, create: bool) -> int:
     """A file descriptor for <mount>/<saves.location>/<card id>, walked component by
     component with O_NOFOLLOW: a symbolic link anywhere on the way is refused,
     so a crafted card cannot point the writer at its own content. With
-    `create`, the per-game directory is made (never through a link). Returns
-    the descriptor; the caller closes it. Raises CardError("save_path_unsafe")
-    or FileNotFoundError (without `create`) when the game directory is absent.
+    `create`, each directory missing on the way is made, the saves location
+    itself included: a card is valid without one (docs/game-cards.md), and
+    it must still be possible to save to it. A directory is made by name in
+    its parent's descriptor and then opened like any other, so never through
+    a link. Returns the descriptor; the caller closes it. Raises
+    CardError("save_path_unsafe"), or FileNotFoundError (without `create`)
+    when a directory on the way is absent.
     """
     if not SAVE_ID.fullmatch(str(info.get("id", ""))):
         raise CardError("save_path_unsafe", "El identificador del juego no sirve como ruta")
@@ -775,20 +779,17 @@ def open_save_dir(mount: Path, info: dict, create: bool) -> int:
         raise CardError("save_path_unsafe", "La ruta de partidas sale de la tarjeta")
     fd = os.open(mount, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
     try:
-        for part in parts:
-            nxt = _open_dir_component(fd, part)
+        for part in parts + [str(info["id"])]:
+            try:
+                nxt = _open_dir_component(fd, part)
+            except FileNotFoundError:
+                if not create:
+                    raise
+                os.mkdir(part, mode=0o755, dir_fd=fd)
+                nxt = _open_dir_component(fd, part)
             os.close(fd)
             fd = nxt
-        game = str(info["id"])
-        try:
-            nxt = _open_dir_component(fd, game)
-        except FileNotFoundError:
-            if not create:
-                raise
-            os.mkdir(game, mode=0o755, dir_fd=fd)
-            nxt = _open_dir_component(fd, game)
-        os.close(fd)
-        return nxt
+        return fd
     except BaseException:
         os.close(fd)
         raise

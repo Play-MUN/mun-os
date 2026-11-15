@@ -578,6 +578,50 @@ class SaveWriteTests(unittest.TestCase):
         self.assertEqual(ctx.exception.code, "save_path_unsafe")
         self.assertEqual(sorted(p.name for p in (self.tmp / "content").iterdir()), ["mun-collect"])
 
+    # --- a card without its saves directory (docs/game-cards.md: "if present ... a directory") ---
+    def test_a_card_without_a_saves_directory_gets_one_at_its_first_save(self):
+        (self.tmp / "saves").rmdir()
+        self.assertEqual(self.handout()[0], {"present": False})
+        self.assertFalse((self.tmp / "saves").exists(), "reading a save creates nothing")
+        outcome = self.write()
+        self.assertTrue(outcome["ok"], outcome)
+        self.assertEqual(self.names(), ["save.json"])
+        for made in (self.tmp / "saves", self.game_dir):
+            info = os.lstat(made)
+            self.assertTrue(statmod.S_ISDIR(info.st_mode)); self.assertEqual(oct(info.st_mode & 0o777), "0o755")
+        self.assertEqual(self.mounter.log, [("remount", "c1", "rw"), ("remount", "c1", "ro")])
+        self.assert_loadable_old_save()
+
+    def test_a_saves_location_of_several_folders_is_made_one_at_a_time(self):
+        (self.tmp / "saves").rmdir()
+        self.info["saves"] = "data/slot/saves"
+        (self.tmp / "data").mkdir()                       # the first exists, the others do not
+        self.assertTrue(self.write()["ok"])
+        self.assertEqual(sorted(p.name for p in (self.tmp / "data" / "slot" / "saves" / "mun.collect").iterdir()), ["save.json"])
+        self.assertEqual(sorted(p.name for p in self.tmp.iterdir()), ["content", "data"])
+
+    def test_a_missing_saves_directory_is_never_made_through_a_link(self):
+        (self.tmp / "saves").rmdir()
+        (self.tmp / "saves").symlink_to(self.tmp / "content" / "elsewhere", target_is_directory=True)   # points at nothing
+        with self.assertRaises(CardError) as ctx:
+            self.write()
+        self.assertEqual(ctx.exception.code, "save_path_unsafe")
+        (self.tmp / "saves").unlink()
+        self.info["saves"] = "data/saves"
+        (self.tmp / "data").symlink_to(self.tmp / "content", target_is_directory=True)
+        with self.assertRaises(CardError) as ctx:
+            self.write()
+        self.assertEqual(ctx.exception.code, "save_path_unsafe")
+        self.assertEqual(sorted(p.name for p in (self.tmp / "content").iterdir()), ["mun-collect"], "nothing made in content")
+        self.assertEqual(self.mounter.log[-1], ("remount", "c1", "ro"))
+
+    def test_a_file_where_the_saves_directory_should_be_is_refused(self):
+        (self.tmp / "saves").rmdir(); (self.tmp / "saves").write_bytes(b"not a folder")
+        with self.assertRaises(CardError) as ctx:
+            self.write()
+        self.assertEqual(ctx.exception.code, "save_path_unsafe")
+        self.assertEqual((self.tmp / "saves").read_bytes(), b"not a folder")
+
     def test_restore_never_follows_links(self):
         (self.tmp / "saves" / "mun.collect").symlink_to(self.tmp / "content", target_is_directory=True)
         outcome, copy = self.handout()

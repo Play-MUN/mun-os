@@ -262,7 +262,15 @@ growpart:
         return pid if vm.pid_alive(pid) else None
 
     def ssh_base(self) -> List[str]:
-        return [vm.which("ssh"), "-i", str(self.key), "-p", str(self.port),
+        # Nothing of the user's or the system's ssh configuration applies to
+        # the builder: no file is read (-F), only this builder's key is
+        # offered, the user's key store is neither asked nor forwarded
+        # (IdentityAgent, ForwardAgent), and no jump host is used. A
+        # `Host *` block would otherwise send a build through a proxy or
+        # let the builder sign with the user's keys.
+        return [vm.which("ssh"), "-F", os.devnull, "-i", str(self.key), "-p", str(self.port),
+                "-o", "IdentitiesOnly=yes", "-o", "IdentityAgent=none", "-o", "ForwardAgent=no",
+                "-o", "ProxyJump=none",
                 "-o", f"UserKnownHostsFile={self.known_hosts}", "-o", "StrictHostKeyChecking=accept-new",
                 "-o", "ConnectTimeout=10", "-o", "LogLevel=ERROR", "-o", "BatchMode=yes",
                 "-o", "ServerAliveInterval=30", f"{BUILDER_USER}@127.0.0.1"]

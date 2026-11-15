@@ -255,6 +255,22 @@ class BuilderTests(Fixture):
         self.assertIn("ssh-ed25519 AAAA test", user_data)
         self.assertIn("ssh_pwauth: false", user_data)
 
+    def test_ssh_to_the_builder_takes_nothing_from_the_users_configuration(self):
+        # A Host * block of ~/.ssh/config (a jump host, forwarding of the
+        # user's keys, other identities) must not reach a build.
+        with patch.object(vm, "which", side_effect=lambda name: name):
+            builder = mundev.Builder("b1")
+            builder.port = 2222
+            command = builder.ssh_base()
+        self.assertEqual(command[:3], ["ssh", "-F", os.devnull], "no configuration file is read")
+        options = [command[index + 1] for index, part in enumerate(command) if part == "-o"]
+        for option in ("IdentitiesOnly=yes", "IdentityAgent=none", "ForwardAgent=no", "ProxyJump=none",
+                       "BatchMode=yes", f"UserKnownHostsFile={builder.known_hosts}"):
+            self.assertIn(option, options)
+        self.assertEqual(command[command.index("-i") + 1], str(builder.key), "the builder's own key and no other")
+        self.assertEqual(command[command.index("-p") + 1], "2222")
+        self.assertEqual(command[-1], "builder@127.0.0.1")
+
     def test_the_builder_image_must_match_its_pin(self):
         cache = self.root / "cache"
         cache.mkdir()

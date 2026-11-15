@@ -920,15 +920,25 @@ def _copy_save_out(mount: Path, info: dict, target: Path) -> dict:
             log(f"save.json {why} under {mount}; handing out save.json.prev as the recovered save")
     finally:
         os.close(dir_fd)
-    owner = os.stat(target.parent)
-    out = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_CLOEXEC, 0o600)
+    # The session's work directory belongs to the game's user, so nothing in
+    # it is taken on trust: the directory is opened without following a link,
+    # a name already there is removed rather than opened, and the copy is
+    # created exclusively. This service, which is root, never writes through
+    # something left for it to find.
+    work = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
     try:
-        view = memoryview(data)
-        while view:          # a directory save's envelope can be megabytes
-            view = view[os.write(out, view):]
-        os.fchown(out, owner.st_uid, owner.st_gid)
+        owner = os.fstat(work)
+        _unlink_quiet(work, target.name)
+        out = os.open(target.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=work)
+        try:
+            view = memoryview(data)
+            while view:          # a directory save's envelope can be megabytes
+                view = view[os.write(out, view):]
+            os.fchown(out, owner.st_uid, owner.st_gid)
+        finally:
+            os.close(out)
     finally:
-        os.close(out)
+        os.close(work)
     return {"present": True, "copied": True, "bytes": len(data), "recovered": recovered}
 
 

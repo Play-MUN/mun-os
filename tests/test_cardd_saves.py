@@ -130,6 +130,59 @@ class HostileSaveFileTests(unittest.TestCase):
                 self.assertEqual(replies[-1]["save"].get("present"), current is not None)
 
 
+class StagedCopyTests(unittest.TestCase):
+    """The save handed to a session is written into a directory that belongs
+    to the game's user. Nothing found there is followed or written through."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(__import__("shutil").rmtree, self.tmp, True)
+        (self.tmp / "saves" / "mun.collect").mkdir(parents=True)
+        (self.tmp / "saves" / "mun.collect" / "save.json").write_bytes(GOOD)
+        self.work = self.tmp / "session" / "work"; self.work.mkdir(parents=True)
+        self.victim = self.tmp / "victim"; self.victim.write_bytes(b"a file the service must not touch")
+
+    def copy(self):
+        return cardd._copy_save_out(self.tmp, game_info(), self.work / "save.json")
+
+    def assert_copied(self):
+        import os, stat
+        info = os.lstat(self.work / "save.json")
+        self.assertTrue(stat.S_ISREG(info.st_mode)); self.assertEqual(oct(info.st_mode & 0o777), "0o600")
+        self.assertEqual(info.st_nlink, 1)
+        self.assertEqual((self.work / "save.json").read_bytes(), GOOD)
+        self.assertEqual(self.victim.read_bytes(), b"a file the service must not touch")
+
+    def test_the_copy_is_a_new_private_file(self):
+        out = self.copy()
+        self.assertEqual((out["copied"], out["bytes"]), (True, len(GOOD)))
+        self.assert_copied()
+
+    def test_a_link_left_under_the_name_is_replaced_not_followed(self):
+        (self.work / "save.json").symlink_to(self.victim)
+        self.assertTrue(self.copy()["copied"])
+        self.assert_copied()
+
+    def test_a_hard_link_left_under_the_name_is_replaced_not_written_through(self):
+        import os
+        os.link(self.victim, self.work / "save.json")
+        self.assertTrue(self.copy()["copied"])
+        self.assert_copied()
+        self.assertEqual(os.lstat(self.victim).st_nlink, 1)
+
+    def test_a_stale_copy_is_replaced(self):
+        (self.work / "save.json").write_bytes(b"x" * 500)
+        self.assertTrue(self.copy()["copied"])
+        self.assert_copied()
+
+    def test_a_work_directory_that_is_a_link_is_refused(self):
+        elsewhere = self.tmp / "elsewhere"; elsewhere.mkdir()
+        self.work.rmdir(); self.work.symlink_to(elsewhere, target_is_directory=True)
+        with self.assertRaises(OSError):
+            self.copy()
+        self.assertEqual(list(elsewhere.iterdir()), [], "nothing is written where the link points")
+
+
 def compact(payload):
     return len(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
 

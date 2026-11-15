@@ -42,7 +42,10 @@ class SocketDirectoryTests(unittest.TestCase):
         self.assertEqual(vm.socket_path(DEEP, "qga.sock").parent, self.leaf, "and it is found again")
 
     def test_a_directory_others_can_enter_is_refused(self):
-        self.leaf.mkdir(parents=True)
+        # The parent as the tool makes it, whatever this user's umask: the
+        # directory under test is the one inside it.
+        self.parent.mkdir(mode=0o700)
+        self.leaf.mkdir()
         for mode in (0o777, 0o750, 0o705):
             with self.subTest(mode=oct(mode)):
                 os.chmod(self.leaf, mode)

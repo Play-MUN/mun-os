@@ -131,7 +131,9 @@ class RunningLauncher:
             try:
                 conn.connect(str(path))
                 return conn
-            except ConnectionRefusedError:      # the listener's queue is full for a moment
+            except (ConnectionRefusedError, BlockingIOError):
+                # The listener's queue is full for a moment: refused on
+                # macOS, "try again" on Linux.
                 if time.monotonic() > deadline:
                     raise
                 time.sleep(0.01)

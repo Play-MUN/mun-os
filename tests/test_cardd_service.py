@@ -8,6 +8,7 @@ and the service goes on serving the card and the session it has."""
 
 import json
 import socket
+import time
 import sys
 import tempfile
 import threading
@@ -99,8 +100,17 @@ class RunningService:
     def connect(self):
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         sock.settimeout(5)
-        sock.connect(str(self.control))
-        return sock
+        deadline = time.monotonic() + 5
+        while True:
+            try:
+                sock.connect(str(self.control))
+                return sock
+            except (ConnectionRefusedError, BlockingIOError):
+                # The control socket's queue is short and full for a moment:
+                # refused on macOS, "try again" on Linux.
+                if time.monotonic() > deadline:
+                    raise
+                time.sleep(0.01)
 
     @staticmethod
     def exchange(sock, line):

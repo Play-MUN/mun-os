@@ -14,9 +14,21 @@
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
+#include <mutex>
 #include <limits>
 
 namespace {
+
+// The worker's write as ~SystemSounds sees it. A device that never drains
+// holds the worker in snd_pcm_writei, where no flag reaches it, and the
+// shell then leaves without it: the object it writes for is destroyed while
+// that write may still return. So this lives in static storage, beyond the
+// object. Under the lock the worker says it is in a write, and on its way
+// out of one learns whether it was left behind; if so it returns at once,
+// touching nothing of the object.
+std::mutex g_writeLock;
+bool g_inWrite = false;
+bool g_leftBehind = false;
 
 // Gains in quarters: the mock-up's level for the menus' sounds, leaving
 // headroom when they overlap; the start-up sound as it was mastered.
@@ -158,11 +170,18 @@ SystemSounds::~SystemSounds()
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
     while (!m_finished && std::chrono::steady_clock::now() < deadline)
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    if (m_finished) {
-        m_worker.join();
-    } else {
+    // Left behind only while it is in a write (g_writeLock above): anywhere
+    // else it is on its way out, with the stop asked, and is waited for.
+    bool leave = false;
+    if (!m_finished) {
+        std::lock_guard lock(g_writeLock);
+        leave = g_leftBehind = g_inWrite;
+    }
+    if (leave) {
         qWarning("mun-shell: sound: the sound device holds a write and does not let go; the shell leaves without it");
         m_worker.detach();
+    } else {
+        m_worker.join();
     }
 }
 
@@ -623,7 +642,17 @@ void SystemSounds::run()
         const qint16 *next = period.data();
         snd_pcm_uframes_t left = kPeriodFrames;
         while (left > 0) {
+            {
+                std::lock_guard lock(g_writeLock);
+                g_inWrite = true;
+            }
             snd_pcm_sframes_t written = snd_pcm_writei(pcm, next, left);
+            {
+                std::lock_guard lock(g_writeLock);
+                if (g_leftBehind)
+                    return;  // the shell left without this worker: its object is gone
+                g_inWrite = false;
+            }
             if (written < 0) {
                 // A failed write: recovered where ALSA can (an underrun, a
                 // suspend); both errors said, a few times per opening.

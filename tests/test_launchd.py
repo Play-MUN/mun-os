@@ -575,6 +575,21 @@ class RuntimeProfileTests(unittest.TestCase):
                 inputs = [p for p in props if p.startswith("DeviceAllow=") and "input" in p]
                 self.assertEqual(inputs, ["DeviceAllow=char-input r"])
 
+    def test_a_profiles_groups_are_the_only_groups_a_game_gets(self):
+        # systemd adds every group the unit's user is a member of to the ones
+        # the unit names, so the game user must be a member of none.
+        lines = [line.split() for line in (ROOT / "services" / "mun-launchd" / "deploy" / "sysusers.conf")
+                 .read_text().splitlines() if line.strip() and not line.startswith("#")]
+        self.assertEqual([line for line in lines if line[0] == "m"], [], "no membership for mun-game")
+        created = {line[1] for line in lines if line[0] == "g"}
+        for profile, spec in launchd.PROFILES.items():
+            with self.subTest(profile):
+                props = launchd.unit_properties(profile, "s1", Path("/run/mun/launch/s1"))
+                groups = [p[len("SupplementaryGroups="):] for p in props if p.startswith("SupplementaryGroups=")]
+                self.assertEqual(sorted(groups), sorted(spec["groups"]))
+                self.assertLessEqual(set(groups), created, "a group a profile names must exist on the console")
+        self.assertEqual(launchd.PROFILES["linux-arm64-v0"]["groups"], ("video", "input"))
+
     def test_shared_memory_and_ipc_are_the_sessions_own_and_bounded_in_both_profiles(self):
         def size(text):
             return int(text[:-1]) * {"M": 1 << 20, "G": 1 << 30}[text[-1]]

@@ -44,8 +44,11 @@ class StagingTests(unittest.TestCase):
             self.assertTrue(os.access(dest / "usr/local/libexec/mun-launch-cleanup", os.X_OK))
             users = (dest / "usr/lib/sysusers.d/mun-launchd.conf").read_text()
             self.assertIn('u mun-game - "MUN game sessions" /nonexistent /usr/sbin/nologin', users)
+            # The groups exist; the game user is a member of none (each
+            # runtime profile names its own in the game's unit).
             for group in ("video", "input", "render", "audio"):
-                self.assertIn(f"m mun-game {group}", users)
+                self.assertIn(f"g {group} -", users)
+            self.assertNotIn("m mun-game", users)
 
     def test_the_same_sources_give_the_same_staged_record(self):
         records = []

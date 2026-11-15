@@ -287,8 +287,11 @@ class RangeHandler(http.server.SimpleHTTPRequestHandler):
             return super().send_head()
         start = int(requested.split("=")[1].rstrip("-"))
         RangeHandler.served_ranges.append(start)
-        handle = path.open("rb")
         size = path.stat().st_size
+        if start >= size:                      # nothing left to send: not satisfiable
+            self.send_error(416)
+            return None
+        handle = path.open("rb")
         handle.seek(start)
         self.send_response(206)
         self.send_header("Content-Range", f"bytes {start}-{size - 1}/{size}")
@@ -325,6 +328,30 @@ class HttpTests(Fixture):
         build, _ = self.get(url)
         self.assertEqual((build / IMAGE).read_bytes(), whole)
         self.assertIn(5000, RangeHandler.served_ranges)
+
+    def test_a_download_that_stopped_after_its_last_byte_is_verified_and_installed(self):
+        # The process ended between the last write and the rename: the whole
+        # file is there under its partial name and nothing is left to ask for.
+        source = self.bundle()
+        url = self.serve(source)
+        staging = self.root / "installed" / "d0929-123647.download"
+        staging.mkdir(parents=True)
+        whole = (source / IMAGE).read_bytes()
+        (staging / (IMAGE + ".part")).write_bytes(whole)
+        RangeHandler.served_ranges = []
+        build, _ = self.get(url)
+        self.assertEqual((build / IMAGE).read_bytes(), whole)
+        self.assertEqual(RangeHandler.served_ranges, [], "nothing of it is asked for again")
+
+    def test_a_complete_partial_file_that_is_not_the_file_is_fetched_again(self):
+        source = self.bundle()
+        url = self.serve(source)
+        staging = self.root / "installed" / "d0929-123647.download"
+        staging.mkdir(parents=True)
+        whole = (source / IMAGE).read_bytes()
+        (staging / (IMAGE + ".part")).write_bytes(b"!" * len(whole))
+        build, _ = self.get(url)
+        self.assertEqual((build / IMAGE).read_bytes(), whole)
 
     def test_a_server_without_ranges_sends_the_whole_file_and_it_still_verifies(self):
         source = self.bundle()

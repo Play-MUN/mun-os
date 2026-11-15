@@ -242,6 +242,15 @@ def fetch_file(source: Source, entry: Dict[str, Any], target: Path, report: Call
         with part.open("rb") as previous:
             for block in iter(lambda: previous.read(CHUNK), b""):
                 digest.update(block)
+    if have and have == entry["size"]:
+        # All of it arrived and the process stopped before the rename. There
+        # is no byte left to ask for (a server answers such a range with an
+        # error), so the file is checked as it is; a wrong one starts again.
+        if digest.hexdigest() == entry["sha256"]:
+            os.replace(part, target)
+            return
+        part.unlink()
+        digest, have = hashlib.sha256(), 0
     stream, start = source.open(entry["name"], have)
     if start != have:                              # the server sent the whole file again
         digest, have = hashlib.sha256(), 0

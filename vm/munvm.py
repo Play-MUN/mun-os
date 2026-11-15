@@ -28,6 +28,7 @@ import secrets
 import shlex
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -98,7 +99,19 @@ def socket_path(root: Path, name: str) -> Path:
     if len(str(path).encode()) <= 100 or not HOST.unix_sockets:
         return path
     short = Path(tempfile.gettempdir()) / f"mun-{os.getuid()}" / hashlib.sha1(str(root).encode()).hexdigest()[:12]
-    short.mkdir(mode=0o700, parents=True, exist_ok=True)
+    # Whoever connects to QMP runs commands as this user, and on a shared
+    # temporary directory anyone can make these names first. So both must be
+    # this user's own directories, not links: the sockets' one closed to
+    # everybody else, its parent not writable by them (or the name could be
+    # given to another directory).
+    for directory, closed in ((short.parent, 0o022), (short, 0o077)):
+        with contextlib.suppress(FileExistsError):
+            directory.mkdir(mode=0o700)
+        info = os.lstat(directory)
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & closed:
+            raise LabError(f"{directory} is not a directory of this user alone (owner {info.st_uid}, mode "
+                           f"{stat.S_IMODE(info.st_mode):04o}): QEMU's control sockets are not put there; remove "
+                           "it, or set another TMPDIR")
     return short / name
 
 

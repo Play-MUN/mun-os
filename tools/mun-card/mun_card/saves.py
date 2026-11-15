@@ -9,6 +9,7 @@ deciding alike, since the launcher does not ship this package."""
 import base64
 import fnmatch
 import hashlib
+import json
 import re
 import zlib
 from typing import Optional
@@ -24,6 +25,7 @@ SAVE_MAX_BYTES = 64 * 1024            # a game's payload, measured as compact JS
 # it confirms is one it reads back whole; an envelope over the bound is a
 # damaged save for the console and for the card tool alike.
 SAVE_FILE_MAX_BYTES = SAVE_MAX_BYTES * 3 // 2 + 16 * 1024
+ENVELOPE_MAX_SEPARATORS = SAVE_FILE_MAX_BYTES // 2   # see parse_envelope
 # Directory saves (docs/saves.md): the card declares the bound on the raw files;
 # the envelope carries them in base64 (4/3) plus names and hashes.
 FILES_PAYLOAD_MAX_FILES = 64
@@ -36,6 +38,50 @@ INFLATE_FACTOR = 64
 XML_INFLATE_LIMIT = 16 * 1024 * 1024
 _FILE_NAME = re.compile(r"[A-Za-z0-9._-]{1,128}")
 _XML_SPACE = re.compile(rb"[ \t\n\r\x0b\x0c]*")
+
+
+# Parsing an envelope read from a card (docs/saves.md), as the launcher does.
+# Commas and colons outside strings count its values: a single-object
+# envelope holds at most what its file bound has room for, a directory-save
+# envelope a few per unit, everything big in it being a string. More is
+# refused before it is parsed: the 16 MiB a card declaring the largest
+# directory saves may hold, made of tiny values, would become hundreds of
+# megabytes of objects.
+JSON_MAX_DEPTH = 64
+_NOT_SEPARATOR = bytes(byte for byte in range(256) if byte not in b',:"')
+_NOT_BRACKET = bytes(byte for byte in range(256) if byte not in b'[]{}"')
+_BRACES = bytes.maketrans(b"{}", b"[]")
+
+
+def _outside_strings(raw: bytes, keep: bytes, table: Optional[bytes] = None) -> bytes:
+    """The bytes of `raw` that `keep` does not delete, from outside its JSON strings."""
+    marks = raw.replace(b"\\\\", b"").replace(b'\\"', b"").translate(table, keep)
+    outside, inside = [], False
+    for start in range(0, len(marks), 1 << 20):
+        pieces = marks[start:start + (1 << 20)].split(b'"')
+        outside.append(b"".join(pieces[inside::2]))
+        inside ^= not len(pieces) % 2
+    return b"".join(outside)
+
+
+def parse_envelope(raw: bytes):
+    """json.loads for an envelope read from a card: UTF-8 only, and a
+    ValueError, cheaply, for one nested deeper or holding far more values
+    than any the console writes."""
+    if raw.count(b",") + raw.count(b":") > ENVELOPE_MAX_SEPARATORS \
+            and len(_outside_strings(raw, _NOT_SEPARATOR)) > ENVELOPE_MAX_SEPARATORS:
+        raise ValueError(f"more than {ENVELOPE_MAX_SEPARATORS} values")
+    if raw.count(b"[") + raw.count(b"{") > JSON_MAX_DEPTH:
+        marks = _outside_strings(raw, _NOT_BRACKET, _BRACES)
+        if b"[" * (JSON_MAX_DEPTH + 1) in marks:
+            raise ValueError(f"nested deeper than {JSON_MAX_DEPTH} levels")
+        for _ in range(JSON_MAX_DEPTH):
+            if not marks:
+                break
+            marks = marks.replace(b"[]", b"")
+        if marks:
+            raise ValueError(f"nested deeper than {JSON_MAX_DEPTH} levels")
+    return json.loads(raw.decode("utf-8-sig"))
 
 
 def _field(info, name):
@@ -54,6 +100,16 @@ def save_bounds(info) -> "tuple[int, int]":
 def inflate_limit(max_bytes: int) -> int:
     """How far a unit may inflate on a card that declares `max_bytes` for its saves."""
     return min(INFLATE_LIMIT, INFLATE_FACTOR * max_bytes)
+
+
+# Units checked together share a budget of a few units' limit, as in the
+# launcher: many small zlib bombs cost a few limits, not one each.
+INFLATE_TOTAL_FACTOR = 4
+
+
+def inflate_share(limit: int, units: int) -> int:
+    """How far each of `units` units checked together may inflate."""
+    return min(limit, INFLATE_TOTAL_FACTOR * limit // max(units, 1))
 
 
 def unit_check(check: str, data: bytes, limit: int = INFLATE_LIMIT) -> Optional[str]:
@@ -151,12 +207,13 @@ def envelope_problem(document: object, info, wanted_format: str) -> Optional[str
         if problem:
             return problem
         patterns = list(zip(_field(info, "saves_units") or [], _field(info, "saves_checks") or []))
+        share = inflate_share(inflate_limit(max_bytes), len(document["payload"]["files"]))
         for entry in document["payload"]["files"]:
             name = entry["path"]
             check = next((c for pattern, c in patterns if fnmatch.fnmatchcase(name, pattern)), None)
             if check is None:
                 return f"{name} no es un archivo de partida declarado"
-            problem = unit_check(check, base64.b64decode(entry["data"]), inflate_limit(max_bytes))
+            problem = unit_check(check, base64.b64decode(entry["data"]), share)
             if problem:
                 return f"{name}: {problem}"
         return None

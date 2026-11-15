@@ -911,7 +911,9 @@ class DirectorySaveCardTests(unittest.TestCase):
     """Directory saves on the card side: the payload file, per-card bounds, integrity,
     a damaged envelope never becomes the previous copy, restore falls back."""
 
-    SPEC = {"saves_directory": ".Sample/save", "saves_units": ["*.sav"], "saves_checks": ["zlib-xml"],
+    # "any": the units these tests write are placeholders, not a game's files;
+    # what a unit's check refuses is tested beside the launcher's restore.
+    SPEC = {"saves_directory": ".Sample/save", "saves_units": ["*.sav"], "saves_checks": ["any"],
             "saves_max_bytes": 1024 * 1024}
 
     def setUp(self):
@@ -1050,11 +1052,13 @@ class NamingGenerationSaveTests(unittest.TestCase):
     def envelope(self, fmt, n=1, **extra):
         return (json.dumps({"format": fmt, "game": "mun.collect", "schema": 1, "payload": {"n": n}, **extra}) + "\n").encode()
 
-    def files_envelope(self, fmt, data=b"<Save/>"):
-        import base64, hashlib
+    def files_envelope(self, fmt, data=b"<Save/>", compress=True, **extra):
+        # The card declares its units zlib-xml: a unit is what such a game writes.
+        import base64, hashlib, zlib
+        data = zlib.compress(data) if compress else data
         payload = {"files": [{"path": "save-0000.sav", "size": len(data), "sha256": hashlib.sha256(data).hexdigest(),
                               "data": base64.b64encode(data).decode()}]}
-        return self.envelope(fmt, payload_kind="files").replace(b'{"n": 1}', json.dumps(payload).encode())
+        return self.envelope(fmt, payload_kind="files", **extra).replace(b'{"n": 1}', json.dumps(payload).encode())
 
     def handout(self, info):
         target = self.tmp / "work" / "save.json"
@@ -1136,6 +1140,45 @@ class NamingGenerationSaveTests(unittest.TestCase):
         # The same envelopes are valid on a card of the earlier generation.
         out, target = self.handout(game_info(naming="earlier", **self.DIRECTORY))
         self.assertEqual((out["copied"], out["recovered"]), (True, False))
+
+
+    def test_a_previous_copy_is_handed_out_only_if_the_launcher_would_restore_it(self):
+        # A directory-save game cannot tell the player its save is damaged:
+        # the console falls back to save.json.prev, and must not hand out one
+        # the launcher then refuses (docs/saves.md).
+        info = game_info(naming="mun", **self.DIRECTORY)
+        refused = {
+            "a unit failing its check": self.files_envelope("mun-save/1", b"<prev/>", compress=False),
+            "another game's": self.files_envelope("mun-save/1", b"<prev/>", game="other.game"),
+            "another schema": self.files_envelope("mun-save/1", b"<prev/>", schema=2),
+        }
+        for what, previous in refused.items():
+            with self.subTest(what):
+                (self.game_dir / "save.json").write_bytes(b"{torn")
+                (self.game_dir / "save.json.prev").write_bytes(previous)
+                out, target = self.handout(info)
+                self.assertEqual((out["copied"], out["error"]["code"]), (False, "save_damaged"))
+                self.assertFalse(target.exists())
+        (self.game_dir / "save.json.prev").write_bytes(self.files_envelope("mun-save/1", b"<prev/>"))
+        out, target = self.handout(info)
+        self.assertEqual((out["copied"], out["recovered"]), (True, True))
+
+    def test_a_save_of_countless_small_values_is_refused_without_parsing_it(self):
+        import time, tracemalloc
+        info = game_info(naming="mun", **dict(self.DIRECTORY, saves_max_bytes=8 * 1024 * 1024))
+        _, limit = cardd.save_bounds(info)
+        (self.game_dir / "save.json").write_bytes(b"{torn")
+        (self.game_dir / "save.json.prev").write_bytes(b"[" + b"0," * (limit // 2 - 8) + b"0]")
+        tracemalloc.start()
+        started = time.perf_counter()
+        try:
+            out, _ = self.handout(info)
+            seconds, peak = time.perf_counter() - started, tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+        self.assertEqual(out["error"]["code"], "save_damaged")
+        self.assertLess(peak, 64 * 1024 * 1024, "parsed into objects")
+        self.assertLess(seconds, 1.0)
 
 
 class ReaderSlotTests(unittest.TestCase):

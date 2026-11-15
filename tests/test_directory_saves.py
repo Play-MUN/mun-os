@@ -489,7 +489,7 @@ class RestoreTests(SyncCase):
         # The converter (mun_card.saves) must not certify what this refuses,
         # nor refuse what this restores: the same cases, the same verdicts.
         sys.path.insert(0, str(ROOT / "tools" / "mun-card"))
-        from mun_card.saves import envelope_problem
+        from mun_card.saves import envelope_problem, parse_envelope
         info = {"id": SPEC["card_id"], "saves_directory": SPEC["directory"], "saves_units": SPEC["units"],
                 "saves_checks": SPEC["checks"], "saves_max_bytes": SPEC["max_bytes"]}
         cases = {
@@ -503,13 +503,16 @@ class RestoreTests(SyncCase):
             "other format": envelope({"save-0000.sav": SLOT}, format="mun-save/1"),
             "hash mismatch": envelope({"save-0000.sav": SLOT}).replace(b'"sha256": "', b'"sha256": "0'),
             "over the declared size": envelope({"screen-0000.zsc": zlib.compress(os.urandom(SPEC["max_bytes"] + 1))}),
+            "countless small values": b"[" + b"0," * 60000 + b"0]",
+            "many inflation bombs": envelope({f"screen-{n:04d}.zsc": zlib.compress(b"\0" * (SPEC["max_bytes"] * 60))
+                                              for n in range(64)}),
         }
         self.sync.max_bytes = SPEC["max_bytes"]
         for what, raw in cases.items():
             with self.subTest(what):
                 launcher = self.sync._check_envelope(raw)[0]
                 try:
-                    tool = envelope_problem(json.loads(raw), info, "neptune-save/1")
+                    tool = envelope_problem(parse_envelope(raw), info, "neptune-save/1")
                 except ValueError:
                     tool = "not JSON"
                 self.assertEqual(launcher is None, tool is None, f"launcher: {launcher!r}; card tool: {tool!r}")

@@ -47,7 +47,7 @@ from mun_card.source import DirectorySource  # noqa: E402
 from mun_card.validate import COVER_MAX_BYTES, SAVE_FORMATS, save_format, validate_card  # noqa: E402
 # The integrity rule of a directory save's payload, shared with the card tool's converter.
 from mun_card.saves import (FILES_PAYLOAD_MAX_FILES, SAVE_FILE_MAX_BYTES, SAVE_MAX_BYTES,  # noqa: E402,F401
-                           files_payload_problem, save_bounds)
+                           envelope_problem, files_payload_problem, parse_envelope, save_bounds)
 
 PROTOCOL = 1
 SERIAL_PREFIX = "NPT-"
@@ -835,14 +835,15 @@ def _is_envelope(data: Optional[bytes], limit: int = SAVE_FILE_MAX_BYTES, info: 
     if data is None or len(data) > limit:
         return False
     try:
-        document = json.loads(data)
-    except (ValueError, RecursionError):     # RecursionError: nested deeper than the parser goes
+        document = parse_envelope(data)
+    except (ValueError, RecursionError):
         return False
     if not isinstance(document, dict) or document.get("format") != save_format(info or {}):
         return False
-    if document.get("payload_kind") == "files":
-        max_bytes = int((info or {}).get("saves_max_bytes") or 0)
-        return max_bytes > 0 and files_payload_problem(document.get("payload"), max_bytes) is None
+    if document.get("payload_kind") == "files" or (info or {}).get("saves_directory"):
+        # What the launcher restores and nothing less (docs/saves.md): this
+        # card's game, schema and declared units, each passing its check.
+        return envelope_problem(document, info or {}, save_format(info or {})) is None
     return True
 
 
@@ -853,7 +854,7 @@ def _other_generation(data: Optional[bytes], info: dict) -> Optional[str]:
     if data is None:
         return None
     try:
-        document = json.loads(data)
+        document = parse_envelope(data)
     except (ValueError, RecursionError):
         return None
     found = document.get("format") if isinstance(document, dict) else None
@@ -870,7 +871,7 @@ def _marked_recovered(previous: Optional[bytes], limit: int, info: dict) -> Opti
     write this file, and it could not write it back marked."""
     if not _is_envelope(previous, limit, info):
         return None
-    document = json.loads(previous)
+    document = parse_envelope(previous)
     document["recovered_from"] = "save.json.prev"
     try:
         return _save_bytes(document) + b"\n"

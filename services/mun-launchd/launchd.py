@@ -787,8 +787,10 @@ def json_too_deep(raw: bytes, limit: int = JSON_MAX_DEPTH) -> bool:
 # (docs/saves.md); everything big in it is a string. Commas and colons
 # outside strings count its values: a few hundred in any envelope the console
 # writes, millions in 16 MiB of tiny values that would parse into hundreds of
-# megabytes of objects before anything could refuse them.
-ENVELOPE_MAX_SEPARATORS = 4096
+# megabytes of objects before anything could refuse them. The bound is the
+# card tool's (mun_card.saves), which judges single-object envelopes too: as
+# many values as that envelope's file bound (112 KiB) has room for.
+ENVELOPE_MAX_SEPARATORS = 57344
 _JSON_NOT_SEPARATOR = bytes(byte for byte in range(256) if byte not in b',:"')
 
 

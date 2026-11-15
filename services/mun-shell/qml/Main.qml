@@ -259,7 +259,8 @@ Window {
     property real dial: 0
 
     readonly property var mainEntries: [
-        // The orbital design's names (the owner's): MUN Disk and Universe.
+        // The orbital design calls the first two entries MUN Disk and
+        // Universe; the previous design keeps Game Card and My games.
         { key: "card", label: orbital ? "MUN Disk" : "Game Card", detail: cardDetail, icon: "disk" },
         { key: "games", label: orbital ? I18n.t("Universe", "Universo") : I18n.t("My games", "Mis juegos"), icon: "universe" },
         { key: "settings", label: I18n.t("Settings", "Configuración"), icon: "settings" },

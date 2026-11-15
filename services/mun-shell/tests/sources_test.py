@@ -82,6 +82,16 @@ class SettingsTests(unittest.TestCase):
         self.assertIn("std::unique_ptr<QSettings> m_file;", source("src/shellsettings.h"))
 
 
+class CommentTests(unittest.TestCase):
+    def test_comments_speak_to_any_reader(self):
+        # A comment explains the code to whoever reads it; who asked for a
+        # thing, noted in passing, is not something a reader can use.
+        for path in sorted([*(SHELL / "qml").glob("*.qml"), *(SHELL / "qml").glob("*.js"),
+                            *(SHELL / "src").glob("*.cpp"), *(SHELL / "src").glob("*.h")]):
+            text = path.read_text(encoding="utf-8")
+            self.assertNotRegex(text, r"(?i)\((?:the )?owner(?:'s)?[,)]", path.name)
+
+
 class UnitTests(unittest.TestCase):
     def test_the_shell_has_a_memory_ceiling_far_above_what_it_may_hold(self):
         # Without one, a fault that keeps allocating takes the console's

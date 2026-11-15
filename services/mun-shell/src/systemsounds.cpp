@@ -149,7 +149,21 @@ SystemSounds::~SystemSounds()
         m_stop = true;
     }
     m_wake.notify_one();
-    m_worker.join();
+    // A device that takes samples and never drains holds the worker in its
+    // write, where no flag reaches it (measured with a sink nobody read: the
+    // shell asked for a new resolution sat in join() with its screen black).
+    // The shell is leaving, for a new resolution or a stop: it waits a moment
+    // and goes without the worker rather than for ever. Leaving ends the
+    // process, the blocked thread with it.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!m_finished && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    if (m_finished) {
+        m_worker.join();
+    } else {
+        qWarning("mun-shell: sound: the sound device holds a write and does not let go; the shell leaves without it");
+        m_worker.detach();
+    }
 }
 
 // A RIFF/WAVE with a PCM format chunk in the device's format and a data
@@ -693,4 +707,5 @@ void SystemSounds::run()
         }
     }
     closeDevice("the shell stops");
+    m_finished = true;
 }

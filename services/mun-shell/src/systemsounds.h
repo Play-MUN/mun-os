@@ -263,5 +263,6 @@ private:
     std::atomic<int> m_recoveries{0};
     std::atomic<double> m_firstOpenedAt{-1};
     std::string m_readyFile;  // guarded by m_mutex: openAfter()'s
+    std::atomic<bool> m_finished{false};  // the worker has left run()
     std::thread m_worker;
 };

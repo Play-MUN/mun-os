@@ -357,9 +357,43 @@ function panelChecks() {
           i18n(false).launchError({ code: "busy", message: "Ya hay un juego en marcha" }) === "A game is already running.");
 }
 
+// A session's result says what became of the save. The launcher words it in
+// Spanish (services/mun-launchd/launchd.py); in English the interface says
+// what it knows, and the one figure in those words, the time of the last save
+// the card holds when it left during play, must not be lost on the way.
+function savesChecks() {
+    const launcher = fs.readFileSync(path.join(__dirname, "..", "..", "mun-launchd", "launchd.py"), "utf8");
+    const lostAfter = /f"(Se perdieron los cambios de la partida [^"{]*)\{held_at\}"/.exec(launcher);
+    check("the launcher still words the lost changes with the time they date from", lostAfter !== null);
+    if (lostAfter === null)
+        return;
+    const lost = { ok: false, message: lostAfter[1] + "15:52", synced_at: null };
+    check("Spanish: the launcher's own words, with the time", i18n(true).savesText(lost) === lostAfter[1] + "15:52",
+          i18n(true).savesText(lost));
+    check("English: the changes lost after a time are said with that time",
+          i18n(false).savesText(lost) === "Progress after 15:52 was not saved on the Game Card.", i18n(false).savesText(lost));
+    const recovered = { ok: false, message: "Partida recuperada de la copia anterior\n" + lostAfter[1] + "09:05" };
+    check("English: the time is found among the launcher's other lines",
+          i18n(false).savesText(recovered) === "Progress after 09:05 was not saved on the Game Card.", i18n(false).savesText(recovered));
+
+    // Every other outcome reads as before.
+    const noTime = { ok: false, message: "Los cambios de la partida de esta sesión no llegaron a la Game Card" };
+    check("English: lost without a time: the plain line",
+          i18n(false).savesText(noTime) === "The latest progress was not saved on the Game Card.", i18n(false).savesText(noTime));
+    const failed = { ok: false, message: "La última partida no se guardó: El lector no respondió a tiempo", synced_at: 1794700000 };
+    check("English: a save that failed for another reason: the plain line, no time made up",
+          i18n(false).savesText(failed) === "The latest progress was not saved on the Game Card.", i18n(false).savesText(failed));
+    const saved = { ok: true, message: "Partida guardada en la Game Card (15:52)", synced_at: 1794700000 };
+    check("English: a save that reached the card", i18n(false).savesText(saved) === "Progress saved on the Game Card.");
+    check("Spanish: a save that reached the card, in the launcher's words", i18n(true).savesText(saved) === saved.message);
+    check("no save to speak of: nothing said", i18n(false).savesText(undefined) === "" && i18n(true).savesText(null) === ""
+          && i18n(false).savesText({ ok: true, message: "", synced_at: null }) === "");
+}
+
 startUpChecks();
 awakeChecks();
 panelChecks();
+savesChecks();
 
 console.log("interface logic: " + passed + " passed, " + failed + " failed");
 process.exit(failed === 0 ? 0 : 1);

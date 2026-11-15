@@ -132,8 +132,13 @@ QtObject {
             return ""
         if (spanish)
             return saves.message || ""
-        if (!saves.ok)
-            return "The latest progress was not saved on the Game Card."
+        if (!saves.ok) {
+            // The card left during play: the launcher's words give the time
+            // of the last save the card holds, and nothing else carries it.
+            const held = /posteriores a las (\d{1,2}:\d{2})/.exec(saves.message || "")
+            return held ? "Progress after " + held[1] + " was not saved on the Game Card."
+                        : "The latest progress was not saved on the Game Card."
+        }
         return saves.synced_at ? "Progress saved on the Game Card." : ""
     }
 

@@ -855,6 +855,43 @@ class CleanupUnitTests(unittest.TestCase):
         self.assertIn("mun-launch-cleanup@.service", (self.DEPLOY / "stage.sh").read_text())
 
 
+def unit_file(name: str) -> dict:
+    """A unit file of deploy/ as {section: [(key, value), ...]}."""
+    sections, current = {}, None
+    for line in (ROOT / "services" / "mun-launchd" / "deploy" / name).read_text().splitlines():
+        line = line.strip()
+        if line.startswith("[") and line.endswith("]"):
+            current = sections.setdefault(line[1:-1], [])
+        elif line and not line.startswith("#") and current is not None:
+            key, _, value = line.partition("=")
+            current.append((key, value))
+    return sections
+
+
+class LauncherUnitTests(unittest.TestCase):
+    """While a game runs, the launcher is what ends the session when the card
+    goes and what brings the shell back: its unit may never stay stopped."""
+
+    def test_the_launcher_is_restarted_however_often_and_however_it_ended(self):
+        unit = unit_file("mun-launchd.service")
+        service = dict(unit["Service"])
+        self.assertEqual(service["Restart"], "always")
+        self.assertIn(("StartLimitIntervalSec", "0"), unit["Unit"],
+                      "no start limit: five quick failures must not leave the console without a launcher")
+        self.assertNotIn("StartLimitIntervalSec", service, "systemd reads it in [Unit] only")
+        self.assertGreaterEqual(float(service["RestartSec"]), 1, "a launcher that keeps failing must not spin")
+        self.assertLessEqual(float(service["RestartSec"]), launchd.READER_GRACE,
+                             "and a running game is not left unsupervised for long")
+
+    def test_a_failure_still_brings_the_shell_back(self):
+        unit = unit_file("mun-launchd.service")
+        self.assertIn(("OnFailure", "mun-shell-restore.service"), unit["Unit"])
+        # Going straight back to "activating" would skip the failed state that triggers it.
+        self.assertNotEqual(dict(unit["Service"]).get("RestartMode", "normal"), "direct")
+        restore = dict(unit_file("mun-shell-restore.service")["Service"])
+        self.assertEqual(restore["ExecStart"], "/usr/local/libexec/mun-launch-cleanup --restore-only")
+
+
 class CardRecordsCliTests(unittest.TestCase):
     """`launchd.py cards`: the lab's authority on the current insertion's state."""
 

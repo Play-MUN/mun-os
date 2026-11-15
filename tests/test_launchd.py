@@ -433,6 +433,36 @@ class SaveGateTests(unittest.TestCase):
         h.m.save_request(sid, {"type": "save", "schema": 1, "data": {"a": 3}}, replies.append)
         self.assertEqual(len(h.saves), 2, "after the reply the next save is accepted")
 
+    def test_the_size_of_a_save_is_that_of_its_compact_utf8_text_as_the_card_stores_it(self):
+        h, sid = self.running()
+        replies = []
+        cjk = {"text": "漢" * (11 * 1024)}                   # 33 KiB as UTF-8, 66 KiB with every character escaped
+        h.m.save_request(sid, {"type": "save", "schema": 1, "data": cjk}, replies.append)
+        self.assertEqual((replies, [request["payload"] for request, _ in h.saves]), ([], [cjk]), "accepted and forwarded")
+        h.saves.pop()[1]({"ok": True, "bytes": 34000}); h.pump()
+        self.assertTrue(replies.pop()["ok"])
+        frame = len('{"t":""}')
+        for size, code in ((launchd.SAVE_MAX_BYTES, None), (launchd.SAVE_MAX_BYTES + 1, "save_too_large"),
+                           (65 * 1024, "save_too_large")):
+            with self.subTest(size):
+                h.m.save_request(sid, {"type": "save", "schema": 1, "data": {"t": "a" * (size - frame)}}, replies.append)
+                if code is None:
+                    self.assertEqual(replies, [])
+                    h.saves.pop()[1]({"ok": True, "bytes": size}); h.pump()
+                    self.assertTrue(replies.pop()["ok"])
+                else:
+                    self.assertEqual((replies.pop()["error"]["code"], h.saves), (code, []))
+
+    def test_a_save_whose_text_cannot_be_utf8_is_refused_here_and_not_forwarded(self):
+        h, sid = self.running()
+        (request,) = launchd.LineReader(limit=launchd.SAVE_LINE_MAX).feed(
+            b'{"type":"save","schema":1,"data":{"n":"\\ud800"}}\n')     # JSON can spell half a surrogate pair
+        replies = []
+        h.m.save_request(sid, request, replies.append)
+        self.assertEqual((replies[0]["ok"], replies[0]["error"]["code"], h.saves), (False, "save_invalid", []))
+        h.m.save_request(sid, {"type": "save", "schema": 1, "data": {"n": "\U0001f600 a whole pair"}}, replies.append)
+        self.assertEqual(len(h.saves), 1, "a character outside the basic plane is ordinary text")
+
     def test_late_reply_after_the_session_ended_is_not_delivered(self):
         h, sid = self.running(); replies = []
         h.m.save_request(sid, {"type": "save", "schema": 1, "data": {"a": 1}}, replies.append)

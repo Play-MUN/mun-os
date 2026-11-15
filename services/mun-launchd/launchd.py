@@ -217,7 +217,16 @@ class SessionManager:
         schema = request.get("schema")
         if not isinstance(schema, int) or isinstance(schema, bool) or schema < 1:
             return fail("save_invalid", "La versión del esquema de guardado no es válida")
-        if len(json.dumps(request["data"], separators=(",", ":")).encode("utf-8")) > SAVE_MAX_BYTES:
+        # Measured as the card service stores it (docs/saves.md): compact, in
+        # UTF-8. Escaped, every character outside ASCII would count double
+        # or more and a save well inside the bound be refused. Text that
+        # UTF-8 cannot carry (half of a surrogate pair, which JSON can
+        # spell) is no save the card could hold.
+        try:
+            size = len(json.dumps(request["data"], separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
+        except UnicodeEncodeError:
+            return fail("save_invalid", "La partida contiene texto que no se puede guardar")
+        if size > SAVE_MAX_BYTES:
             return fail("save_too_large", "La partida supera el tamaño permitido")
         if self.session.get("saving"):
             return fail("save_busy", "Ya hay un guardado en curso")
@@ -225,7 +234,7 @@ class SessionManager:
         forwarded = {"type": "save", "slot": self.session["slot"], "insertion": self.session.get("insertion"),
                      "serial": self.session["serial"], "version": self.session.get("version"),
                      "game": self.session.get("card_id"), "session": sid, "schema": schema, "payload": request["data"]}
-        log(f"session {sid}: save requested ({len(json.dumps(request['data']))} bytes, schema {schema})")
+        log(f"session {sid}: save requested ({size} bytes, schema {schema})")
         self.saver(forwarded, lambda outcome: self.schedule(lambda: self._save_done(sid, outcome, reply)))
 
     def _save_done(self, sid: str, outcome: dict, reply: Callable[[dict], None]) -> None:

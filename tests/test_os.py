@@ -254,7 +254,11 @@ class ShellTests(unittest.TestCase):
         unit_section = unit.split("[Service]", 1)[0]
         self.assertRegex(unit_section, r"(?m)^StartLimitIntervalSec=0$", "never stop restarting")
         self.assertRegex(unit, r"(?m)^Restart=on-failure$")
-        self.assertRegex(unit, r"(?m)^RestartSec=5$")
+        # One second: a new resolution is a restart (status 75), and the
+        # screen stays black for this long before the shell starts again.
+        # Without a display the shell waits for one itself before it exits,
+        # so a missing display does not make it spin.
+        self.assertRegex(unit, r"(?m)^RestartSec=1$")
         self.assertEqual(re.search(r"(?m)^SuccessExitStatus=(.+)$", unit).group(1).split(), ["1", "75"])
         no_display = re.search(r"kNoDisplayStatus = (\d+);", (self.SHELL / "src" / "displaydevice.h").read_text()).group(1)
         no_interface = re.search(r"kInterfaceFailedStatus = (\d+);", (self.SHELL / "src" / "main.cpp").read_text()).group(1)

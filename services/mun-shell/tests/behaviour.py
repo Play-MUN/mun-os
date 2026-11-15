@@ -49,6 +49,7 @@ come from CardClient. The cases:
   clock runs from the start; with a sound device expected
   (MUN_SHELL_SOUND_WAIT) that never comes, the LED breathes until the
   wait is over, then the picture runs on its own and the journal says so;
+  a sound device that is not there is said once, however often it is tried;
   every time, standby from the first frame (the LED lit at once, as the
   system's standby picture has it) until the start-up begins.
 - home: the shell's own Main.qml (home.qml) against stand-ins for the card
@@ -2151,6 +2152,7 @@ def boot_cases(shell: Shell, checks: Checks):
         clocks[name] = re.findall(r"mun-shell: start-up: the picture (follows the sound|runs on its own[^\n]*)", output)
         waits[name] = re.findall(r"mun-shell: start-up: waited ([0-9.]+) s for the sound device: ([^\n]*)", output)
         sounds_off[name] = output.count("mun-shell: interface sounds off")
+        alsa_after[name] = output.partition("mun-shell: interface sounds off")[2].count("ALSA lib ")
         return lines(output, "BOOT"), lines(output, "KEY")
 
     def first(states, **match):
@@ -2159,6 +2161,7 @@ def boot_cases(shell: Shell, checks: Checks):
     clocks = {}   # what each run's start-up said about its clock
     waits = {}    # what it said about waiting for the sound device
     sounds_off = {}  # how many times it said the interface sounds are off
+    alsa_after = {}  # ALSA's own lines about the device after the shell said so
 
     # Both services answer at once: the hint shows; Down does nothing, A ends it.
     states, keys = run("boot-ready", ready_at=0, steps=[{"at": 2000, "key": "Down"}, {"at": 3000, "key": "A"}], end=5000)
@@ -2207,6 +2210,11 @@ def boot_cases(shell: Shell, checks: Checks):
                   and all(s["settled"] for s in states if s["at"] >= home["at"]), home)
     checks.expect("boot-late", "Home follows the system's answer",
                   home is not None and 15000 <= home["at"] < 16500, home)
+    # No sound device for 17 s, the interface awake: it is tried again every
+    # 5 s, and only the first failure is explained, by ALSA and by the shell.
+    checks.expect("boot-late", "a missing sound device is said once, and its retries say nothing, ALSA's lines included",
+                  sounds_off.get("boot-late") == 1 and alsa_after.get("boot-late") == 0,
+                  (sounds_off.get("boot-late"), alsa_after.get("boot-late")))
 
     # Neither answers: Home after the start-up's 20 s, whatever they do.
     states, _ = run("boot-never", steps=[], end=23000)

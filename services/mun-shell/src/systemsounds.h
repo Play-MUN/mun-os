@@ -30,8 +30,10 @@
 // that undims was not heard in time for the move pressed right after it),
 // and the device is let go when the shell stops for a game. A device that
 // fails is opened afresh at once; no device, or one that fails again, means
-// silence and one line in the journal, never an error in the interface, and
-// the next sound tries again after kRetry. With MUN_SHELL_TIMING set, the
+// silence and one line in the journal (after ALSA's own about that failure),
+// never an error in the interface; it is tried again after kRetry, by the
+// next sound or, awake, by itself, and those tries say nothing, ALSA's
+// messages included, until a device plays. With MUN_SHELL_TIMING set, the
 // journal says when the device is opened and let go.
 //
 // The start-up sound is the one case where that moment is never available

@@ -41,7 +41,9 @@ quint32 u32(const QByteArray &bytes, qsizetype at)
 SystemSounds *provided = nullptr;
 
 // ALSA's messages, as its own handler prints them, except while a device is
-// expected: its attempts to open one that is not there yet are not news.
+// expected (its attempts to open one that is not there yet are not news) and
+// once a failure has been reported: the device is then tried again without
+// end, and ALSA's several lines about each attempt would fill the journal.
 std::atomic<bool> alsaQuiet{false};
 
 void alsaMessage(const char *file, int line, const char *function, int error, const char *format, ...)
@@ -513,7 +515,9 @@ void SystemSounds::run()
                     continue;
                 }
             }
-            alsaQuiet = expected(now);
+            // ALSA explains the first failure, which is reported; the
+            // tries after it are quiet until a device plays.
+            alsaQuiet = expected(now) || reported;
             int error = snd_pcm_open(&pcm, "default", SND_PCM_STREAM_PLAYBACK, 0);
             if (error < 0) {
                 pcm = nullptr;

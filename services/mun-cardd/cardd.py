@@ -824,7 +824,7 @@ def _is_envelope(data: Optional[bytes], limit: int = SAVE_FILE_MAX_BYTES, info: 
         return False
     try:
         document = json.loads(data)
-    except ValueError:
+    except (ValueError, RecursionError):     # RecursionError: nested deeper than the parser goes
         return False
     if not isinstance(document, dict) or document.get("format") != save_format(info or {}):
         return False
@@ -842,12 +842,28 @@ def _other_generation(data: Optional[bytes], info: dict) -> Optional[str]:
         return None
     try:
         document = json.loads(data)
-    except ValueError:
+    except (ValueError, RecursionError):
         return None
     found = document.get("format") if isinstance(document, dict) else None
     if found in SAVE_FORMATS.values() and found != save_format(info):
         return found
     return None
+
+
+def _marked_recovered(previous: Optional[bytes], limit: int, info: dict) -> Optional[bytes]:
+    """The previous envelope carrying the mark that tells the game it is the
+    previous save, or None when `previous` is not an envelope the console
+    wrote. That includes one holding text UTF-8 cannot carry (spelled as a
+    JSON escape): the console refuses to store such text, so it did not
+    write this file, and it could not write it back marked."""
+    if not _is_envelope(previous, limit, info):
+        return None
+    document = json.loads(previous)
+    document["recovered_from"] = "save.json.prev"
+    try:
+        return _save_bytes(document) + b"\n"
+    except CardError:
+        return None
 
 
 def _copy_save_out(mount: Path, info: dict, target: Path) -> dict:
@@ -878,8 +894,9 @@ def _copy_save_out(mount: Path, info: dict, target: Path) -> dict:
         other = _other_generation(data, info)
         unusable = data is None or other or (directory_saves and not _is_envelope(data, limit, info))
         if unusable:
-            previous = _read_regular(dir_fd, "save.json.prev", limit + 1)
-            if previous is None or not _is_envelope(previous, limit, info):
+            # Marked so the game can tell the player it is the previous save.
+            previous = _marked_recovered(_read_regular(dir_fd, "save.json.prev", limit + 1), limit, info)
+            if previous is None:
                 if other:
                     return {"present": True, "copied": False,
                             "error": {"code": "save_other_generation",
@@ -895,11 +912,6 @@ def _copy_save_out(mount: Path, info: dict, target: Path) -> dict:
             log(f"save.json {why} under {mount}; handing out save.json.prev as the recovered save")
     finally:
         os.close(dir_fd)
-    if recovered:
-        # Mark the copy so the game can tell the player it is the previous save.
-        document = json.loads(data)
-        document["recovered_from"] = "save.json.prev"
-        data = (json.dumps(document, ensure_ascii=False) + "\n").encode("utf-8")
     owner = os.stat(target.parent)
     out = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_CLOEXEC, 0o600)
     try:

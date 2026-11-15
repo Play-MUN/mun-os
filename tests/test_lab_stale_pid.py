@@ -56,10 +56,10 @@ class StalePidTests(unittest.TestCase):
         with socket.socket(socket.AF_UNIX) as left:
             left.bind(str(vm.PATHS["qmp"]))
 
-    def stand_in(self):
+    def stand_in(self, spelled=str):
         """A live process with this guest's -pidfile on its command line."""
         process = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)",
-                                    "-pidfile", str(vm.PATHS["pidfile"])])
+                                    "-pidfile", spelled(str(vm.PATHS["pidfile"]))])
         self.addCleanup(process.wait)
         self.addCleanup(process.kill)
         vm.PATHS["pidfile"].write_text(f"{process.pid}\n")
@@ -76,6 +76,16 @@ class StalePidTests(unittest.TestCase):
         process.kill()
         process.wait()
         self.assertIsNone(vm.read_pid())
+
+    def test_a_guest_started_from_the_checkout_spelled_in_another_case_is_recognised(self):
+        # On a file system that ignores case the same checkout can be entered
+        # as /Applications/... or /applications/...: the running guest is the
+        # same one, and taking it for a stale file would clear its cards.
+        process = self.stand_in(spelled=str.swapcase)
+        self.assertEqual(vm.read_pid(), process.pid)
+        status, out, _err = self.lab("status")
+        self.assertEqual(status, 1, "it is running: its control socket is asked, and here nothing answers")
+        self.assertTrue(vm.PATHS["pidfile"].exists())
 
     def test_stop_and_status_say_the_guest_is_off_and_the_file_is_removed(self):
         self.left_by_a_crash()

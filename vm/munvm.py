@@ -205,7 +205,10 @@ def read_pid() -> Optional[int]:
     given to another process: alive, and not this guest. QEMU is started
     with `-pidfile <this file>`, so a live process is the guest only if its
     command line names the file. Where the command line cannot be read
-    (vm/host.py), a live pid counts as the guest, as it always did."""
+    (vm/host.py), a live pid counts as the guest, as it always did. The
+    path is compared without case: taking a running guest for a stale file
+    is the worse mistake, and a checkout on a file system that ignores case
+    can be entered under another spelling."""
     try:
         pid = int(PATHS["pidfile"].read_text().strip())
     except (OSError, ValueError):
@@ -213,7 +216,7 @@ def read_pid() -> Optional[int]:
     if not pid_alive(pid):
         return None
     command = host.process_command(HOST, pid)
-    if command is not None and str(PATHS["pidfile"]) not in command:
+    if command is not None and str(PATHS["pidfile"]).casefold() not in command.casefold():
         return None
     return pid
 

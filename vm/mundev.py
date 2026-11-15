@@ -957,7 +957,14 @@ def cmd_smoke(args: argparse.Namespace) -> int:
         log(f"smoke: {name}" + (f" ({detail})" if detail else "") + f" at {steps[name]} s")
 
     if args.bundle:
+        # Installing a bundle never replaces a card that exists (it may hold
+        # saves), so the card played below may be an earlier one.
+        card_was_there = os.path.lexists(vm.CARD_ROOT / f"{args.card}.img")
         build: Optional[str] = install(args.bundle).name
+        if card_was_there:
+            log(f"smoke: card {args.card} was already in {vm.CARD_ROOT} and was kept: this check plays the card "
+                "that was there, which is the bundle's only if an earlier run of this bundle put it there "
+                "(docs/releasing.md checks a bundle from a fresh copy of the tools)")
     else:
         runnable = [b for b in builds() if runs_in_guest(b)]
         build = args.build or (runnable[-1].name if runnable else None)

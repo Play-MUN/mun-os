@@ -450,6 +450,38 @@ class LicenceTests(unittest.TestCase):
             self.assertIn(f'"$MUN/{name}" "$DESTDIR/usr/share/doc/mun-os/{name}"', image)
 
 
+class SmokeCardTests(Fixture):
+    """`./mun dev smoke --bundle`: installing a bundle never replaces a card
+    that exists, so the check may play a card that is not the bundle's."""
+
+    def smoke(self, install):
+        self.build("b1")
+        said = io.StringIO()
+        arguments = argparse.Namespace(bundle="https://example.invalid/bundle", build=None, card="collect",
+                                       guest="smoke", motion=False, wait=1, card_timeout=1, play=0)
+        # The check itself needs a guest: it is stopped where it would make one.
+        with patch.object(vm, "CARD_ROOT", self.root / "cards"), patch.object(mundev, "install", side_effect=install), \
+                patch.object(mundev, "create_guest", side_effect=vm.LabError("no guest in host tests")), \
+                contextlib.redirect_stdout(said), self.assertRaises(vm.LabError) as stopped:
+            mundev.cmd_smoke(arguments)
+        self.assertIn("no guest in host tests", str(stopped.exception))
+        return said.getvalue()
+
+    def test_a_card_that_was_already_there_is_said_to_be_the_one_played(self):
+        (self.root / "cards").mkdir()
+        (self.root / "cards" / "collect.img").write_bytes(b"an earlier card")
+        said = self.smoke(lambda source: self.root / "builds" / "b1")
+        self.assertIn("card collect was already", said)
+        self.assertIn("plays the card that was there", said)
+
+    def test_a_card_the_bundle_brought_is_not_remarked(self):
+        def install(source):
+            (self.root / "cards").mkdir()
+            (self.root / "cards" / "collect.img").write_bytes(b"the bundle's card")
+            return self.root / "builds" / "b1"
+        self.assertNotIn("already", self.smoke(install))
+
+
 class SmokeMotionTests(unittest.TestCase):
     """`./mun dev smoke --motion`: the shell's own words decide whether it plays
     the inserted card's motion (lines as services/mun-shell/src/motionscene.cpp

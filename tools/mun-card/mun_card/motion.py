@@ -59,6 +59,16 @@ MOTION_MAX_BYTES = 32 * 1024 * 1024
 # shell's limit for any one decode (src/shape.cpp, kAllocationLimitMiB).
 MOTION_MAX_DECODED = 64 * 1024 * 1024
 DECODE_MAX_BYTES = 16 * 1024 * 1024
+# What one frame may draw, in screens: the area of everything the motion
+# lists for a frame, each thing at its largest and counted for at most the
+# whole screen, over the screen's area (screens_drawn). The other limits
+# count things, and things can each cover the screen: 8 planes and 160
+# figures doing so are 168 screens blended on every display frame, which a
+# console drawing in software showed at 4 to 5 frames a second instead of
+# 30, its navigation with it. The reef sample draws 8. Provisional, as
+# every limit here: three times the sample, and a seventh of that measured
+# case; to be set again from measurements on the console.
+MAX_SCREENS_DRAWN = 24
 # A plane or a light that drifts sideways repeats across the screen, one
 # copy for each of its widths: at least this wide in canvas pixels, it is
 # drawn ten times at most.
@@ -861,11 +871,69 @@ def check(document: Dict[str, Any], package, stats, cache,
         _fail("shape_motion_empty", "no declara nada que dibujar: ni planos, ni personajes, ni emisores, ni luces", "motion")
     out.update({"planes": out["planes"], "sheets": sheets, "actors": actors, "paths": paths, "states": states,
                 "emitters": emitters, "lights": lights, "react": react})
+    # What one frame draws, whatever the counts above: things within every
+    # one of them can each cover the screen.
+    drawn = screens_drawn(out, files.found)
+    if drawn > MAX_SCREENS_DRAWN:
+        _fail("shape_motion_count", f"un fotograma dibuja hasta {drawn:.1f} veces la pantalla; máximo {MAX_SCREENS_DRAWN} "
+              "(menos figuras o planos, más pequeños o a menor escala)", "motion")
     findings = []
     for kind, places in unseen.items():
         more = f" y {len(places) - 3} más" if len(places) > 3 else ""
         findings.append((kind, places[0], f"{NOT_DRAWN[kind]}: {', '.join(places[:3])}{more}"))
     return out, files.found, findings
+
+
+def screens_drawn(motion: Dict[str, Any], files: Dict[str, Dict[str, Any]]) -> float:
+    """How many times over a frame of the motion can cover the screen, at
+    most: the area of every thing it lists for one frame, at the look's
+    resolution, over the screen's. An upper bound from the document alone,
+    as the player draws it (src/motionscene.cpp, collect): a plane or an
+    image light once, or across the whole width when it drifts sideways; a
+    glow by its radius; every figure of an actor at the largest scale any of
+    its states gives it, times how much nearer than its place it can come
+    when the scene has depth and the actor a course through it or something
+    to avoid, twice when its sheet has a clip that dissolves frame into
+    frame; every particle an emitter may hold, fully grown. Nothing is
+    counted for more than the screen: what is off it is not drawn."""
+    width, height = motion["look"]["resolution"] or (1920, 1080)
+    screen = width * height
+    canvas = width / 1920        # canvas pixels to the look's
+    nearer = (1 / motion["depth"]["far"] - 1) if motion["depth"] else 0.0
+    area = 0.0
+
+    def spread(details: Dict[str, Any], drift: Dict[str, float]) -> float:
+        return (width if drift["x"] else min(details["width"], width)) * min(details["height"], height)
+
+    for plane in motion["planes"]:
+        area += spread(files[plane["image"]], plane["drift"])
+    for light in motion["lights"].values():
+        if light["image"]:
+            area += spread(files[light["image"]], light["drift"])
+        else:
+            area += min((2 * light["radius"] * canvas) ** 2, screen)
+    for name, actor in motion["actors"].items():
+        sheet = motion["sheets"][actor["sheet"]]
+        states = [state for key, state in motion["states"].items() if key.partition(".")[0] == name]
+        scale = max([1.0] + [state["vary"]["scale"]["max"] for state in states if "scale" in state["vary"]])
+        copies = actor["copies"] or {"count": 1, "depth": 0.0, "places": None}
+        if nearer:
+            # A figure is drawn at its own size where it rests (the actor's
+            # depth plus its place's), and larger by perspective the nearer
+            # than that it comes: as near as the nearest point of its
+            # courses, or the front when it keeps away from another actor.
+            depths = [point[2] for state in states if state["path"]
+                      for point in motion["paths"][state["path"]]["points"] if len(point) == 3]
+            nearest = 0.0 if actor["avoid"] else min([actor["z"]] + depths)
+            apart = max([abs(place[2]) for place in copies["places"]]) if copies["places"] else copies["depth"]
+            back = min(apart, nearest)      # the place where the gain is greatest
+            scale *= (1 + (actor["z"] - back) * nearer) / (1 + (nearest - back) * nearer)
+        twice = 2 if any(clip["mode"] == "blend" for clip in sheet["clips"].values()) else 1
+        area += copies["count"] * twice * min(sheet["frame"][0] * sheet["frame"][1] * scale * scale, screen)
+    for emitter in motion["emitters"].values():
+        frame = motion["sheets"][emitter["sheet"]]["frame"]
+        area += emitter["max"] * min(frame[0] * frame[1] * (1 + emitter["grow"]) ** 2, screen)
+    return area / screen
 
 
 def named_files(document: Dict[str, Any]) -> List[str]:

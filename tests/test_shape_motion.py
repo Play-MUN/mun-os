@@ -9,6 +9,7 @@ Packages are written to temporary folders with images made here.
 import contextlib
 import io
 import json
+import random
 import shutil
 import struct
 import sys
@@ -238,6 +239,132 @@ class MotionTests(unittest.TestCase):
                                        actors={k: actors[k] for k in ("a0", "a1", "a2")}, states={},
                                        react={}, scene__poster="sheets/s4.png"), big)
         self.assertIn("motion", poster.shape, poster.notes)
+
+    # ------------------------------------------------- what a frame draws
+
+    WALL = {"sheets/wall.png": header_png(2048, 2048), "sheets/screen.png": header_png(1920, 1080),
+            "sheets/tile.png": header_png(256, 256)}
+
+    def walls(self, **changes):
+        """A native scene of full-screen things only: `planes` planes and
+        actors of `copies` figures each, one frame of sheets/screen.png."""
+        planes, copies = changes.pop("planes", 0), changes.pop("copies", ())
+        actors = {f"wall-{i}": {"sheet": "screen", "at": [960, 540], "copies": {"count": count}}
+                  for i, count in enumerate(copies)}
+        return self.edited(scene={"look": "native", "planes": [{"image": "sheets/screen.png"}] * planes},
+                           sheets={"screen": {"image": "sheets/screen.png", "frame": [1920, 1080]}},
+                           actors=actors, paths={}, states={}, react={}, **changes)
+
+    def test_a_motion_within_every_count_that_covers_the_screen_too_often_is_dropped(self):
+        # Every limit that counts things is kept: 8 planes, 160 figures in 3
+        # actors, one sheet. Each is a 2048 x 2048 frame, the figures at four
+        # times their size: 168 things that each cover the whole screen, on
+        # every display frame.
+        actors = {f"wall-{i}": {"sheet": "wall", "at": [960, 540], "rest": "big", "copies": {"count": count}}
+                  for i, count in enumerate((64, 64, 32))}
+        document = self.edited(scene={"look": "native", "rate": 30, "planes": [{"image": "sheets/wall.png"}] * 8},
+                               sheets={"wall": {"image": "sheets/wall.png", "frame": [2048, 2048]}}, actors=actors,
+                               paths={}, states={f"{name}.big": {"vary": {"scale": [4, 4, 600]}} for name in actors},
+                               react={})
+        self.assertEqual(len(document["scene"]["planes"]), motion.MAX_PLANES)
+        self.assertEqual(sum(a["copies"]["count"] for a in actors.values()), motion.MAX_COPIES)
+        note = self.dropped(self.read(document, self.WALL))
+        self.assertEqual((note.code, note.where), ("shape_motion_count", "motion"))
+        self.assertIn("168", note.detail)
+        self.assertIn(str(motion.MAX_SCREENS_DRAWN), note.detail)
+
+    def test_the_bound_on_what_a_frame_draws_is_held_at_its_limit(self):
+        limit = motion.MAX_SCREENS_DRAWN
+        self.assertLessEqual(limit, 32, "far under the 168 screens that held a console at 4 frames a second")
+        within = self.read(self.walls(planes=8, copies=(limit - 8,)), self.WALL)
+        self.assertIn("motion", within.shape, within.notes)
+        self.assertEqual(motion.screens_drawn(within.shape["motion"], within.files), limit)
+        over = self.dropped(self.read(self.walls(planes=8, copies=(limit - 8, 1)), self.WALL))
+        self.assertEqual((over.code, over.where), ("shape_motion_count", "motion"))
+
+    def test_each_way_a_thing_grows_counts_towards_what_a_frame_draws(self):
+        tile = {"tile": {"image": "sheets/tile.png", "frame": [256, 256]}}
+        many = {"copies": {"count": 64}}
+        cases = {
+            # a state's scale: 256 pixels at 4 times, 64 figures, twice
+            "scale": self.edited(scene={"look": "native"}, sheets=tile, paths={}, react={},
+                                 actors={"a": {"sheet": "tile", "at": [960, 540], "rest": "big", **many},
+                                         "b": {"sheet": "tile", "at": [960, 540], "rest": "big", **many}},
+                                 states={"a.big": {"vary": {"scale": [4, 4, 600]}}, "b.big": {"vary": {"scale": [1, 4, 9]}}}),
+            # perspective: resting at the back, a course to the front, 20 times nearer
+            "depth": self.edited(scene={"look": "native", "depth": {"far": 0.05}}, sheets=tile, react={},
+                                 actors={"a": {"sheet": "tile", "at": [960, 540], "z": 1, **many}},
+                                 paths={"near": {"points": [[960, 540, 0]]}}, states={"a.come": {"path": "near"}}),
+            # perspective again: kept away from another actor, in depth too
+            "avoid": self.edited(scene={"look": "native", "depth": {"far": 0.05}}, sheets=tile, react={}, paths={}, states={},
+                                 actors={"a": {"sheet": "tile", "at": [960, 540], "z": 1, **many,
+                                               "avoid": {"actor": "b"}},
+                                         "b": {"sheet": "tile", "at": [900, 500], "z": 1}}),
+            # particles growing to nine times their frame
+            "grow": self.edited(scene={"look": "native"}, sheets=tile, actors={}, paths={}, states={}, react={},
+                                emitters={"e": {"sheet": "tile", "at": [960, 540], "max": 320, "grow": 8, "rate": 60}}),
+            # a clip that dissolves frame into frame is drawn twice
+            "blend": self.edited(scene={"look": "native"}, paths={}, states={}, react={},
+                                 sheets={"screen": {"image": "sheets/screen.png", "frame": [1920, 1080],
+                                                    "clips": {"loop": [0, 1, 8, "blend"]}}},
+                                 actors={"a": {"sheet": "screen", "at": [960, 540], "copies": {"count": 13}}}),
+            # a narrow plane or light that drifts sideways is repeated across the screen
+            "drift": self.edited(scene={"look": "native", "planes": [{"image": "sheets/tile.png", "drift": {"x": 20}}] * 8},
+                                 sheets={"screen": {"image": "sheets/screen.png", "frame": [1920, 1080]}}, paths={},
+                                 states={}, react={},
+                                 lights={f"l{i}": {"image": "sheets/wall.png", "drift": {"x": 9}} for i in range(4)},
+                                 actors={"a": {"sheet": "screen", "at": [960, 540], "copies": {"count": 19}}}),
+        }
+        for name, document in cases.items():
+            with self.subTest(name):
+                note = self.dropped(self.read(document, self.WALL))
+                self.assertEqual((note.code, note.where), ("shape_motion_count", "motion"), note.detail)
+        # The same things at their own size are a scene like any other.
+        calm = self.read(self.edited(scene={"look": "native"}, sheets=tile, paths={}, states={}, react={},
+                                     actors={"a": {"sheet": "tile", "at": [960, 540], **many},
+                                             "b": {"sheet": "tile", "at": [960, 540], **many}},
+                                     emitters={"e": {"sheet": "tile", "at": [960, 540], "max": 320, "rate": 60}}),
+                         self.WALL)
+        self.assertIn("motion", calm.shape, calm.notes)
+        self.assertLess(motion.screens_drawn(calm.shape["motion"], calm.files), 15)
+
+    def test_the_bound_is_never_under_what_the_player_draws(self):
+        # The player's own arithmetic for one figure (src/motionscene.cpp,
+        # collect): its frame at the state's scale, times the perspective of
+        # where it is over that of where its place rests, both depths kept
+        # within 0 and 1.
+        rng = random.Random(1969)
+
+        def depth_scale(z, far):
+            return 1 / (1 + z * (1 / far - 1))
+
+        for _ in range(4000):
+            far, rest = rng.uniform(0.05, 1), rng.uniform(0, 1)
+            nearest, apart = rng.uniform(0, rest), rng.choice((0.0, rng.uniform(0, 1)))
+            vary = rng.uniform(0.2, 4)
+            document = {"look": {"resolution": None}, "depth": {"far": far, "span": 2000}, "planes": [], "lights": {},
+                        "emitters": {}, "sheets": {"s": {"frame": [8, 8], "clips": {"loop": {"mode": "loop"}}}},
+                        "paths": {"p": {"points": [[0, 0, nearest], [5, 5]]}},
+                        "states": {"a.go": {"vary": {"scale": {"max": vary}}, "path": "p"}},
+                        "actors": {"a": {"sheet": "s", "z": rest, "avoid": None,
+                                         "copies": {"count": 1, "depth": apart, "places": None}}}}
+            bound = motion.screens_drawn(document, {}) * 1920 * 1080
+            for _ in range(8):
+                where = rng.uniform(nearest, 1)          # anywhere along its course, or deeper
+                place = rng.uniform(-apart, apart)
+                drawn = vary * depth_scale(min(1, max(0, where + place)), far) / depth_scale(min(1, max(0, rest + place)), far)
+                self.assertLessEqual(64 * drawn * drawn, bound * (1 + 1e-9), (far, rest, nearest, apart, where, place))
+
+    def test_the_sample_and_ordinary_scenes_are_far_within_the_bound(self):
+        reef = shape.check_package(DirectorySource(REEF))
+        self.assertIn("motion", reef.shape, reef.notes)
+        drawn = motion.screens_drawn(reef.shape["motion"], reef.files)
+        self.assertTrue(4 < drawn < motion.MAX_SCREENS_DRAWN / 2, drawn)
+        base = self.read(BASE)
+        self.assertLess(motion.screens_drawn(base.shape["motion"], base.files), 2)
+        # three planes larger than the screen, as the shell's own checks use
+        planes = self.read(self.edited(scene__planes=[{"image": "sheets/wall.png"}] * 3), self.WALL)
+        self.assertIn("motion", planes.shape, planes.notes)
 
     def test_the_exported_document_fits_what_the_shell_reads(self):
         # 16 sheets of 290 clips: 61 KiB of shape.json, within its 64 KiB,

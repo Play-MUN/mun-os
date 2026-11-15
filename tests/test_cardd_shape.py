@@ -216,6 +216,36 @@ class ShapeExportTests(unittest.TestCase):
         self.assertFalse((export / "world").exists(), "a dropped block's files never reach the shell")
         self.assertNotIn("world", json.loads((export / "shape.json").read_text()))
 
+    def test_a_motion_that_would_cover_the_screen_too_often_is_not_exported(self):
+        # Within every count, each figure a whole screen: the checker drops
+        # the motion, and the shell is given the package's v1 look alone.
+        import struct
+        import zlib
+
+        def chunk(kind, body):
+            return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body) & 0xFFFFFFFF)
+        package = self.tmp / "walls"
+        (package / "sheets").mkdir(parents=True)
+        (package / "sheets" / "wall.png").write_bytes(
+            b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 1920, 1080, 8, 6, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(b"\0")) + chunk(b"IEND", b""))
+        actors = {f"wall-{i}": {"sheet": "wall", "at": [960, 540], "copies": {"count": 64}} for i in range(2)}
+        (package / "shape.json").write_text(json.dumps({
+            "format": "mun-shape/1.1", "motion_draft": 1,
+            "palette": {"light": "#E6FBFF", "mid": "#2A9DBA", "deep": "#02202E", "plate": "#04283A",
+                        "text": "#EFFFFF", "accent": "#F2B85C"},
+            "world": {"backdrop": {"gradient": ["#02202E", "#2A9DBA"]}},
+            "sheets": {"wall": {"image": "sheets/wall.png", "frame": [1920, 1080]}}, "actors": actors}))
+        h = ShapeHarness(self.tmp, {"vdc": package})
+        self.insert(h)
+        h.pump(until=h.settled())
+        record = h.card()["shape"]
+        self.assertEqual(record["state"], "partial")
+        self.assertIn(("shape_motion_count", "motion"), [(n["code"], n["block"]) for n in record["notes"]])
+        exported = json.loads((Path(record["path"]) / "shape.json").read_text())
+        self.assertEqual(("motion" in exported, "world" in exported), (False, True))
+        self.assertFalse((Path(record["path"]) / "sheets").exists(), "the dropped motion's files are not exported")
+
     def test_an_unusable_package_publishes_nothing(self):
         h = ShapeHarness(self.tmp, {"vdc": self.fixture("not-json")})
         self.insert(h)

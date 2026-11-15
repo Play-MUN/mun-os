@@ -388,7 +388,9 @@ designs. What was found:
   removed while Play's reaction runs leaves, and the shell goes on to MUN's
   Home. On the virtual console, ten minutes without input dim Home with the
   scene still moving under it, and the first press only wakes it; on the
-  board that check is still to be made.
+  board the dimming has been seen once, by eye
+  ([MUN Dev](mun-dev.md#what-has-been-checked)), and that the first press
+  only wakes it has not been checked there.
 - **Sustained, on the board.** Two runs with a key every 20 seconds
   (Play's reaction coming and going) and no recording. Instrumentation on in
   both: Qt Quick's timing line for every frame (`QSG_RENDER_TIMING`) to the

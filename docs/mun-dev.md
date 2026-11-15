@@ -102,7 +102,7 @@ page's release is made from.
 | What | State |
 | --- | --- |
 | Arrival of a card, navigation, playing MUN Collect and coming back, a save written to the physical card, safe and abrupt removal | Checked on 13 November 2026, with an earlier build of this branch installed whole on the eMMC |
-| Reef behind the menus (MUN Shape's motion), dimming after ten minutes, *Reduce motion* | Checked the same day: 33.6 minutes at 60 Hz with no late step and no restart |
+| Reef behind the menus (MUN Shape's motion), dimming after ten minutes, *Reduce motion* | Checked the same day: left running for 33.6 minutes with no restart of the shell or of the services, the display dimming after ten. Frame times were not recorded in that run and it says nothing about a frame rate: [where the motion stands](shape-motion.md#where-it-stands) has what was measured on this board, where the motion does not hold 60 frames a second |
 | Start-up: one change of picture after the firmware's, standby picture, sound from its first note | Checked on 14 November 2026 on three kinds of start (after unplugging, after a power cut, power button), with a television; with the candidate's shell and board files put over the earlier installation |
 | The candidate's image installed whole, and the whole walk on it | Pending |
 | A start with no sound device | Pending on the board; the shell's own checks cover it |

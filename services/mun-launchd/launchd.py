@@ -783,6 +783,39 @@ def json_too_deep(raw: bytes, limit: int = JSON_MAX_DEPTH) -> bool:
     return bool(marks)
 
 
+# A save envelope holds a few named fields and one entry of four per unit
+# (docs/saves.md); everything big in it is a string. Commas and colons
+# outside strings count its values: a few hundred in any envelope the console
+# writes, millions in 16 MiB of tiny values that would parse into hundreds of
+# megabytes of objects before anything could refuse them.
+ENVELOPE_MAX_SEPARATORS = 4096
+_JSON_NOT_SEPARATOR = bytes(byte for byte in range(256) if byte not in b',:"')
+
+
+def json_too_many_values(raw: bytes, limit: int = ENVELOPE_MAX_SEPARATORS) -> bool:
+    """Whether `raw` holds more than `limit` commas and colons outside its
+    strings, decided without parsing it, in time and memory linear in its size."""
+    if raw.count(b",") + raw.count(b":") <= limit:
+        return False
+    marks = raw.replace(b"\\\\", b"").replace(b'\\"', b"").translate(None, _JSON_NOT_SEPARATOR)
+    count, inside = 0, False
+    for start in range(0, len(marks), 1 << 20):
+        pieces = marks[start:start + (1 << 20)].split(b'"')
+        count += sum(len(piece) for piece in pieces[inside::2])
+        if count > limit:
+            return True
+        inside ^= not len(pieces) % 2
+    return False
+
+
+def parse_envelope(raw: bytes):
+    """parse_json for a save envelope from a card, refusing first, and
+    cheaply, what holds far more values than an envelope can."""
+    if json_too_many_values(raw):
+        raise ValueError(f"more than {ENVELOPE_MAX_SEPARATORS} values")
+    return parse_json(raw)
+
+
 def parse_json(raw: bytes):
     """json.loads for bytes the launcher did not write: UTF-8 only, and
     nesting beyond JSON_MAX_DEPTH is a ValueError like any other malformed
@@ -957,6 +990,17 @@ def inflate_limit(max_bytes: int) -> int:
 
 
 _XML_SPACE = re.compile(rb"[ \t\n\r\x0b\x0c]*")
+
+
+# Units checked together share a budget of a few units' limit: each one may
+# still inflate to the whole limit, but a payload of many small zlib bombs
+# costs a few limits, not one each (64 units of 64 MiB were 4 GiB to inflate).
+INFLATE_TOTAL_FACTOR = 4
+
+
+def inflate_share(limit: int, units: int) -> int:
+    """How far each of `units` units checked together may inflate."""
+    return min(limit, INFLATE_TOTAL_FACTOR * limit // max(units, 1))
 
 
 def unit_check(check: str, data: bytes, limit: int = INFLATE_LIMIT) -> Optional[str]:
@@ -1222,7 +1266,7 @@ class DirectorySync:
     def _check_envelope(self, raw: bytes) -> "tuple[Optional[str], Dict[str, bytes], dict]":
         """Refuse the whole envelope for any flaw; nothing is unpacked outside the directory."""
         try:
-            document = parse_json(raw)
+            document = parse_envelope(raw)
         except ValueError:
             return "no es JSON", {}, {}
         if not isinstance(document, dict) or document.get("format") not in SAVE_FORMATS.values():
@@ -1242,6 +1286,7 @@ class DirectorySync:
             return "partida sin lista de archivos válida", {}
         files: Dict[str, bytes] = {}
         total = 0
+        share = inflate_share(self.inflate_limit, len(payload["files"]))
         for entry in payload["files"]:
             name = entry.get("path") if isinstance(entry, dict) else None
             if not isinstance(name, str) or not _SEGMENT.fullmatch(name) or name in (".", "..") or name in files:
@@ -1258,7 +1303,7 @@ class DirectorySync:
                 return "la partida supera el tamaño declarado", {}
             if len(data) != entry.get("size") or hashlib.sha256(data).hexdigest() != entry.get("sha256"):
                 return f"{name}: tamaño o huella no coinciden", {}
-            problem = unit_check(check, data, self.inflate_limit)
+            problem = unit_check(check, data, share)
             if problem:
                 return f"{name}: {problem}", {}
             files[name] = data
@@ -1404,9 +1449,10 @@ class DirectorySync:
         previous = self.last_synced
         snapshot: Dict[str, bytes] = {}
         carried, omitted = [], []
+        share = inflate_share(self.inflate_limit, len(found))
         for name, data in found.items():
             check = self.unit_pattern(name) or "any"
-            problem = "no es un archivo normal" if data is None else unit_check(check, data, self.inflate_limit)
+            problem = "no es un archivo normal" if data is None else unit_check(check, data, share)
             if problem is None:
                 snapshot[name] = data
             elif name in previous:

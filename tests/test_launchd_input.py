@@ -285,3 +285,58 @@ class SaveUnitCostTests(directory_saves.SyncCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def traced(work):
+    """(result, seconds, peak bytes Python allocated) of work()."""
+    tracemalloc.start()
+    started = time.perf_counter()
+    try:
+        result = work()
+        return result, time.perf_counter() - started, tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+
+
+class EnvelopeCostTests(directory_saves.SyncCase):
+    """What a card's save envelope may cost the launcher, which reads it as
+    root before the game starts: a card declaring the largest directory saves
+    (8 MiB) may hand it 16 MiB, and that much JSON made of tiny values parses
+    into hundreds of megabytes of objects."""
+
+    def setUp(self):
+        super().setUp()
+        self.sync.max_bytes = 8 * 1024 * 1024
+        self.sync.inflate_limit = launchd.inflate_limit(self.sync.max_bytes)
+
+    def test_an_envelope_of_countless_small_values_is_refused_cheaply(self):
+        size = self.sync.max_bytes * 2 + 128 * 1024
+        for hostile in (b"[" + b"0," * (size // 2) + b"0]",
+                        b'{"format":"neptune-save/1","x":{' + b'"a":0,' * (size // 6) + b'"a":0}}'):
+            with self.subTest(hostile[:14]):
+                self.setUp()
+                _, seconds, peak = traced(lambda: self.prepare(card_save=hostile))
+                self.assertEqual(self.sync.restore["state"], "damaged")
+                self.assertLess(peak, 64 * 1024 * 1024, "parsed into objects")
+                self.assertLess(seconds, 1.0)
+
+    def test_the_largest_envelope_a_card_may_hold_is_still_restored(self):
+        # 64 units, 8 MiB in all: the most a card declaring 8 MiB may store.
+        unit = zlib.compress(os.urandom(8 * 1024 * 1024 // 64 - 64), 0)
+        files = {f"save-{n:04d}.sav": zlib.compress(b"<Flag n='%d'/>" % n) + b"" for n in range(1)}
+        files.update({f"screen-{n:04d}.zsc": unit for n in range(63)})
+        _, seconds, peak = traced(lambda: self.prepare(card_save=directory_saves.envelope(files)))
+        self.assertEqual(self.sync.restore, {"state": "restored", "units": 64})
+        self.assertLess(peak, 192 * 1024 * 1024)
+
+    def test_many_small_inflation_bombs_cost_a_few_units_not_one_each(self):
+        # Each unit inflates to its own limit (64 MiB): 64 of them used to make
+        # the check inflate 4 GiB before the game started.
+        bomb = zlib.compress(b"\0" * (self.sync.inflate_limit - 1024), 9)
+        files = {f"screen-{n:04d}.zsc": bomb for n in range(64)}
+        _, seconds, _ = traced(lambda: self.prepare(card_save=directory_saves.envelope(files)))
+        self.assertEqual(self.sync.restore["state"], "damaged")
+        self.assertIn("límite", self.sync.restore["detail"])
+        self.assertLess(seconds, 4.0)
+        self.assertEqual(launchd.inflate_share(self.sync.inflate_limit, 64), self.sync.inflate_limit * 4 // 64)
+        self.assertEqual(launchd.inflate_share(self.sync.inflate_limit, 2), self.sync.inflate_limit)

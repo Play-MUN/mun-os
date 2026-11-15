@@ -2305,10 +2305,6 @@ def main(argv=None) -> int:
     listener = server.start()
     log(f"mun-launchd ready: socket {args.socket}, launch root {LAUNCH_ROOT}, game user {GAME_USER}")
 
-    # Reconcile: adopt a surviving game unit, or make sure the shell is back.
-    if not reconcile_sessions(runner, manager, LAUNCH_ROOT, sweep_cleanups(runner, manager)):
-        ShellControl().start()
-
     # Card service feed: a client connection with reconnection.
     cardd_sock: Optional[socket.socket] = None
     cardd_reader = LineReader()
@@ -2376,6 +2372,13 @@ def main(argv=None) -> int:
 
     manager.gate_open, manager.gate_close = gate_open, gate_close
     faults: set = server.faults
+
+    # Reconcile: adopt a surviving game unit, or make sure the shell is back.
+    # Only now that the save socket can be opened: the one the adopted game
+    # holds the name of died with the previous launcher, and a game adopted
+    # before this point could not save for the rest of its session.
+    if not reconcile_sessions(runner, manager, LAUNCH_ROOT, sweep_cleanups(runner, manager)):
+        ShellControl().start()
 
     def save_accept() -> None:
         try:

@@ -11,6 +11,7 @@ import sys
 import tempfile
 import time
 import shutil
+import socket
 import unittest
 import unittest.mock
 import zlib
@@ -789,13 +790,19 @@ class StartupReconcileTests(unittest.TestCase):
                 pass
             shell = unittest.mock.Mock()
             shell.start.side_effect = StopBeforeLoop
+            # Sessions are reconciled once the loop's sockets are registered,
+            # so the listener is a socket the selector can take.
+            listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            self.addCleanup(listener.close)
+            server = unittest.mock.Mock()
+            server.start.return_value = listener
             with unittest.mock.patch.object(launchd, "LAUNCH_ROOT", root), \
                     unittest.mock.patch.object(launchd, "CONTENT_MOUNT", Path(td) / "content"), \
                     unittest.mock.patch.object(launchd, "Runner", return_value=runner), \
                     unittest.mock.patch.object(launchd, "ResultStore", return_value=store), \
-                    unittest.mock.patch.object(launchd, "Server", return_value=unittest.mock.Mock()), \
+                    unittest.mock.patch.object(launchd, "Server", return_value=server), \
                     unittest.mock.patch.object(launchd, "ShellControl", return_value=shell), \
-                    unittest.mock.patch.object(launchd.socket, "socketpair", return_value=[unittest.mock.Mock(), unittest.mock.Mock()]), \
+                    unittest.mock.patch.object(launchd.signal, "signal"), \
                     unittest.mock.patch.object(launchd.subprocess, "run", return_value=unittest.mock.Mock(stdout="rw,exec")):
                 with self.assertRaises(StopBeforeLoop):
                     launchd.main([])

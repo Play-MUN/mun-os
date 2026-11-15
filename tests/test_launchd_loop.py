@@ -42,11 +42,12 @@ class RunningLauncher:
         self.root = self.folder / "lr"
         self.root.mkdir()
         self.socket = self.folder / "l.sock"
-        self.lines, self.handlers, self.error, self.managers = [], {}, None, []
+        self.lines, self.handlers, self.error, self.managers, self.commands = [], {}, None, [], []
         self.thread = threading.Thread(target=self._main, daemon=True)
         case.addCleanup(shutil.rmtree, self.folder, True)
 
     def systemctl(self, cmd, **_):
+        self.commands.append(list(cmd))
         if cmd[0] == "findmnt":
             return Done("rw,nosuid,nodev")
         if cmd[:2] == ["systemctl", "list-units"]:
@@ -227,6 +228,25 @@ class LoopSurvivalTests(unittest.TestCase):
             launcher.alive()
             self.assertEqual(launcher.manager.results.current()["reason"], "interrupted")
             self.assertFalse((launcher.root / "sbroken").exists())
+
+
+class AdoptionTests(unittest.TestCase):
+    """A launcher that starts while a game runs (after a restart of any kind)."""
+
+    def test_the_adopted_game_can_save_again_through_its_socket(self):
+        launcher = RunningLauncher(self)
+        launcher.session_left_running("sadopt1")
+        with launcher:
+            self.assertEqual((launcher.manager.state, launcher.manager.session["id"]), ("running", "sadopt1"))
+            answer = launcher.save(launcher.root / "sadopt1" / "save.sock", b'{"type":"save","schema":1,"data":{"n":1}}\n')
+            self.assertEqual((answer["type"], answer["error"]["code"]), ("saved", "reader_unavailable"),
+                             "served by this launcher (no card service in this fixture)")
+
+    def test_a_launcher_that_finds_no_game_opens_no_socket_and_brings_the_shell_back(self):
+        with RunningLauncher(self) as launcher:
+            self.assertEqual(launcher.manager.state, "idle")
+            self.assertEqual([path.name for path in launcher.root.iterdir() if path.is_dir()], [])
+            self.assertIn(["systemctl", "start", "--no-block", launchd.SHELL_UNIT], launcher.commands)
 
 
 def still_open(conn: socket.socket) -> bool:

@@ -60,7 +60,9 @@ PACKAGE_MAX_BYTES = 32 * 1024 * 1024
 IMAGE_MAX_BYTES = 4 * 1024 * 1024
 SOUND_MAX_BYTES = 1024 * 1024
 # Largest side of each kind of image, which bounds its decoded size before
-# anything decodes it (2048 x 2048 ARGB is 16 MiB).
+# anything decodes it (2048 x 2048 ARGB is 16 MiB, what the shell decodes at
+# most at once; a 16-bit colour image is twice that a pixel, and is held to
+# the same bytes: _decodable).
 SIDE_LIMITS = {"backdrop": 2048, "layer": 2048, "light": 2048, "sprite": 256, "window": 1024,
                # motion (mun-shape/1.1): a sheet of frames, a plane, the still poster
                "sheet": 2048, "plane": 2048, "poster": 2048}
@@ -927,6 +929,22 @@ def _read_file(package: _Scoped, reference: _Reference, size: int, cache: Dict[s
     return found
 
 
+def _decodable(details: Dict[str, Any], reference: _Reference, motion) -> None:
+    """An image of a v1 block must be one the console can decode: read in
+    the format of its colour type and depth (16-bit colour at 8 bytes a
+    pixel), it stays within the shell's limit for any one decode, the one a
+    motion's images are held to (motion.DECODE_MAX_BYTES). Within its
+    kind's sides an 8-bit image always does; a 16-bit colour one need not.
+    Raises _Invalid."""
+    if details["type"] != "png":
+        return
+    reading = motion.decode_bytes(details)
+    if reading > motion.DECODE_MAX_BYTES:
+        raise _Invalid("shape_png_dimensions",
+                       f"{reference.path}: decodificarla ocupa {reading} bytes > {motion.DECODE_MAX_BYTES} "
+                       f"({details['depth']} bits por canal: guárdala a 8 bits o más pequeña)", reference.where)
+
+
 def export_bytes(document: Dict[str, Any], insertion: str, version: str) -> bytes:
     """The exported shape.json, byte for byte, as the card service writes
     it for an insertion of a card of `version` (services/mun-cardd/cardd.py)
@@ -1013,6 +1031,8 @@ def check_package(source, base: str = "", version: Optional[str] = None) -> Shap
             continue
         try:
             found = {ref.path: _read_file(package, ref, sizes[ref.path], cache) for ref in references[name]}
+            for ref in references[name]:
+                _decodable(found[ref.path], ref, motion)
         except _Invalid as exc:
             notes.append(Note(exc.code, "dropped", exc.detail, block=name, where=exc.where))
             del blocks[name]

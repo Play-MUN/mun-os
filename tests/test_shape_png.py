@@ -255,6 +255,71 @@ class PackageTests(unittest.TestCase):
                 self.assertNotIn("shape_png", result.codes())
 
 
+def header_only(width: int, height: int, depth: int = 8, colour: int = 6) -> bytes:
+    """A PNG the checker accepts, made of its header and a token of data:
+    the checker reads headers only, so its size costs nothing here."""
+    return (shape._PNG_SIGNATURE + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, depth, colour, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(b"\0")) + chunk(b"IEND", b""))
+
+
+class DecodableTests(unittest.TestCase):
+    """The checker and the console agree on which v1 image can be decoded:
+    the console reads a 16-bit colour image at 8 bytes a pixel, within its
+    limit for any one decode."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="shape-decode-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    def world(self, name, **images):
+        folder = self.tmp / name
+        files = {"world/backdrop.png": flat(), "world/layer.png": flat(), "world/light.png": flat(),
+                 "card/window.png": flat(), **images}
+        for path, data in files.items():
+            (folder / path).parent.mkdir(parents=True, exist_ok=True)
+            (folder / path).write_bytes(data)
+        (folder / "shape.json").write_text(json.dumps({
+            "format": "mun-shape/1", "palette": PackageTests.PALETTE, "card": {"window": "card/window.png"},
+            "world": {"backdrop": {"image": "world/backdrop.png"}, "layers": [{"image": "world/layer.png"}],
+                      "light": [{"texture": "world/light.png"}]}}), encoding="utf-8")
+        return shape.check_package(DirectorySource(folder))
+
+    def test_a_16_bit_image_the_console_cannot_decode_is_not_called_ready(self):
+        # 2048 x 2048 at 16 bits a channel is within the side of a backdrop
+        # and is 32 MiB as the console reads it, twice what it may decode.
+        for name in ("world/backdrop.png", "world/layer.png", "world/light.png"):
+            with self.subTest(name):
+                result = self.world(name.replace("/", "-"), **{name: header_only(2048, 2048, depth=16)})
+                self.assertEqual(result.state, "partial")
+                self.assertEqual([(n.code, n.block) for n in result.notes], [("shape_png_dimensions", "world")])
+                self.assertIn(str(motion.DECODE_MAX_BYTES), result.notes[0].detail)
+                self.assertNotIn("world", result.shape)
+                self.assertEqual(shape.memory_estimate(result)["1080p"]["detail"], "none")
+
+    def test_the_limit_is_the_shells_for_one_decode(self):
+        cases = (
+            (dict(depth=16, colour=6), 1448, True),     # 8 bytes a pixel: 16.0 MiB
+            (dict(depth=16, colour=6), 1449, False),
+            (dict(depth=16, colour=2), 1449, False),    # 16-bit RGB is read at 8 bytes a pixel too
+            (dict(depth=16, colour=4), 1449, False),    # and 16-bit grey with alpha
+            (dict(depth=16, colour=0), 2048, True),     # 16-bit grey: 2 bytes a pixel
+            (dict(depth=8, colour=6), 2048, True),      # 4 bytes a pixel: exactly the limit
+            (dict(depth=8, colour=2), 2048, True),
+        )
+        for form, side, accepted in cases:
+            with self.subTest(form=form, side=side):
+                result = self.world(f"b-{form['depth']}-{form['colour']}-{side}",
+                                    **{"world/backdrop.png": header_only(side, side, **form)})
+                self.assertEqual(result.state, "ready" if accepted else "partial", result.notes)
+                self.assertEqual("world" in result.shape, accepted)
+        shell = (ROOT / "services" / "mun-shell" / "src" / "shape.cpp").read_text(encoding="utf-8")
+        self.assertIn(f"kAllocationLimitMiB = {motion.DECODE_MAX_BYTES // (KIB * KIB)};", shell)
+
+    def test_a_16_bit_window_is_within_the_limit_at_its_largest(self):
+        result = self.world("window", **{"card/window.png": header_only(1024, 1024, depth=16)})
+        self.assertEqual((result.state, result.codes()), ("ready", []))
+
+
 class ShellAgreementTests(unittest.TestCase):
     """The shell scans a PNG's chunks itself before it opens it (it does not
     lean on the card service alone): its bounds are the checker's."""

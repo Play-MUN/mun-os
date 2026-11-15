@@ -155,6 +155,35 @@ class CaptureRuleTests(SyncCase):
         self.game_writes("save-0000.sav", SLOT); self.sync.poll()
         self.assertEqual(self.sent, []); self.assertEqual(self.host.calls, ["freeze", "thaw"], "nothing read unfrozen")
 
+    def test_when_writers_cannot_be_told_the_result_says_why_nothing_was_copied(self):
+        self.prepare()
+        self.host.writing = None                   # no read lease can be taken at all
+        self.game_writes("save-0000.sav", SLOT); self.sync.poll()
+        self.assertEqual(self.sent, [])
+        self.sync.final(lambda: None, write=False)                 # the card is pulled
+        summary = self.sync.summary("card_removed")
+        self.assertFalse(summary["ok"])
+        self.assertEqual(summary["error"]["code"], "save_unverified")
+        self.assertEqual(summary["message"].split("\n"),
+                         ["Los cambios de la partida de esta sesión no llegaron a la Game Card",
+                          "No se pudo comprobar si el juego estaba escribiendo sus partidas, y no se copiaron mientras se jugaba"])
+
+    def test_a_writer_in_the_middle_or_a_later_capture_leaves_no_such_notice(self):
+        self.prepare()
+        self.host.writing = ["pid 7 fd 12"]
+        self.game_writes("save-0000.sav", SLOT); self.sync.poll()
+        self.assertIsNone(self.sync.last_error, "a writer closes, and its close is the next save point")
+        self.host.writing = None
+        self.game_writes("save-0000.sav", SLOT); self.sync.poll()
+        self.assertEqual(self.sync.last_error["code"], "save_unverified")
+        done = []
+        self.sync.final(lambda: done.append(True))                 # the game stops: no lease is needed
+        self.assertEqual(self.files_sent(), {"save-0000.sav": SLOT})
+        self.answer()
+        summary = self.sync.summary("exited")
+        self.assertEqual((done, summary["ok"], summary["error"]), ([True], True, None))
+        self.assertIn("Partida guardada en la Game Card", summary["message"])
+
     def test_a_torn_unit_keeps_its_last_valid_version(self):
         self.prepare(envelope({"save-0000.sav": SLOT, "save-0001.sav": SLOT}))
         self.game_writes("save-0000.sav", SLOT2[:len(SLOT2) // 2])     # crash mid-write

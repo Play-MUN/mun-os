@@ -880,6 +880,12 @@ INFLATE_LIMIT = 64 * 1024 * 1024
 INFLATE_FACTOR = 64
 XML_INFLATE_LIMIT = 16 * 1024 * 1024
 DIRECTORY_SAVE_SCHEMA = 1
+# Why a capture was given up when no read lease can be taken at all, and what
+# the session's result then carries: unlike a writer in the middle, whose
+# close brings the next save point, nothing can be copied while the game runs.
+NO_LEASE = "open files cannot be checked (no read lease)"
+SAVE_UNVERIFIED = {"code": "save_unverified",
+                   "message": "No se pudo comprobar si el juego estaba escribiendo sus partidas, y no se copiaron mientras se jugaba"}
 _SEGMENT = re.compile(r"[A-Za-z0-9._-]{1,128}")
 _UNIT_PATTERN = re.compile(r"[A-Za-z0-9._*-]{1,64}")
 
@@ -1346,7 +1352,7 @@ class DirectorySync:
                     # can even open it until the descriptor is closed.
                     free = self.lease(fd)
                     if free is None:
-                        return found, False, "open files cannot be checked (no read lease)"
+                        return found, False, NO_LEASE
                     if not free:
                         return found, False, f"{name} is open for writing"
                 chunks, size = [], 0
@@ -1379,6 +1385,8 @@ class DirectorySync:
             found, too_many, no_point = self._read_units(check_writers=frozen)
             if no_point:
                 log(f"session {self.sid}: no save point: {no_point}")
+                if no_point == NO_LEASE:
+                    self.last_error = dict(SAVE_UNVERIFIED)    # until a capture succeeds: summary()
                 return                    # the writer's close triggers the next attempt
         finally:
             if frozen:
@@ -1521,6 +1529,8 @@ class DirectorySync:
         if reason in ("card_removed", "reader_lost") and unsynced:
             lines.append(f"Se perdieron los cambios de la partida posteriores a las {held_at}" if held_at
                          else "Los cambios de la partida de esta sesión no llegaron a la Game Card")
+            if (self.last_error or {}).get("code") == SAVE_UNVERIFIED["code"]:
+                lines.append(self.last_error["message"])
             ok = False
         elif self.lost is not None:
             lines.append(f"La última partida no se guardó: {self.lost}")

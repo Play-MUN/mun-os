@@ -10,6 +10,7 @@ import os
 import stat
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -105,6 +106,40 @@ class MountTimeoutTests(unittest.TestCase):
         self.assertEqual(card.mount, target)
         self.does("mount", "exit 0")
         self.mounter.remount(card, rw=False)         # and it can be remounted again
+
+    def test_a_mount_point_stays_taken_until_the_detach_of_a_late_mount_ends(self):
+        # The late mount ends; its detach takes a while. A card that comes in
+        # meanwhile must not be mounted there, or the detach would take it.
+        self.does("mount", "sleep 0.4")
+        with self.assertRaises(CardError):
+            self.mounter.mount(Card(), "/dev/vdb")
+        target = str(self.root / "c1")
+        self.mounted.add(target)
+        self.does("umount", "sleep 0.5")
+        time.sleep(0.6)
+        with patch.object(cardd, "MOUNT_TIMEOUT", 3.0):    # this detach is slow, not stalled
+            reaper = threading.Thread(target=self.mounter.reap)
+            reaper.start()
+            time.sleep(0.15)
+            self.does("mount", "exit 0")
+            with self.assertRaises(CardError):       # the new card waits for the detach
+                self.mounter.mount(Card(), "/dev/vdc")
+            reaper.join()
+        self.assertEqual(self.mounter.stalled, {})
+        self.assertEqual(self.mounter.mount(Card(), "/dev/vdc"), target)   # then it is mounted
+
+    def test_a_detach_that_does_not_end_is_bounded_and_keeps_its_mount_point(self):
+        self.does("mount", "sleep 0.4")
+        with self.assertRaises(CardError):
+            self.mounter.mount(Card(), "/dev/vdb")
+        target = str(self.root / "c1")
+        self.does("umount", "sleep 5")
+        time.sleep(0.6)
+        started = time.monotonic()
+        self.mounter.reap()
+        self.assertLess(time.monotonic() - started, 2.0, "the service waited on the detach")
+        self.assertEqual(self.mounter.stalled[target][0], "detach")
+        self.assertIsNone(self.mounter.stalled[target][1].poll(), "kept running, not killed and waited on")
 
     def test_an_unmount_that_does_not_answer_never_reads_as_safe_removal(self):
         target = str(self.root / "c1")

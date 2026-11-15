@@ -1452,26 +1452,50 @@ class Mounter:
     def reap(self) -> None:
         """Forget stalled commands that have ended. A mount that succeeded
         after it was reported failed has no card using it: detached."""
+        detaching = []
         with self.stalled_lock:
             ended = [(target, command, proc) for target, (command, proc) in self.stalled.items()
                      if proc.poll() is not None]
-            for target, _, _ in ended:
+            for target, command, proc in ended:
                 del self.stalled[target]
+                # Only a first mount has no card behind it; a late remount or
+                # umount concerns the card that is still tracked. The detach
+                # starts under the lock and stays this mount point's command
+                # until it ends: a card mounted here in between would be the
+                # one it detaches.
+                if command == "mount" and proc.returncode == 0:
+                    detach = self._start_detach(target)
+                    if detach is not None:
+                        self.stalled[target] = ("detach", detach)
+                        detaching.append((target, detach))
         for target, command, proc in ended:
             log(f"{command} on {target} ended at last (exit {proc.returncode})")
-            # Only a first mount has no card behind it; a late remount or
-            # umount concerns the card that is still tracked.
-            if command == "mount" and proc.returncode == 0:
-                self._detach(target)
+        for target, detach in detaching:
+            self._finish_detach(target, detach)
 
     @staticmethod
-    def _detach(target: str) -> None:
-        """A lazy detach: it does not wait on the device, and if even it does
-        not end in time, nothing more can be done from here."""
+    def _start_detach(target: str) -> "Optional[subprocess.Popen]":
         try:
-            subprocess.run(["umount", "-l", target], capture_output=True, check=False, timeout=MOUNT_TIMEOUT)
+            return subprocess.Popen(["umount", "-l", target], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError as exc:
+            log(f"umount -l on {target} could not start: {exc}")
+            return None
+
+    def _finish_detach(self, target: str, detach: "subprocess.Popen") -> None:
+        """Wait for a lazy detach within MOUNT_TIMEOUT. It does not wait on
+        the device and is expected to end at once; one that does not is
+        kept as the mount point's command, like any other, and never waited
+        on again from here."""
+        try:
+            detach.wait(timeout=MOUNT_TIMEOUT)
         except subprocess.TimeoutExpired:
-            log(f"umount -l on {target} did not end in {MOUNT_TIMEOUT:.0f} s")
+            with self.stalled_lock:
+                self.stalled.setdefault(target, ("detach", detach))
+            log(f"umount -l on {target} still running after {MOUNT_TIMEOUT:.0f} s; kept until it ends")
+            return
+        with self.stalled_lock:
+            if self.stalled.get(target, (None, None))[1] is detach:
+                del self.stalled[target]
 
     def _run(self, kind: str, argv: List[str], target: str, code: str, message: str) -> "tuple[int, str]":
         """Run a mount-family command (`kind`: mount, remount or umount) on
@@ -1541,7 +1565,9 @@ class Mounter:
                 raise CardError("unmount_failed", "No se pudo desmontar la tarjeta de forma segura",
                                 detail or f"umount exit {code}")
             # The device is gone: a lazy detach does not wait on it.
-            self._detach(target)
+            detach = self._start_detach(target)
+            if detach is not None:
+                self._finish_detach(target, detach)
         card.mount = None
         try:
             Path(target).rmdir()

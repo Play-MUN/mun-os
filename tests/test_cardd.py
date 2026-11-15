@@ -32,6 +32,9 @@ def popen_from(run):
 
         def poll(self):
             return self.returncode
+
+        def wait(self, timeout=None):
+            return self.returncode
     return Command
 
 

@@ -14,6 +14,7 @@ import tempfile
 import time
 import tracemalloc
 import unittest
+import unittest.mock
 import zlib
 from pathlib import Path
 
@@ -340,3 +341,57 @@ class EnvelopeCostTests(directory_saves.SyncCase):
         self.assertLess(seconds, 4.0)
         self.assertEqual(launchd.inflate_share(self.sync.inflate_limit, 64), self.sync.inflate_limit * 4 // 64)
         self.assertEqual(launchd.inflate_share(self.sync.inflate_limit, 2), self.sync.inflate_limit)
+
+
+class ForwardedSaveTests(unittest.TestCase):
+    """A save the launcher accepts (at most 64 KiB as compact UTF-8) must
+    reach the card service in a line that service takes: escaped, every
+    character outside ASCII became six bytes and a save well inside the
+    bound was refused as a request too large."""
+
+    def sent_line(self, data):
+        sent, replies = [], []
+
+        class Socket:
+            def __init__(self, *args):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def settimeout(self, value):
+                pass
+
+            def connect(self, path):
+                pass
+
+            def sendall(self, line):
+                sent.append(line)
+
+            def recv(self, size):
+                return b'{"ok": true}\n'
+
+        request = {"type": "save", "session": "s1", "schema": 1, "data": data}
+        with unittest.mock.patch.object(launchd.socket, "socket", Socket):
+            launchd.stage_via_cardd(request, replies.append)
+            deadline = time.monotonic() + 5
+            while not replies and time.monotonic() < deadline:
+                time.sleep(0.01)
+        self.assertEqual(replies, [{"ok": True}])
+        return sent[0]
+
+    def test_a_save_of_text_outside_ascii_reaches_the_card_service_within_its_line(self):
+        sys.path.insert(0, str(ROOT / "tools" / "mun-card"))
+        from mun_card.saves import SAVE_FILE_MAX_BYTES
+        data = {"name": "é" * 32000}
+        compact = len(json.dumps(data, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
+        self.assertLessEqual(compact, launchd.SAVE_MAX_BYTES, "a save the launcher accepts")
+        line = self.sent_line(data)
+        self.assertLessEqual(len(line), SAVE_FILE_MAX_BYTES)
+        self.assertEqual(json.loads(line)["data"], data)
+
+    def test_an_ascii_save_is_forwarded_as_before(self):
+        self.assertEqual(json.loads(self.sent_line({"n": 1}))["data"], {"n": 1})

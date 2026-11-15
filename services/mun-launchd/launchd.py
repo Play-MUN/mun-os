@@ -2062,7 +2062,10 @@ def stage_via_cardd(request: dict, reply: Callable[[dict], None]) -> None:
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
                 sock.settimeout(PREPARE_TIMEOUT if request.get("type") == "stage" else SAVE_TIMEOUT)
                 sock.connect(str(CARDD_CONTROL))
-                sock.sendall((json.dumps(request) + "\n").encode("utf-8"))
+                # Unescaped, as the card service measures a save and stores
+                # it: escaped, every character outside ASCII became six bytes
+                # and a save well inside its bound outgrew the service's line.
+                sock.sendall((json.dumps(request, ensure_ascii=False) + "\n").encode("utf-8", "replace"))
                 data = b""
                 while b"\n" not in data:
                     chunk = sock.recv(65536)

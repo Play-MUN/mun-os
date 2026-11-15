@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(ROOT / "services" / "mun-cardd"))
 sys.path.insert(0, str(ROOT / "tools" / "mun-card"))
 
@@ -130,6 +131,70 @@ class SuperblockErrorPolicyTests(unittest.TestCase):
         for policy in ("panic", "remount-ro", "continue"):
             subprocess.run([tune2fs, "-e", policy, str(path)], check=True, capture_output=True)
             self.assertEqual(ext4.check_mountable(path)["errors_policy"], policy)
+
+
+class RefusedCardIsNamedTests(unittest.TestCase):
+    """A card the service refuses is shown as invalid by the shell; the
+    service's own journal must name it and say why, once per insertion."""
+
+    def setUp(self):
+        import io
+        from contextlib import redirect_stdout
+        from test_cardd import Harness
+        self.tmp = Path(tempfile.mkdtemp())
+        self.commands = []
+
+        def run(cmd, **kwargs):
+            self.commands.append(cmd)
+            return Mock(returncode=0, stderr="", stdout="")
+        p = patch.object(cardd.subprocess, "run", run); p.start(); self.addCleanup(p.stop)
+        self.journal = io.StringIO()
+        silenced = redirect_stdout(self.journal); silenced.__enter__(); self.addCleanup(silenced.__exit__, None, None, None)
+        self.Harness = Harness
+
+    def lines(self):
+        return [line for line in self.journal.getvalue().splitlines() if "refused" in line]
+
+    def insert(self, image, validator=None):
+        h = self.Harness(mounter=cardd.Mounter(self.tmp / "mounts"), validator=validator)
+        h.manager.device_added("vdc", "NPT-card01", str(image))
+        if h.manager.cards["vdc"].state == "reading":
+            h.pump()
+        return h
+
+    def test_a_card_marked_with_errors_is_named_with_its_reason_once(self):
+        image = superblock_image(self.tmp / "errors.img", 1, state=ext4.STATE_CLEAN | ext4.STATE_ERRORS)
+        h = self.insert(image)
+        card = h.manager.snapshot()["cards"][0]
+        self.assertEqual((card["state"], card["error"]["code"]), ("invalid", "image_has_errors"))
+        self.assertEqual(self.commands, [], "refused before any mount")
+        self.assertEqual(len(self.lines()), 1)
+        for word in ("c1", "vdc", "NPT-card01", "image_has_errors", "marcado con errores", "errores anotados"):
+            self.assertIn(word, self.lines()[0])
+        h.manager.device_added("vdc", "NPT-card01", str(image))       # what every rescan does
+        self.assertEqual(len(self.lines()), 1, "once per insertion")
+
+    def test_the_reason_tells_recorded_errors_from_an_unclean_unmount(self):
+        for state, expected in ((ext4.STATE_CLEAN | ext4.STATE_ERRORS, "errores anotados"), (ext4.STATE_ERRORS, "errores anotados"),
+                                (0, "no se desmontó limpiamente")):
+            with self.subTest(state=state):
+                with self.assertRaises(CardError) as ctx:
+                    ext4.check_mountable(superblock_image(self.tmp / "state.img", 1, state=state))
+                self.assertEqual(ctx.exception.code, "image_has_errors")
+                self.assertIn(expected, ctx.exception.detail)
+
+    def test_a_card_refused_by_validation_is_named_too(self):
+        def validator(mount):
+            raise CardError("manifest_missing", "No se encontró mun.toml ni neptune.toml en la tarjeta")
+        h = self.insert(superblock_image(self.tmp / "clean.img", 1), validator)
+        self.assertEqual(h.manager.snapshot()["cards"][0]["state"], "invalid")
+        self.assertEqual(len(self.lines()), 1)
+        self.assertIn("manifest_missing", self.lines()[0]); self.assertIn("vdc", self.lines()[0])
+
+    def test_a_valid_card_is_not_reported_as_refused(self):
+        h = self.insert(superblock_image(self.tmp / "clean.img", 1))
+        self.assertEqual(h.manager.snapshot()["cards"][0]["state"], "valid")
+        self.assertEqual(self.lines(), [])
 
 
 if __name__ == "__main__":

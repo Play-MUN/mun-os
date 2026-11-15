@@ -69,5 +69,6 @@ def check_mountable(image: Path) -> Dict[str, object]:
     if info["needs_recovery"]:
         raise CardError("image_needs_recovery", "El sistema de archivos necesita recuperación y no se monta")
     if info["errors"] or not info["clean"]:
-        raise CardError("image_has_errors", "El sistema de archivos está marcado con errores")
+        raise CardError("image_has_errors", "El sistema de archivos está marcado con errores",
+                        "errores anotados en el superbloque" if info["errors"] else "no se desmontó limpiamente")
     return info

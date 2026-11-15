@@ -569,6 +569,10 @@ class CardManager:
             return
         if error is not None:
             card.state, card.error, card.info = "invalid", error, None
+            # Once per insertion: the shell shows the card as invalid, and
+            # whoever reads the journal must find which device and why.
+            log(f"{card.slot} ({card.device}, {card.serial}) refused: {error.get('code')}: {error.get('message')}"
+                + (f" ({error['detail']})" if error.get("detail") else ""))
             self.mounter.unmount(card)
         else:
             card.state, card.info, card.error = "valid", info, None

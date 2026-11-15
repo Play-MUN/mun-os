@@ -418,7 +418,9 @@ def _windows_unix_connect(path: Path, timeout: float) -> socket.socket:
     if ws2.connect(handle, ctypes.byref(address), ctypes.sizeof(address)) != 0:
         error = ctypes.get_last_error()
         ws2.closesocket(handle)
-        raise ConnectionRefusedError(error, f"nothing listens on {path}")
+        if error == 10013:                                # WSAEACCES: the socket is not this user's to reach
+            raise PermissionError(error, f"{path}: access denied (Winsock error {error})")
+        raise ConnectionRefusedError(error, f"nothing listens on {path} (Winsock error {error})")
     sock = socket.socket(fileno=handle)
     sock.settimeout(timeout)
     return sock

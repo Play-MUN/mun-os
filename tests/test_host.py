@@ -369,6 +369,24 @@ class CommandLineTests(Fixture):
             self.assertEqual(host.connect(self.paths["qmp"], 3.0), "connected")
         winsock.assert_called_once_with(self.paths["qmp"], 3.0)
 
+    def test_winsock_tells_access_denied_from_nobody_listening(self):
+        # Another account's refusal and an absent listener must not read alike:
+        # the Windows check of another account depends on it.
+        import ctypes
+        from unittest import mock
+        for error, expected in ((10013, PermissionError), (10061, ConnectionRefusedError)):
+            ws2 = mock.MagicMock()
+            ws2.socket.return_value = 5
+            ws2.connect.return_value = -1
+            with self.subTest(error=error), \
+                    patch.object(ctypes, "WinDLL", return_value=ws2, create=True), \
+                    patch.object(ctypes, "get_last_error", return_value=error, create=True):
+                with self.assertRaises(OSError) as refused:
+                    host._windows_unix_connect(Path("C:/Users/x/AppData/Local/mun/sockets/a/qmp.sock"), 3.0)
+                self.assertIs(type(refused.exception), expected)
+                self.assertEqual(refused.exception.errno, error)
+                ws2.closesocket.assert_called_once_with(5)
+
 
 class Started:
     """What host.start_detached returns, as far as the start can tell: a

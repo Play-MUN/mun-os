@@ -28,9 +28,10 @@ draws the parts that depend on it accordingly (*How it is drawn*).
 | `src/systemsounds.*` | The menus' sounds (move, enter, back), mixed on a worker thread and played through ALSA |
 | `src/playbackhealth.h` | Whether the sound device plays what it is given at its rate (not just open), in standard C++, checked on the host |
 | `src/startupclock.h`, `src/bootclock.*` | The start-up's clock: following its sound while it can be trusted, alone at real speed once not; in standard C++, checked on the host, and given to QML on the monotonic clock |
-| `src/powercontrol.*` | The only privileged request: runs `mun-power` through `sudo -n`; reports failure to the UI |
+| `src/powercontrol.*` | The only privileged requests: runs `mun-power` and, for Reset console, `mun-reset request` through `sudo -n`; reports failure to the UI |
 | `src/cardclient.*` | Mirror of the card service over its UNIX socket: snapshot, events, reconnection; exposes state, manifest, error, cover (data URL) and whether the active card arrived while the shell was watching to QML |
 | `src/shape.*`, `src/contrast.h`, `src/readpalette.*` | A Game Card's MUN Shape on the eligible surfaces: the export read and decoded off the GUI thread, its colours verified again with the contrast rule, the palette read from a cover, the phases of its coming in and leaving (*A Game Card's identity*) |
+| `src/pngchunks.h`, `src/decodingmarker.h` | What guards the reading of a card's images, in standard C++, checked on the host: the scan of a PNG's chunk headers before any image reader opens the file, and the marker that names the insertion being decoded, with the insertion a start skips for it |
 | `src/shapeworld.*`, `src/shapefront.h` | The package's world, prepared and painted on its own thread, and the fronts of its transitions |
 | `src/motionscene.*`, `shaders/sprite.*` | The motion of a `mun-shape/1.1` package (draft, [docs/shape-motion.md](../../docs/shape-motion.md)): its images decoded off the GUI thread, one simulation drawn as one composed image or as scene graph nodes (on a graphics API, every run of things from one image as one node of quads), its reactions to the console's events |
 | `src/framewatch.*` | The interface's frame and key timings while a world is drawn; the step down when navigation suffers |
@@ -51,11 +52,12 @@ draws the parts that depend on it accordingly (*How it is drawn*).
 | `qml/OrbitalMenu.qml`, `OrbitalNode`, `OrbitalIcon`, `OrbitalFocus`, `src/orbitalcard.*` | The orbital design's menus: the entries as nodes on the orbit's ring with their pills, their icons (each part painted once and moved by a transform), and the entry in focus large at the orbit's centre, the card object among them |
 | `qml/ArcMenu.qml`, `ArcNode`, `DetailPanel`, `OptionRow`, `StatusBar`, `MoonPhase`, `ModalLayer`, `BootLayer`, `UiText`, `MarkText`, `Shadow`, `Material`, `Logo.js` | Components: the arcs and their entries, the panel and its options, the status line, dialogs, the start-up and power-off screen, text and shadows; the MUN logo |
 | `tests/behaviour.py`, `tests/scenes/` | Behaviour regressions run on the compiled binary: offscreen with the software renderer, Home also through OpenGL on Xvfb (*A Game Card's identity*), and the two drawing paths side by side (*On a graphics API*) |
-| `tests/displaydevice_test.cpp`, `tests/startupclock_test.cpp`, `tests/playbackhealth_test.cpp`, `tests/Makefile` | The display rules on fake sysfs trees and mode lists, the start-up's clock against sounds that stall, crawl, race, go back or recover, and the device's health against devices that do; compiled and run on the host by `make check` |
+| `tests/displaydevice_test.cpp`, `tests/startupclock_test.cpp`, `tests/playbackhealth_test.cpp`, `tests/pngchunks_test.cpp`, `tests/decodingmarker_test.cpp`, `tests/Makefile` | The display rules on fake sysfs trees and mode lists, the start-up's clock against sounds that stall, crawl, race, go back or recover, the device's health against devices that do, the chunk scan against PNGs that carry too much besides their pixels, and the decoding marker across starts; compiled and run on the host by `make check` |
+| `tests/qml_test.js`, `tests/sources_test.py` | The logic the interface keeps in its QML files (the start-up's wait for the sound, the hand-overs of the screen, turning off, the options that need the launcher, the session's result in English), its own functions run under node against stand-ins, where node is installed; and what the sources and the units promise each other (the unit's memory ceiling, the board's sound file, the quiet retries of the sound device); both run by `make check` |
 | `fonts/` | Archivo and Michroma, compiled in, with their licences |
 | `sounds/` | The interface's sounds, compiled in: the menus' `move.wav`, `enter.wav`, `back.wav`, the console's events' (`launch.wav`, `game_return.wav`, `shape_exit.wav`, `eject.wav`, `shutdown.wav`, `success.wav`, `warning.wav`, `error.wav`, `controller_connect.wav`, `controller_disconnect.wav`) and the start-up's `startup.wav` |
 | `deploy/mun-shell.service` | systemd unit on tty1 as user `mun-shell` with the display (DRM) and evdev environment and the state directory |
-| `deploy/mun-shell.sudoers` | Allows exactly `mun-power poweroff|reboot` for that user |
+| `deploy/mun-shell.sudoers` | Allows exactly `mun-power poweroff`, `mun-power reboot` and `mun-reset request` for that user |
 | `deploy/mun-power` | Root-side helper with a fixed vocabulary in front of `systemctl` |
 | `deploy/packages`, `deploy/build-packages` | Debian packages at run time and for compiling; the image build mirrors them in `os/mkosi/mkosi.conf` |
 | `deploy/build.sh` | Compiles out of tree with a given build id; run by the image build |
@@ -64,8 +66,16 @@ draws the parts that depend on it accordingly (*How it is drawn*).
 | `deploy/mun-standby`, `deploy/mun-standby.service` | Show the standby picture on the kernel's framebuffer as soon as the image's root is mounted |
 
 Separation: the UI (QML) never touches the system; `SystemInfo` reads it;
-`PowerControl` asks a root helper through a sudoers rule that names one binary
-and two arguments. The service runs unprivileged with `ProtectSystem=strict`.
+`PowerControl` asks a root helper through a sudoers rule that names three
+exact commands: `mun-power` with `poweroff` or `reboot`, and `mun-reset
+request`, which only asks for a reset and refuses with a card in the slot or
+a game running ([mun-reset](../mun-reset/README.md)); the reset itself is
+never the shell's to run. The service runs unprivileged with
+`ProtectSystem=strict`, and its unit bounds its memory (`MemoryMax=2G`,
+`OOMPolicy=stop`): by itself the shell holds 150 to 250 MiB and what a Game
+Card may add is bounded, so only a fault reaches the ceiling, and it then
+ends the shell alone, which starts again (*Recovery*), instead of the
+kernel choosing a process among all of the console's.
 
 ## Identity
 
@@ -180,7 +190,11 @@ interface has loaded. Where the sound card comes up after the shell starts
 shell looks for the device every 0.25 s until then, and the start-up waits
 for one that plays well; `MUN_SHELL_SOUND_READY` may name a file the system
 writes once the device is ready (a board's route to HDMI), before which it
-is not opened. Once the device has come, the start-up waits for it to play
+is not opened within that wait; after it the device is opened whatever the
+file, so a route that is never set costs no more than a card that never
+comes. The `q6a-dev` profile sets both: 30 s, and
+`/run/mun-board-audio/route-set`, which the board's route script writes.
+Once the device has come, the start-up waits for it to play
 well up to 5 s from its first opening, then goes on without it; after the
 wait, without a device it does not wait, and for a device that is open but
 does not play well, up to 3 s. A device that opens and fails without
@@ -429,15 +443,21 @@ code (`src/shape.*`, `src/shapeworld.*`, `src/shapefront.h`):
     journal says why and Home draws the package's v1 world instead. The
     motion, its export and its insertion reach the scene together, and the
     export must be the insertion's own (`<insertion>.<attempt>`, as the card
-    service names it). Before its images are decoded, the marker
+    service names it). Each image is read as PNG and nothing else: its
+    chunks scanned before any reader opens it (`src/pngchunks.h`), then its
+    header, its sides within 2048, and only then its pixels, within what
+    the motion may still decode. Before its images are decoded, the marker
     `shape-decoding-motion` in the runtime directory is written naming the
     insertion; if it cannot be, nothing is decoded and the v1 world is
     drawn. If decoding takes the shell down, the next start skips that
-    insertion's motion and shows its v1 look; other insertions are not
-    affected. A clean stop (the launcher's, around every game) removes the
-    markers (`ExecStopPost` in `deploy/mun-shell.service`), so a motion that
-    was only being decoded is not skipped. MUN's panel sits on its plate
-    over the motion as over a world.
+    insertion's motion and shows its v1 look, and keeps the insertion in
+    `shape-skipped-motion` so that its later starts do too; other insertions
+    are not affected. A clean stop (the launcher's, around every game)
+    removes the markers (`ExecStopPost` in `deploy/mun-shell.service`), so a
+    motion that was only being decoded is not skipped, and leaves what is
+    kept, so one that ended the shell stays skipped after every game, until
+    the card is put in again or the console restarts. MUN's panel sits on
+    its plate over the motion as over a world.
     It is drawn by one of two ways
     (`MUN_SHELL_MOTION_BACKEND`, laboratory only): `cpu` composes each frame
     into one image at the look's resolution on a worker thread; `graph`
@@ -561,13 +581,31 @@ code (`src/shape.*`, `src/shapeworld.*`, `src/shapefront.h`):
     of a world's paint time; at 1440p the VM is at the watchdog's edge.
 - **Decoding**: the export's `shape.json` (bound to the insertion), the
   window image, the cover and the world's images are read and decoded off
-  the GUI thread, with the dimensions checked first (1024 × 1024 for the
+  the GUI thread. Before any image reader opens one of them its chunk
+  headers are scanned (`src/pngchunks.h`): the checker's bounds on what a
+  PNG carries besides its pixels, as stored (64 ancillary chunks and
+  256 KiB; of them 16 text chunks and 32 KiB; one colour profile), held
+  here again so that the shell does not lean on the card service alone. A
+  reader asked only for a size already keeps, and inflates, every text
+  chunk and the profile, outside Qt's allocation limit, which covers
+  pixels. Then the dimensions are checked (1024 × 1024 for the
   window and the cover, 2048 for the world's large images, 256 for a
-  sprite) and an allocation limit of 16 MiB. The shell reads only
+  sprite), and the pixels decoded under an allocation limit of 16 MiB. An
+  image over a bound is not shown, as one that does not decode, and the
+  journal says which. The shell reads only
   `/run/mun/shape/<insertion>.<attempt>/` for the insertion in the record.
   A marker in the runtime directory (`shape-decoding`) names the insertion
-  being decoded: if the shell ends meanwhile, its next start skips that
-  insertion's identity, so a decoder that crashes cannot do it in a loop.
+  whose images are being read, the world's headers and pixels included,
+  and they are read only once it is written: if it cannot be, no image of
+  that insertion is decoded and the journal says so. If the shell ends
+  meanwhile, its next start finds the marker and skips that
+  insertion's identity, so a decoder that crashes cannot do it in a loop,
+  and keeps the insertion in `shape-skipped`: a clean stop removes the
+  markers and not what is kept, so the insertion stays skipped over the
+  shell's later starts, the ones after each game included, until the card
+  is put in again (another insertion) or the console restarts (the runtime
+  directory outlives the shell's restarts and not a reboot). A shell that
+  ends for another reason while it reads leaves the same marker.
   Sounds are read in the mixer's format and within the contract's
   durations, the set whole or not at all.
 - **Settings** (Appearance and accessibility; Sound): *MUN Shape* Full (default), Colours only
@@ -808,7 +846,8 @@ changed something. The console's own events have theirs: `game_return`
 when a game's result is first shown, `shape_exit` as Shape leaves, `eject`
 when a safe release is done and `warning` when it is refused, `shutdown`
 as the console turns off (it goes down once the sound has played, 3.5 s,
-the screen dark), `error` when launching, turning off or saving a choice
+the screen dark; at once when no sound device is open to play it, as with
+System sounds off), `error` when launching, turning off or saving a choice
 fails, and `controller_connect` and `controller_disconnect` when a
 controller comes or goes while the shell runs. A card arriving is greeted
 by the game's own cue (*MUN Shape*), not by these. All of them follow
@@ -846,8 +885,11 @@ before the start-up (*Motion*). Otherwise it
 is let go after three seconds of silence; the shell holds none of it while
 a game runs (the launcher stops the shell first). A device that
 fails is opened afresh at once; no device, or one that fails again, means
-silence and one line in the journal, and the next sound tries again after
-five seconds. Settings › Sound › System
+silence and one line in the journal, after ALSA's own lines about that
+failure. It is tried again after five seconds, by the next sound or, while
+the menus are shown with their sounds on, by itself, and those tries say
+nothing, ALSA's lines included, until a device plays: a console without a
+sound card does not write to its journal every five seconds. Settings › Sound › System
 sounds turns them off. In the laboratory the guest's sound device
 is silent unless it plays to the Mac (`--window`, or `--audio coreaudio`)
 or records to `audio.wav` (`--audio wav`).
@@ -867,7 +909,7 @@ results) and shows the service's own words only when it has nothing better.
 | Reader unavailable | "Reader unavailable" | "No reader"; the panel says the console cannot reach its card reader and reconnects on its own. Shown while the socket is down, never confused with "no card" |
 | Absent | "Slot empty" | "Empty"; "Insert a Game Card…" |
 | Reading | "Reading the card…" | "Reading…"; the rest of the UI stays usable |
-| Valid | The title, the slot's light in the LED's white | The title; the crescent fills; options *Play* (a game with an entry and a reachable, idle launcher) and *Eject safely* |
+| Valid | The title, the slot's light in the LED's white | The title; the crescent fills; options *Play* (a game with an entry and a reachable, idle launcher) and *Eject safely*. While the launcher does not answer both say "Unavailable", with a note: the console cannot do it right now and, if that does not pass by itself, to turn the console off and on again to play, or off before taking the card out |
 | Invalid | "Card not valid" | "Not valid"; the panel gives the reason; *Details* opens the code, the service's detail and what to do |
 | Released | "Remove the card" | "Remove it"; "You can remove the Game Card" |
 | Another card waiting | — | The panel adds that another Game Card is waiting: it will be read when the current one is removed |
@@ -892,7 +934,11 @@ through the start-up (it plays once per boot), with the session's result in
 a dialog (A or B acknowledges it): "Session ended", "The game closed
 unexpectedly", "The Game Card was removed", "The card reader was lost", "The
 Game Card has no valid program", "The game could not start", "The session
-was interrupted", with what happened to the progress. The result may arrive
+was interrupted", with what happened to the progress ("Progress saved on the
+Game Card.", "Progress after HH:MM was not saved on the Game Card." when the
+card left with changes it does not hold, "The latest progress was not saved
+on the Game Card."; in Spanish the launcher's own words,
+[docs/saves.md](../../docs/saves.md#what-the-player-is-told)). The result may arrive
 a moment after the shell starts (the launcher records it on its next poll);
 the dialog then opens over whatever is shown. A refused launch is said
 under the panel's options. Wording is the console's; nothing in these
@@ -973,13 +1019,17 @@ Under a desktop session (X11/Wayland) the same binary runs in a window: unset
   Status 69 (no usable display) and 70 (the interface did not load) are
   failures, restarted after 5 seconds without a limit; `./mun vm shell-log`
   shows the shell's own account of each.
+- A shell that reaches its memory ceiling (`MemoryMax=2G`) is killed alone,
+  with the result `oom-kill`, and started again like any failure. The
+  decoding markers stay, so if a card's image was being read, that
+  insertion is skipped from then on (*A Game Card's identity*).
 - A resolution that leaves the screen dark goes back by itself after 15
   seconds, and a restart or power cut before it is kept does the same. The
   choice is `display/resolution` in the settings file; removing the line
   returns to Automatic.
 - qemu-ga keeps answering regardless of the shell: `./mun vm run -- …`.
 - If the launcher dies mid-session, systemd starts the shell when the game unit
-  stops (`ExecStopPost`), and the launcher's restart adopts a running game; see
+  stops (the session's cleanup unit), and the launcher's restart adopts a running game; see
   `services/mun-launchd/README.md`.
 - `sudo systemctl stop mun-shell && sudo systemctl start getty@tty1` returns
   a text login on the console display.

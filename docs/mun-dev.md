@@ -61,7 +61,13 @@ accepts keys only.
 
 - **Kernel and boot.** Radxa's kernel and device tree, started through
   Type 1 boot entries; a hidden menu with entries that print the boot on
-  HDMI, for diagnosis (a key held at power-on shows it).
+  HDMI, for diagnosis (a key held at power-on shows it). Its "MUN OS
+  diagnostic" entry starts the board without the interface and opens a root
+  shell on tty1, HDMI and a USB keyboard, with no password
+  (`systemd.debug_shell=tty1`,
+  [`mkosi.postoutput`](../os/mkosi/mkosi.profiles/q6a-dev/mkosi.postoutput)).
+  Anyone who can hold a key at power-on has root: the entry is there for a
+  development board and must not be carried into a console image.
 - **Display.** The shell draws through the GPU (Qt's eglfs on KMS, Mesa's
   freedreno) at 1920x1080 and 60 Hz whatever the display prefers, and the
   kernel starts in that mode too. The link is capped at 8 bits per channel
@@ -77,7 +83,13 @@ accepts keys only.
 - **Sound.** On HDMI, through the board's audio DSP. The sound card comes
   up about 10 s into the boot (the vendor's kernel waits 5 s for an answer
   from the DSP), so the shell loads meanwhile and its start-up waits for the
-  sound. A DSP whose services do not reach Linux has its link reset once.
+  sound, up to 30 s (`MUN_SHELL_SOUND_WAIT`). The sound card appears a moment
+  before its route to HDMI is set, and a device opened in between plays to
+  nothing and fails: within that wait the shell opens the device only once
+  the file the board's route script writes exists
+  (`MUN_SHELL_SOUND_READY=/run/mun-board-audio/route-set`, set by the
+  profile's drop-in for the shell's unit). A DSP whose services do not
+  reach Linux has its link reset once.
   No saved mixer state is restored: on this board that restore turned the
   route to HDMI off.
 - **Game Cards.** A card image written whole to a microSD card is a Game

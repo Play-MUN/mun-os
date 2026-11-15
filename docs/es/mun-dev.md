@@ -64,7 +64,12 @@ dirección por DHCP, y SSH solo acepta claves.
 - **Kernel y arranque.** El kernel y el árbol de dispositivos de Radxa,
   arrancados con entradas de arranque de tipo 1; un menú oculto con entradas
   que muestran el arranque por HDMI, para diagnóstico (lo muestra una tecla
-  mantenida al encender).
+  mantenida al encender). Su entrada «MUN OS diagnostic» arranca la placa
+  sin la interfaz y abre una línea de órdenes de root en tty1, por HDMI y
+  con un teclado USB, sin contraseña (`systemd.debug_shell=tty1`,
+  [`mkosi.postoutput`](../../os/mkosi/mkosi.profiles/q6a-dev/mkosi.postoutput)).
+  Quien pueda mantener una tecla al encender tiene root: la entrada existe
+  para una placa de desarrollo y no debe llevarse a una imagen de consola.
 - **Pantalla.** El shell dibuja con la GPU (eglfs de Qt sobre KMS, freedreno
   de Mesa) a 1920x1080 y 60 Hz prefiera lo que prefiera la pantalla, y el
   kernel arranca también en ese modo. El enlace se limita a 8 bits por canal
@@ -80,8 +85,14 @@ dirección por DHCP, y SSH solo acepta claves.
 - **Sonido.** Por HDMI, a través del DSP de audio de la placa. La tarjeta
   de sonido aparece unos 10 s después de arrancar (el kernel del fabricante
   espera 5 s una respuesta del DSP), así que el shell carga mientras tanto
-  y su arranque espera al sonido. A un DSP cuyos servicios no llegan a
-  Linux se le reinicia el enlace una vez. No se restaura ningún estado
+  y su arranque espera al sonido, hasta 30 s (`MUN_SHELL_SOUND_WAIT`). La
+  tarjeta de sonido aparece un momento antes de que se ponga su ruta a HDMI, y un
+  dispositivo abierto entre medias suena hacia nada y falla: dentro de esa
+  espera el shell solo abre el dispositivo cuando existe el archivo que
+  escribe el script de la ruta de la placa
+  (`MUN_SHELL_SOUND_READY=/run/mun-board-audio/route-set`, puesto por el
+  añadido del perfil a la unidad del shell). A un DSP cuyos servicios no
+  llegan a Linux se le reinicia el enlace una vez. No se restaura ningún estado
   guardado del mezclador: en esta placa esa restauración apagaba la ruta a
   HDMI.
 - **Game Cards.** Una imagen de tarjeta escrita entera en una tarjeta

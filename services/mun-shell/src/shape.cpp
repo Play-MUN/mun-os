@@ -1,6 +1,7 @@
 #include "shape.h"
 
 #include "contrast.h"
+#include "decodingmarker.h"
 #include "pngchunks.h"
 #include "readpalette.h"
 #include "shapefront.h"
@@ -157,9 +158,17 @@ void ShapeLoader::load(quint64 token, const QVariantMap &request)
     const bool full = request.value("mode").toString() == QLatin1String("full");
 
     // The crash guard: if decoding below takes the shell down, the next start
-    // finds this and skips the insertion (Shape::Shape).
+    // finds this and skips the insertion (Shape::Shape). It guards only if it
+    // is there: when it cannot be written, no image is decoded, and the card
+    // object and the read level are as with images that do not decode.
+    // (Without a runtime directory there is no marker to write.)
     const QString marker = runtimeFile("shape-decoding");
-    writeMarker(marker, insertion);
+    std::string unwritten;
+    const bool guarded = marker.isEmpty() || decodingmarker::write(QFile::encodeName(marker).toStdString(),
+                                                                   insertion.toStdString(), &unwritten);
+    if (!guarded)
+        qWarning("mun-shell: shape: the decoding marker could not be written (%s); no image of insertion %s is decoded",
+                 unwritten.c_str(), qPrintable(insertion));
 
     QVariantMap document;
     if (!path.isEmpty()) {
@@ -190,9 +199,9 @@ void ShapeLoader::load(quint64 token, const QVariantMap &request)
     bool windowFailed = false;
     if (full && !windowPath.isEmpty()) {
         QFile file(path + QLatin1Char('/') + windowPath);
-        if (kPackagePath.match(windowPath).hasMatch() && file.open(QIODevice::ReadOnly))
+        if (guarded && kPackagePath.match(windowPath).hasMatch() && file.open(QIODevice::ReadOnly))
             window = decode(&file, windowPath);
-        else
+        else if (guarded)
             qWarning("mun-shell: shape: %s could not be read; not shown", qPrintable(windowPath));
         windowFailed = window.isNull();
     }
@@ -202,7 +211,7 @@ void ShapeLoader::load(quint64 token, const QVariantMap &request)
     const bool readLevel = !document.contains("palette");
     QImage cover;
     const QByteArray coverBytes = QByteArray::fromBase64(request.value("cover").toString().toLatin1());
-    if (!coverBytes.isEmpty() && coverBytes.size() <= kCoverMaxBytes && (coverAsWindow || readLevel)) {
+    if (guarded && !coverBytes.isEmpty() && coverBytes.size() <= kCoverMaxBytes && (coverAsWindow || readLevel)) {
         QBuffer buffer;
         buffer.setData(coverBytes);
         buffer.open(QIODevice::ReadOnly);

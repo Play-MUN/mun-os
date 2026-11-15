@@ -57,6 +57,23 @@ class DecodingGuardTests(unittest.TestCase):
         stop = re.search(r"(?m)^ExecStopPost=(.+)$", unit).group(1)
         self.assertIn('"$$XDG_RUNTIME_DIR/shape-decoding"', stop)
 
+    def test_the_window_and_the_cover_are_decoded_only_under_a_written_marker(self):
+        # Writing the marker can fail (a full or damaged runtime directory):
+        # then a crash while decoding would leave no trace, so the loader
+        # must know the marker is there before it decodes, and decode
+        # nothing when it is not.
+        loader = function(self.source("shape.cpp"), "void ShapeLoader::load(")
+        self.assertTrue("decodingmarker::write(" in loader, "the marker's write is not checked")
+        self.assertNotIn("writeMarker(marker", loader)
+        written = loader.index("decodingmarker::write(")
+        decodes = [match.start() for match in re.finditer(r"= decode\(&", loader)]
+        self.assertEqual(len(decodes), 2, "the card window and the cover")
+        for at in decodes:
+            self.assertLess(written, at)
+            condition = loader[loader.rindex("if (", 0, at):at]
+            self.assertIn("guarded", condition, condition)
+        self.assertLess(max(decodes), loader.index("QFile::remove(marker)"))
+
     def test_the_marker_is_built_and_run_with_the_host_checks(self):
         recipe = (SHELL / "tests" / "Makefile").read_text(encoding="utf-8")
         self.assertIn("\t./decodingmarker_test\n", recipe)

@@ -35,9 +35,11 @@ stages a game's entry and writes saves. Card format:
 - Removal: unmount (lazy if busy), `removed` event, promotion of a waiting card.
 - An unmount that cannot even start (no process to be had: the service's
   task limit, memory) leaves the mount as it is and recorded: the card is
-  still published as refused or removed, its unmount is tried again every
-  5 seconds, and a safe release meanwhile is answered `unmount_failed`,
-  never `released`.
+  still published as refused or removed, the service's loop tries its
+  unmount again every 5 seconds (no thread is needed for that, nor for any
+  timer whose thread cannot start), and a safe release meanwhile is
+  answered `unmount_failed`, never `released`, whether the card is still
+  in or already gone.
 - For a valid card, its MUN Shape package is copied to RAM for the shell
   ([MUN Shape export](#mun-shape-export)).
 

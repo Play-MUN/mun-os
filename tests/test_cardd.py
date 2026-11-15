@@ -1274,11 +1274,11 @@ class ReaderSlotTests(unittest.TestCase):
 
 class UnmountWithoutProcessesTests(unittest.TestCase):
     """A card refused, or gone, whose unmount cannot even start: no process
-    to be had, as when the card service has reached its task limit. The
-    shell still hears the refusal; the mount is kept as it really is, never
-    forgotten while it stands; a safe release meanwhile is refused, not
-    reported as done; and once processes can start again the unmount it
-    owes goes through at its next try."""
+    and no thread to be had, as when the card service has reached its task
+    limit. The shell still hears the refusal or the removal; the mount is
+    kept as it really is, never forgotten while it stands; a safe release
+    meanwhile is refused, not reported as done; and once processes can
+    start again the service's loop gets the unmount it owes through."""
 
     TARGET = "/run/mun/cards/c1"
 
@@ -1286,8 +1286,13 @@ class UnmountWithoutProcessesTests(unittest.TestCase):
         self.mounted = set()
         self.processes = True
         self.failures = []
-        self.laters = []
         mounted = self.mounted
+        real_start = threading.Thread.start
+
+        def start(thread):
+            if not self.processes:
+                raise RuntimeError("can't start new thread")
+            return real_start(thread)
 
         class Mounter(cardd.Mounter):
             def mount(self, card, path):
@@ -1309,11 +1314,11 @@ class UnmountWithoutProcessesTests(unittest.TestCase):
             raise CardError("image_has_errors", "El sistema de archivos está marcado con errores")
 
         for p in (patch.object(cardd.subprocess, "Popen", popen_from(run)),
+                  patch.object(cardd.threading.Thread, "start", start),
                   patch.object(Path, "rmdir", lambda self: None)):
             p.start()
             self.addCleanup(p.stop)
         self.h = Harness(mounter=Mounter(Path("/run/mun/cards")), validator=refuse)
-        self.h.manager.later = lambda seconds, fn: self.laters.append(fn)
 
     def pump(self):
         # As the service runs its callbacks: one that fails is logged and the
@@ -1328,10 +1333,14 @@ class UnmountWithoutProcessesTests(unittest.TestCase):
             except Exception as exc:  # noqa: BLE001
                 self.failures.append(exc)
 
-    def retry(self):
-        laters, self.laters = self.laters, []
-        for fn in laters:
-            fn()
+    def wake(self):
+        # What the service's loop does on a wake once a retry is due: the
+        # timers that had no thread of their own, then the owed unmounts
+        # (main()); then what they scheduled.
+        for step in ("run_due", "retry_unmounts"):
+            if hasattr(self.h.manager, step):
+                getattr(self.h.manager, step)(now=float("inf"))
+        self.pump()
 
     def states(self):
         return [event["card"]["state"] for event in self.h.events if event.get("type") == "card"]
@@ -1349,16 +1358,16 @@ class UnmountWithoutProcessesTests(unittest.TestCase):
         self.h.manager.release({"type": "release", "serial": "NPT-bad"}, replies.append)
         self.assertFalse(replies[-1]["ok"], "not safe to remove while it is mounted")
         self.assertNotIn("released", self.states())
-        self.retry()                            # still no process: still owed
+        self.wake()                             # still no process: still owed
         self.assertEqual(card.mount, self.TARGET)
         self.processes = True
-        self.retry()
+        self.wake()
         self.assertIsNone(card.mount)
         self.assertNotIn(self.TARGET, self.mounted)
         self.h.manager.release({"type": "release", "serial": "NPT-bad"}, replies.append)
         self.assertTrue(replies[-1]["ok"], replies[-1])
         self.assertEqual(self.states()[-1], "released")
-        self.assertEqual(self.laters, [], "nothing is tried again once it is unmounted")
+        self.assertEqual(self.h.manager.unmounts_owed, {}, "nothing is tried again once it is unmounted")
 
     def test_a_card_gone_while_its_unmount_cannot_start_is_unmounted_later(self):
         self.h.manager.device_added("vdc", "NPT-bad", "/dev/vdc")
@@ -1374,10 +1383,34 @@ class UnmountWithoutProcessesTests(unittest.TestCase):
         self.assertIn("removed", [event.get("type") for event in self.h.events], "the shell must hear the removal")
         self.assertIn(self.TARGET, self.mounted, "the mount stands")
         self.assertIn("c1", self.h.manager.unmounts_owed)
+        replies = []
+        self.h.manager.release({"type": "release", "serial": "NPT-bad"}, replies.append)
+        self.assertFalse(replies[-1]["ok"], "gone but still mounted: not a safe removal either")
         self.processes = True
-        self.retry()
+        self.wake()
         self.assertNotIn(self.TARGET, self.mounted)
         self.assertEqual(self.h.manager.unmounts_owed, {})
+
+    def test_a_timer_without_a_thread_runs_from_the_loop(self):
+        ran = []
+        self.processes = False
+        try:                                    # as main's guard runs a callback
+            self.h.manager.later(5.0, lambda: ran.append(True))
+        except Exception as exc:  # noqa: BLE001
+            self.failures.append(exc)
+        self.assertEqual(ran, [], "not before it is due")
+        self.processes = True
+        self.wake()
+        self.assertEqual(ran, [True], "a timer that had no thread still runs")
+
+    def test_an_export_removed_without_a_thread_is_removed_at_once(self):
+        import tempfile
+        export = Path(tempfile.mkdtemp()) / "insertion.1"
+        (export / "world").mkdir(parents=True)
+        (export / "world" / "a.png").write_bytes(b"x")
+        self.processes = False
+        cardd._remove_in_background(export)
+        self.assertFalse(export.exists())
 
 
 class SaveThreadStartTests(unittest.TestCase):

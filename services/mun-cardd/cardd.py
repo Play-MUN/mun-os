@@ -187,8 +187,13 @@ class CardManager:
         self.schedule = schedule      # runs a callable on the manager thread later
         self.cards: Dict[str, Card] = {}   # keyed by device name
         # Cards refused or gone whose unmount could not even start, by slot
-        # (_unmount_or_owe); a gone card is kept here alone.
+        # (_unmount_or_owe); a gone card is kept here alone. They are tried
+        # again by the service's loop (retry_unmounts), which needs no
+        # thread: what stopped the unmount stops new threads too.
         self.unmounts_owed: Dict[str, Card] = {}
+        self._next_unmount_try = 0.0
+        # Timers that could not start a thread (_timer), for the loop.
+        self._due: List["tuple[float, Callable[[], None]]"] = []
         self._slot_counter = 0
         # MUN Shape export, off unless a root is given (main() gives SHAPE_ROOT).
         # `later(seconds, fn)` runs fn on the manager thread after a delay;
@@ -203,7 +208,22 @@ class CardManager:
     def _timer(self, seconds: float, fn: Callable[[], None]) -> None:
         timer = threading.Timer(seconds, lambda: self.schedule(fn))
         timer.daemon = True
-        timer.start()
+        try:
+            timer.start()
+        except RuntimeError as exc:
+            # No thread to be had (the service's task limit): the service's
+            # loop, which wakes at least twice a second, runs it when due.
+            log(f"a timer could not start its thread ({exc}); the service's loop runs it when due")
+            self._due.append((time.monotonic() + seconds, fn))
+
+    def run_due(self, now: Optional[float] = None) -> None:
+        """Run the timers that could not have a thread of their own and are due
+        (_timer); called by the service's loop on every wake."""
+        now = time.monotonic() if now is None else now
+        due = [entry for entry in self._due if entry[0] <= now]
+        self._due = [entry for entry in self._due if entry[0] > now]
+        for _, fn in due:
+            fn()
 
     # --- events from the platform ---------------------------------------------
     def device_added(self, device: str, serial: str, path: str) -> None:
@@ -228,7 +248,6 @@ class CardManager:
         if card is None:
             return
         card.generation += 1
-        self._drop_shape(card)
         if card.release_reply is not None:
             # A safe release that was waiting (for a save or the Shape copy):
             # the card went before it could finish, so this was not a safe
@@ -237,8 +256,10 @@ class CardManager:
             card.release_timer += 1
             reply({"type": "released", "ok": False, "slot": card.slot, "serial": card.serial,
                    "error": {"code": "card_removed", "message": "Se retiró la tarjeta antes de terminar la expulsión segura"}})
-        self._unmount_or_owe(card)
+        # Said before the cleanup, which may lack a process or a thread.
         self.publish({"type": "removed", "slot": card.slot, "insertion": card.insertion, "device": device, "serial": card.serial})
+        self._drop_shape(card)
+        self._unmount_or_owe(card)
         if card.active:
             self._promote_waiting()
 
@@ -478,6 +499,11 @@ class CardManager:
         card is unmounted strictly and published as released."""
         card = next((c for c in self.cards.values() if c.serial == request.get("serial")), None)
         if card is None:
+            gone = next((c for c in self.unmounts_owed.values() if c.serial == request.get("serial")), None)
+            if gone is not None:
+                return reply({"type": "released", "ok": False, "slot": gone.slot, "serial": gone.serial,
+                              "error": {"code": "unmount_failed", "message": "No se pudo desmontar la tarjeta de forma segura",
+                                        "detail": "la tarjeta ya no está y su desmontaje sigue pendiente"}})
             return reply({"type": "released", "ok": True, "detail": "no such card"})
         card.releasing = True
         card.release_reply = reply
@@ -618,28 +644,31 @@ class CardManager:
     def _unmount_or_owe(self, card: Card) -> None:
         """Unmount a card nobody may use: refused, or gone. If not even a
         command can be started, the mount is still there and card.mount
-        still names it: the unmount is owed, tried again every
-        READ_ONLY_RETRY seconds whether the card is still in or not, and a
-        safe release meanwhile is refused, not reported as done."""
+        still names it: the unmount is owed and the service's loop tries it
+        again every READ_ONLY_RETRY seconds (retry_unmounts), whether the
+        card is still in or not. A safe release meanwhile is refused, not
+        reported as done."""
         if self.mounter.unmount(card) is not False:
             self.unmounts_owed.pop(card.slot, None)
             return
         if card.slot not in self.unmounts_owed:
+            if not self.unmounts_owed:
+                self._next_unmount_try = time.monotonic() + READ_ONLY_RETRY
             self.unmounts_owed[card.slot] = card
             log(f"{card.slot} ({card.serial}) is still mounted; its unmount is tried again every {READ_ONLY_RETRY:g} s")
-        self.later(READ_ONLY_RETRY, lambda: self._unmount_due(card))
 
-    def _unmount_due(self, card: Card) -> None:
-        if self.unmounts_owed.get(card.slot) is not card:
+    def retry_unmounts(self, now: Optional[float] = None) -> None:
+        """The owed unmounts, again, once every READ_ONLY_RETRY seconds;
+        called by the service's loop on every wake."""
+        now = time.monotonic() if now is None else now
+        if not self.unmounts_owed or now < self._next_unmount_try:
             return
-        if not card.mount:                       # a safe release unmounted it meanwhile
-            self.unmounts_owed.pop(card.slot, None)
-            return
-        if self.mounter.unmount(card) is False:
-            self.later(READ_ONLY_RETRY, lambda: self._unmount_due(card))
-            return
-        self.unmounts_owed.pop(card.slot, None)
-        log(f"{card.slot} ({card.serial}) unmounted at last")
+        self._next_unmount_try = now + READ_ONLY_RETRY
+        for slot, card in list(self.unmounts_owed.items()):
+            if card.mount and self.mounter.unmount(card) is False:
+                continue
+            self.unmounts_owed.pop(slot, None)
+            log(f"{card.slot} ({card.serial}) unmounted at last")
 
     def _promote_waiting(self) -> None:
         for card in self.cards.values():
@@ -1417,7 +1446,10 @@ def _remove_tree(path: Path) -> None:
 
 
 def _remove_in_background(path: Path) -> None:
-    threading.Thread(target=_remove_tree, args=(path,), name="shape-remove", daemon=True).start()
+    try:
+        threading.Thread(target=_remove_tree, args=(path,), name="shape-remove", daemon=True).start()
+    except RuntimeError:
+        _remove_tree(path)      # no thread to be had: the export is in RAM, removed here
 
 
 def clear_shape_root(root: Path) -> None:
@@ -2099,6 +2131,10 @@ def main(argv=None) -> int:
             last_rescan = time.monotonic()
         if manager.mounter.__dict__.get("stalled"):
             guarded("ending stalled mount commands", manager.mounter.reap)
+        if manager._due:
+            guarded("timers due", manager.run_due)
+        if manager.unmounts_owed:
+            guarded("owed unmounts", manager.retry_unmounts)
 
     manager.stop_shape()
     for card in [*manager.cards.values(), *manager.unmounts_owed.values()]:

@@ -28,6 +28,16 @@ import mundev  # noqa: E402
 BUILD_ID = "20260929T123647Z-aee686f3d1fd"
 IMAGE = "mun-os-0.1.0-dev-qemu-arm64.qcow2"
 COMMIT = "a" * 40
+
+
+def qcow2(backing=b"", features=0, version=3, magic=b"QFI\xfb"):
+    """The start of a qcow2 image: its header (version 3 has 104 bytes),
+    then the name of its backing file when it has one."""
+    header = magic + version.to_bytes(4, "big") + (104 if backing else 0).to_bytes(8, "big") \
+        + len(backing).to_bytes(4, "big") + bytes(52) + features.to_bytes(8, "big") + bytes(24)
+    return header + backing
+
+
 GAME = b"\x7fELF the build's own MUN Collect"
 
 
@@ -41,7 +51,7 @@ class Fixture(unittest.TestCase):
     def report(self, text):
         self.messages.append(text)
 
-    def build(self, image_bytes=b"qcow2-image" * 1000) -> Path:
+    def build(self, image_bytes=qcow2() + b"qcow2-image" * 1000) -> Path:
         build = self.root / "builds" / "b1"
         build.mkdir(parents=True)
         (build / IMAGE).write_bytes(image_bytes)
@@ -300,6 +310,43 @@ class GetTests(Fixture):
             build, installed = self.get(source)
         self.assertEqual([card.name for card in installed], ["demo.img"])
         self.assertTrue((build / IMAGE).is_file())
+
+    def with_image(self, data):
+        """A bundle whose image is `data`, its record and manifest agreeing:
+        only what the image is differs from an ordinary bundle."""
+        shutil.rmtree(self.root)
+        self.root.mkdir()
+        source = self.bundle()
+        self.replace_file(source, IMAGE, data)
+        info = json.loads((source / "BUILD-INFO.json").read_text())
+        info["artifacts"][IMAGE]["sha256"] = hashlib.sha256(data).hexdigest()
+        self.replace_file(source, "BUILD-INFO.json", json.dumps(info).encode())
+        return source
+
+    def test_an_image_that_reads_another_file_of_the_host_is_refused(self):
+        # A qcow2 header can name a backing file, or a file its data is kept
+        # in: QEMU would open that path on the host for the guest to read.
+        clusters = b"clusters" * 1000
+        cases = {
+            "a backing file": (qcow2(backing=b"/etc/passwd") + clusters, "backing file"),
+            "a backing file, version 2": (qcow2(backing=b"/etc/passwd", version=2) + clusters, "backing file"),
+            "an external data file": (qcow2(features=1 << 2) + clusters, "another file"),
+            "not a qcow2 image": (qcow2(magic=b"RAW!") + clusters, "not a qcow2"),
+            "a version that is not one": (qcow2(version=9) + clusters, "not a qcow2"),
+            "shorter than a header": (b"QFI\xfb\0\0\0\3" + bytes(40), "not a qcow2"),
+        }
+        for what, (data, said) in cases.items():
+            with self.subTest(what):
+                source = self.with_image(data)
+                with self.assertRaises(bundle.BundleError) as refused:
+                    self.get(source)
+                self.assertIn(said, str(refused.exception))
+                self.assertFalse((self.root / "installed" / "d0929-123647").exists())
+                self.assertFalse((self.root / "cards").exists(), "no card is unpacked for a refused image")
+        for version in (2, 3):
+            build, cards = self.get(self.with_image(qcow2(version=version) + clusters))
+            self.assertTrue((build / IMAGE).is_file(), "an image that is all in its own file is installed")
+            self.assertEqual(len(cards), 2)
 
     def test_a_name_in_use_by_another_image_is_refused(self):
         source = self.bundle()

@@ -370,6 +370,28 @@ def install_card(packed: Path, entry: Dict[str, Any], cards_root: Path) -> Optio
             temporary.unlink()
 
 
+def check_image(path: Path) -> None:
+    """Refuse a downloaded image that is not a qcow2 image holding all of
+    itself. A qcow2 header may name a backing file, or (version 3,
+    incompatible feature bit 2) keep its data in an external file: QEMU
+    opens the path it names on the host, so a guest made from such an image
+    would read a file of the user's. Images built here have neither. Read
+    from the header itself (QEMU's docs/interop/qcow2.txt): big-endian magic,
+    version, backing file offset (8 bytes) and size (4), and at byte 72 the
+    incompatible features of version 3."""
+    with path.open("rb") as handle:
+        header = handle.read(80)
+    version = int.from_bytes(header[4:8], "big")
+    if header[:4] != b"QFI\xfb" or version not in (2, 3) or len(header) < (72 if version == 2 else 80):
+        raise BundleError(f"{path.name} is not a qcow2 image")
+    if int.from_bytes(header[8:16], "big") or int.from_bytes(header[16:20], "big"):
+        raise BundleError(f"{path.name} names a backing file: an image is installed only when it holds all of "
+                          "itself")
+    if version == 3 and int.from_bytes(header[72:80], "big") & (1 << 2):
+        raise BundleError(f"{path.name} keeps its data in another file: an image is installed only when it holds "
+                          "all of itself")
+
+
 def check_space(manifest: Dict[str, Any], staging: Path, cards_root: Path) -> None:
     """Refuse, before anything is fetched, a bundle that does not fit: what
     is still to download into `staging` and the cards still to unpack into
@@ -451,6 +473,7 @@ def get(location: str, builds_root: Path, cards_root: Path, name: Optional[str] 
     if not isinstance(recorded, dict) or info.get("build_id") != manifest["build_id"] \
             or recorded.get("sha256") != image["sha256"]:
         raise BundleError("the image and its BUILD-INFO.json do not belong together")
+    check_image(staging / image["name"])
     cards = []
     for entry in manifest["files"]:
         if entry["kind"] == "card":

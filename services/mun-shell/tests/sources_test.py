@@ -82,6 +82,25 @@ class SettingsTests(unittest.TestCase):
         self.assertIn("std::unique_ptr<QSettings> m_file;", source("src/shellsettings.h"))
 
 
+class DisplayLinkTests(unittest.TestCase):
+    def test_the_early_cap_says_when_it_found_nothing_to_set(self):
+        # `mun-shell --cap-display` sets a board's cap on the display link
+        # before anything is shown and says, per output, whether it set it
+        # or found it set. Where no connected output takes a cap it must say
+        # that too: a journal without any line cannot tell it from "set".
+        cap = source("src/displaymode.cpp").split("\nint capLink()\n{", 1)[1].split("\n}\n", 1)[0]
+        outputs = cap.split("for (int i = 0; i < resources->count_connectors; ++i) {", 1)
+        self.assertEqual(len(outputs), 2)
+        self.assertRegex(outputs[0], r"bool capped = false;")
+        self.assertRegex(outputs[1], r"if \(bpc\) \{\s+capped = true;")
+        after = outputs[1].split("drmModeFreeResources(resources);", 1)[1]
+        self.assertRegex(after, r'if \(!capped\)\s+qInfo\("mun-shell: display: no connected output takes a cap on bits per channel')
+        # Every other way out says why as well.
+        for way_out in re.finditer(r"\{([^{}]*)return 0;\s+\}", cap):
+            self.assertRegex(way_out.group(1), r"q(Info|Warning)\(", way_out.group(0))
+        self.assertEqual(len(re.findall(r"\{[^{}]*return 0;\s+\}", cap)), 4)
+
+
 class CommentTests(unittest.TestCase):
     def test_comments_speak_to_any_reader(self):
         # A comment explains the code to whoever reads it; who asked for a

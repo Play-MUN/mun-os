@@ -10,6 +10,7 @@ import contextlib
 import io
 import json
 import random
+import re
 import shutil
 import struct
 import sys
@@ -484,6 +485,22 @@ class MotionTests(unittest.TestCase):
         self.assertIn("> kMotionMaxSide", checked)
         self.assertIn("> kMotionDecodedMaxBytes", checked)
         self.assertEqual(checked.count("break;"), 2, "a header over either limit ends the load before decoding")
+
+    def test_the_shell_keeps_a_formations_depth_within_the_scene(self):
+        # An actor kept away from another is pushed in depth too, by any
+        # amount. Perspective, 1 / (1 + z (1/far - 1)), has a pole in front
+        # of the scene (z = -far / (1 - far)): a depth past it turns the
+        # scale of the actor's formation negative, its figures thrown
+        # across the screen. Each figure's own depth is kept within 0 and
+        # 1; so is the depth its formation is spread by.
+        far = 0.25
+        self.assertLess(1 / (1 + -0.5 * (1 / far - 1)), 0, "past the pole the scale is negative")
+        source = (ROOT / "services" / "mun-shell" / "src" / "motionscene.cpp").read_text(encoding="utf-8")
+        collect = source[source.index("void MotionScene::collect("):source.index("void MotionScene::onFrame(")]
+        self.assertNotIn("depthScale(zc)", collect)
+        self.assertIn("const qreal spread = depthScale(std::clamp<qreal>(zc, 0, 1)) / own;", collect)
+        for call in re.findall(r"depthScale\(([^()]*(?:\([^()]*\)[^()]*)*)\)", collect):
+            self.assertRegex(call, r"^(actor\.z|zm|std::clamp<qreal>\(.*, 0, 1\))$", call)
 
     def test_unknown_keys_drop_the_motion(self):
         note = self.dropped(self.read(self.edited(actors__hero__speed=3)))

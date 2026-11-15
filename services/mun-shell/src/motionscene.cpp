@@ -1705,7 +1705,9 @@ void MotionScene::collect(qreal t, qreal alpha)
         const qreal zc = actor.prevZ + (actor.zNow - actor.prevZ) * alpha
                          + (actor.prevShift.z() + (actor.shift.z() - actor.prevShift.z()) * alpha);
         const qreal own = depthScale(actor.z);
-        const qreal spread = depthScale(zc) / own;
+        // Within the scene's depth, as each figure's own (zm): pushed in front
+        // of it by what the actor avoids, zc would cross perspective's pole.
+        const qreal spread = depthScale(std::clamp<qreal>(zc, 0, 1)) / own;
         for (int i = 0; i < actor.copies; ++i) {
             // the clip on show, or this copy's own in turn (still things of many looks)
             const Clip clip = !actor.copyClips.isEmpty() && !actor.turning

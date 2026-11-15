@@ -18,6 +18,10 @@ All files sit side by side, as a release's assets do.
 
 The manifest (`format` mun-bundle/1) names the image's version, environment,
 release flag and build id, and lists every file with its size and SHA-256.
+Its `source` is the build's (commit, describe, clean) and `one_commit`: true
+only when the cards and texts, which come from the checkout that made the
+bundle, were taken from that same commit with nothing changed. A bundle that
+is not of one commit is a local test, and a release image is never one.
 File names are relative to the manifest, so a bundle can be served from any
 directory or web location. Everything read from a bundle is untrusted until
 checked: the manifest's fields and names are validated, each file is
@@ -68,11 +72,19 @@ def sha256_file(path: Path) -> str:
 # ------------------------------------------------------------------- making
 
 def make(build: Path, destination: Path, cards: Dict[str, Tuple[Path, str]],
-         licences: Tuple[Path, ...] = ()) -> Dict[str, Any]:
+         licences: Tuple[Path, ...] = (), one_commit: bool = False) -> Dict[str, Any]:
     """Write a bundle of `build` into `destination` (which must not exist):
     its image and BUILD-INFO.json, each card of `cards` (name -> (image,
-    title)) compressed, and the `licences` texts. Returns the manifest."""
+    title)) compressed, and the `licences` texts. Returns the manifest.
+
+    `one_commit` is the caller's statement that `cards` and `licences` were
+    made from the build's own commit with nothing changed (it is what can
+    check that); the manifest records it, and a release image is refused
+    without it."""
     info = json.loads((build / "BUILD-INFO.json").read_text())
+    if info.get("release") and not one_commit:
+        raise BundleError(f"build {build.name} is a release image: it is bundled only from its own commit, "
+                          "with a clean working tree")
     # A bundle is played in a guest. A build that records no format was made
     # before builds could have another and is a qcow2.
     if info.get("image_format", "qcow2") != "qcow2":
@@ -115,7 +127,8 @@ def make(build: Path, destination: Path, cards: Dict[str, Tuple[Path, str]],
         "format": FORMAT,
         "name": info["name"], "version": info["version"], "environment": info["environment"],
         "release": info["release"], "build_id": info["build_id"],
-        "source": {key: info.get("source", {}).get(key) for key in ("commit", "describe", "clean")},
+        "source": dict({key: info.get("source", {}).get(key) for key in ("commit", "describe", "clean")},
+                       one_commit=one_commit),
         "created": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "files": files,
     }
@@ -337,6 +350,10 @@ def get(location: str, builds_root: Path, cards_root: Path, name: Optional[str] 
         return final, []
     report(f"{manifest['name']} {manifest['version']} ({manifest['environment']}, "
            f"release={str(manifest['release']).lower()}), build {manifest['build_id']}")
+    recorded = manifest.get("source")
+    if isinstance(recorded, dict) and recorded.get("one_commit") is False:
+        report("note: this bundle is a local test: it says it is not of one commit (its cards and texts may not "
+               "be those of the image's source)")
     staging = builds_root / f"{name}.download"
     for entry in manifest["files"]:
         target = staging / entry["name"]

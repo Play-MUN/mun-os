@@ -26,6 +26,8 @@ import mundev  # noqa: E402
 
 BUILD_ID = "20260929T123647Z-aee686f3d1fd"
 IMAGE = "mun-os-0.1.0-dev-qemu-arm64.qcow2"
+COMMIT = "a" * 40
+GAME = b"\x7fELF the build's own MUN Collect"
 
 
 class Fixture(unittest.TestCase):
@@ -42,9 +44,14 @@ class Fixture(unittest.TestCase):
         build = self.root / "builds" / "b1"
         build.mkdir(parents=True)
         (build / IMAGE).write_bytes(image_bytes)
+        game = build / "games" / "mun-collect" / "mun-collect"
+        game.parent.mkdir(parents=True)
+        game.write_bytes(GAME)
         info = {"format": 1, "name": "MUN OS", "version": "0.1.0-dev", "environment": "qemu-arm64", "release": False,
                 "build_id": BUILD_ID, "built": {"finished": "2026-09-29T12:37:58Z"},
-                "source": {"commit": "a" * 40, "describe": "aee686f", "clean": True},
+                "source": {"commit": COMMIT, "describe": "aee686f", "clean": True},
+                "games": {"mun-collect": {"file": "games/mun-collect/mun-collect", "size": len(GAME),
+                                          "sha256": hashlib.sha256(GAME).hexdigest()}},
                 "artifacts": {IMAGE: {"sha256": hashlib.sha256(image_bytes).hexdigest(), "size": len(image_bytes)}}}
         (build / "BUILD-INFO.json").write_text(json.dumps(info))
         return build
@@ -352,28 +359,39 @@ class CommandTests(Fixture):
             holder.wait()
             self.assertTrue(mundev.install(str(source)).is_dir(), "once the first has finished, the second proceeds")
 
-    def test_bundle_makes_the_cards_from_the_builds_own_game_and_refuses_downloads(self):
-        build = self.build()
-        made = []
-
-        def card_tool(command, **kwargs):
+    def card_tool(self, made):
+        def run(command, **kwargs):
             made.append(command)
             Path(command[3]).write_bytes(b"card")
             return argparse.Namespace(returncode=0, stdout="", stderr="")
-        with patch.object(mundev, "BUILDS_ROOT", self.root / "builds"), \
-                patch.object(mundev.subprocess, "run", side_effect=card_tool), \
-                contextlib.redirect_stdout(io.StringIO()):
+        return run
+
+    def bundling(self, made, commit=COMMIT, clean=True):
+        """`./mun dev bundle` in a checkout at `commit`, its working tree
+        `clean` or not, with the card tool replaced by a recorder."""
+        stack = contextlib.ExitStack()
+        stack.enter_context(patch.object(mundev, "BUILDS_ROOT", self.root / "builds"))
+        stack.enter_context(patch.object(mundev, "source_state", return_value={"commit": commit, "clean": clean}))
+        stack.enter_context(patch.object(mundev.subprocess, "run", side_effect=self.card_tool(made)))
+        stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
+        return stack
+
+    def rewrite_info(self, build, change):
+        info = json.loads((build / "BUILD-INFO.json").read_text())
+        change(info)
+        (build / "BUILD-INFO.json").write_text(json.dumps(info))
+
+    def test_bundle_makes_the_cards_from_the_builds_own_game_and_refuses_downloads(self):
+        build = self.build()
+        made = []
+        with self.bundling(made):
             mundev.cmd_bundle(argparse.Namespace(build="b1", out=str(self.root / "out")))
             (build / "ORIGIN.json").write_text("{}")
             with self.assertRaises(mundev.vm.LabError):
                 mundev.cmd_bundle(argparse.Namespace(build="b1", out=str(self.root / "out2")))
-        info = json.loads((build / "BUILD-INFO.json").read_text())
-        info["games"] = {"mun-collect": {}, "mygame": {}}
-        (build / "BUILD-INFO.json").write_text(json.dumps(info))
+        self.rewrite_info(build, lambda info: info["games"].update(mygame={}))
         (build / "ORIGIN.json").unlink()
-        with patch.object(mundev, "BUILDS_ROOT", self.root / "builds"), \
-                patch.object(mundev.subprocess, "run", side_effect=card_tool), \
-                contextlib.redirect_stdout(io.StringIO()), self.assertRaises(mundev.vm.LabError) as refused:
+        with self.bundling(made), self.assertRaises(mundev.vm.LabError) as refused:
             mundev.cmd_bundle(argparse.Namespace(build="b1", out=str(self.root / "out3")))
         self.assertIn("mygame", str(refused.exception), "a build with a third-party game is never bundled")
         game = [command for command in made if "--variant" in command][0]
@@ -387,6 +405,54 @@ class CommandTests(Fixture):
         manifest = json.loads((self.root / "out" / "release.json").read_text())
         self.assertEqual(sorted(e["card"] for e in manifest["files"] if e["kind"] == "card"),
                          ["collect", "collect-reef", "collect-sea", "demo"])
+        self.assertEqual(manifest["source"], {"commit": COMMIT, "describe": "aee686f", "clean": True, "one_commit": True},
+                         "made in the build's own commit: everything in it is of that commit")
+
+    def test_a_clean_build_is_bundled_only_from_its_own_commit_with_a_clean_tree(self):
+        # The cards' MUN Shape packages, the card tool and the licence texts
+        # come from the checkout, while release.json names the build's commit.
+        self.build()
+        for what, checkout in (("another commit", {"commit": "b" * 40}),
+                               ("uncommitted changes", {"clean": False})):
+            with self.subTest(what):
+                made = []
+                with self.bundling(made, **checkout), self.assertRaises(mundev.vm.LabError) as refused:
+                    mundev.cmd_bundle(argparse.Namespace(build="b1", out=str(self.root / "out")))
+                self.assertIn(COMMIT[:12], str(refused.exception))
+                self.assertEqual(made, [], "refused before a card is made")
+                self.assertFalse((self.root / "out").exists())
+
+    def test_a_game_that_is_not_the_one_the_build_recorded_is_not_put_on_a_card(self):
+        build = self.build()
+        (build / "games" / "mun-collect" / "mun-collect").write_bytes(b"\x7fELF compiled by hand afterwards")
+        made = []
+        with self.bundling(made), self.assertRaises(mundev.vm.LabError) as refused:
+            mundev.cmd_bundle(argparse.Namespace(build="b1", out=str(self.root / "out")))
+        self.assertIn("mun-collect", str(refused.exception))
+        self.assertEqual(made, [])
+        self.assertFalse((self.root / "out").exists())
+
+    def test_a_build_of_uncommitted_changes_is_bundled_for_a_local_test_and_says_so(self):
+        build = self.build()
+        self.rewrite_info(build, lambda info: info["source"].update(clean=False))
+        made, said = [], io.StringIO()
+        with self.bundling(made, commit="b" * 40, clean=False), contextlib.redirect_stdout(said):
+            mundev.cmd_bundle(argparse.Namespace(build="b1", out=str(self.root / "out")))
+        self.assertIn("not for publication", said.getvalue())
+        manifest = json.loads((self.root / "out" / "release.json").read_text())
+        self.assertEqual((manifest["source"]["clean"], manifest["source"]["one_commit"], manifest["release"]),
+                         (False, False, False))
+        self.get(self.root / "out")
+        self.assertTrue(any("not of one commit" in message for message in self.messages),
+                        "whoever installs it is told too")
+        # A release image is never bundled from anything but its commit.
+        self.rewrite_info(build, lambda info: info.update(release=True))
+        with self.bundling(made, commit="b" * 40, clean=False), self.assertRaises(mundev.vm.LabError):
+            mundev.cmd_bundle(argparse.Namespace(build="b1", out=str(self.root / "out2")))
+        self.assertFalse((self.root / "out2").exists())
+        with self.assertRaises(bundle.BundleError):
+            bundle.make(build, self.root / "out3", {})
+        self.assertFalse((self.root / "out3").exists())
 
 
 if __name__ == "__main__":

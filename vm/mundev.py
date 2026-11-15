@@ -692,6 +692,8 @@ def shape_of(build: Path) -> str:
 # third-party game (from a recipe, `--recipe`) is not bundled, whatever that
 # game's terms.
 OWN_GAMES = {"mun-collect", "mun-gl-probe"}
+# The game on a bundle's cards: the build's own example game.
+BUNDLED_GAME = "mun-collect"
 # The cards a bundle carries, made from the build's own example game. Two are
 # MUN Collect dressed in a MUN Shape package, each under a name of its own,
 # so a player sees MUN Shape without the card tools (which need e2fsprogs):
@@ -701,11 +703,9 @@ OWN_GAMES = {"mun-collect", "mun-gl-probe"}
 # exists (vm/bundle.py): it may hold saves.
 BUNDLED_CARDS = {
     "demo": ("MUN Test Card", []),
-    "collect": ("MUN Collect", ["--variant", "game", "--game", "{games}/mun-collect/mun-collect"]),
-    "collect-sea": ("MUN Collect", ["--variant", "game", "--game", "{games}/mun-collect/mun-collect",
-                                    "--shape", "{repo}/examples/shape/sea"]),
-    "collect-reef": ("MUN Collect", ["--variant", "game", "--game", "{games}/mun-collect/mun-collect",
-                                     "--shape", "{repo}/examples/shape/reef"]),
+    "collect": ("MUN Collect", ["--variant", "game", "--game", "{game}"]),
+    "collect-sea": ("MUN Collect", ["--variant", "game", "--game", "{game}", "--shape", "{repo}/examples/shape/sea"]),
+    "collect-reef": ("MUN Collect", ["--variant", "game", "--game", "{game}", "--shape", "{repo}/examples/shape/reef"]),
 }
 
 
@@ -731,22 +731,43 @@ def cmd_bundle(args: argparse.Namespace) -> None:
     if others:
         raise vm.LabError(f"build {args.build} also built {', '.join(others)}: a download carries MUN's own software "
                           "only; bundle a build made without it")
-    if not info.get("source", {}).get("clean", False):
+    # The image and the game come from the build. The cards' MUN Shape
+    # packages, the card tool and the licence texts come from this checkout,
+    # and release.json names the build's commit for all of it: so a build of
+    # a commit is bundled from that commit, with nothing changed.
+    source = info.get("source", {})
+    one_commit = bool(source.get("clean", False))
+    if one_commit:
+        checkout = source_state()
+        if checkout["commit"] != source.get("commit") or not checkout["clean"]:
+            state = "has uncommitted changes" if checkout["commit"] == source.get("commit") \
+                else f"is at {checkout['commit'][:12]}"
+            raise vm.LabError(f"build {args.build} was made from commit {str(source.get('commit'))[:12]} and this "
+                              f"checkout {state}: the cards, the card tool and the licence texts of a bundle come "
+                              "from the checkout, so bundle it from that commit with a clean working tree")
+    elif info.get("release"):
+        raise vm.LabError(f"build {args.build} is a release image of uncommitted changes (clean: false in "
+                          "BUILD-INFO): it is not bundled")
+    else:
         log(f"warning: build {args.build} is of uncommitted changes (clean: false in BUILD-INFO); fine for a "
-            "local test, not for publication")
+            "local test, not for publication: its release.json says the bundle is not of one commit")
+    game = build / "games" / BUNDLED_GAME / BUNDLED_GAME
+    if not game.is_file() or sha256_file(game) != (info.get("games", {}).get(BUNDLED_GAME) or {}).get("sha256"):
+        raise vm.LabError(f"{game} is not the {BUNDLED_GAME} that build {args.build} recorded in BUILD-INFO: "
+                          "the cards of a bundle carry the game the build compiled")
     destination = Path(args.out) if args.out else BUNDLES_ROOT / args.build
     with tempfile.TemporaryDirectory(prefix="mun-bundle-") as tmp:
         cards = {}
         for name, (title, extra) in BUNDLED_CARDS.items():
             image = Path(tmp) / f"{name}.img"
             command = [sys.executable, str(CARD_TOOL), "create", str(image), "--title", title]
-            command += [part.format(games=build / "games", repo=REPO_ROOT) for part in extra]
+            command += [part.format(game=game, repo=REPO_ROOT) for part in extra]
             result = subprocess.run(command, capture_output=True, text=True)
             if result.returncode:
                 raise vm.LabError(f"making the {name} card failed: {(result.stderr or result.stdout).strip()}")
             cards[name] = (image, title)
         try:
-            manifest = bundle.make(build, destination, cards, licence_texts())
+            manifest = bundle.make(build, destination, cards, licence_texts(), one_commit=one_commit)
         except bundle.BundleError as exc:
             raise vm.LabError(str(exc)) from exc
     total = sum(entry["size"] for entry in manifest["files"])

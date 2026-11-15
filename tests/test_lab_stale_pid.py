@@ -15,6 +15,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -63,6 +64,11 @@ class StalePidTests(unittest.TestCase):
         self.addCleanup(process.wait)
         self.addCleanup(process.kill)
         vm.PATHS["pidfile"].write_text(f"{process.pid}\n")
+        # The interpreter starts through a launcher that replaces itself:
+        # wait until the process is the one that stays, as a QEMU is.
+        deadline = time.monotonic() + 20
+        while "-pidfile" not in (vm.host.process_command(vm.HOST, process.pid) or "") and time.monotonic() < deadline:
+            time.sleep(0.05)
         return process
 
     def test_a_pid_that_is_now_another_process_is_not_this_guest(self):
@@ -86,6 +92,23 @@ class StalePidTests(unittest.TestCase):
         status, out, _err = self.lab("status")
         self.assertEqual(status, 1, "it is running: its control socket is asked, and here nothing answers")
         self.assertTrue(vm.PATHS["pidfile"].exists())
+
+    def test_a_command_line_the_system_does_not_show_is_not_another_process(self):
+        # ps prints the bare program name in parentheses when it cannot read
+        # a process's arguments: that says nothing of whose process it is.
+        mac = vm.host.Host("macos", "arm64", hypervisor=True)
+        listed = lambda text: patch.object(vm.host.subprocess, "run",  # noqa: E731
+                                           return_value=subprocess.CompletedProcess([], 0, text, ""))
+        with listed("(qemu-system-aarch64)\n"):
+            self.assertIsNone(vm.host.process_command(mac, 4242))
+        with listed("\n"):
+            self.assertIsNone(vm.host.process_command(mac, 4242))
+        with listed("/opt/homebrew/bin/qemu-system-aarch64 -name mun-aa -pidfile /x/qemu.pid\n"):
+            self.assertEqual(vm.host.process_command(mac, 4242),
+                             "/opt/homebrew/bin/qemu-system-aarch64 -name mun-aa -pidfile /x/qemu.pid")
+        vm.PATHS["pidfile"].write_text(f"{os.getpid()}\n")
+        with patch.object(vm, "HOST", mac), listed("(qemu-system-aarch64)\n"):
+            self.assertEqual(vm.read_pid(), os.getpid(), "not known to be another: it counts as the guest")
 
     def test_stop_and_status_say_the_guest_is_off_and_the_file_is_removed(self):
         self.left_by_a_crash()

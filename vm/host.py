@@ -416,7 +416,11 @@ def process_command(host: Host, pid: int) -> Optional[str]:
                                     text=True, errors="replace", timeout=10, check=False)
         except (OSError, subprocess.SubprocessError):
             return None
-        return listed.stdout.strip() or None
+        command = listed.stdout.strip()
+        # ps prints the bare program name in parentheses when it cannot
+        # read the arguments (a process being replaced, or one it may not
+        # look into): not a command line.
+        return None if not command or (command.startswith("(") and command.endswith(")")) else command
     return None
 
 

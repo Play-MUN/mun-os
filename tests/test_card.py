@@ -133,6 +133,45 @@ class ValidatorTests(unittest.TestCase):
         self.assertGreater(len(base64.b64encode((staging / "cover.png").read_bytes())), 1 << 20,
                            "the wire frame for a legal cover exceeds 1 MiB: consumers must accept more")
 
+    def test_a_cover_is_bounded_in_what_it_carries_besides_its_pixels(self):
+        # Whatever reads a PNG's header keeps its text and inflates the
+        # compressed one: a cover within its size and its sides could make
+        # its reader hold a gigabyte before a pixel is decoded.
+        import struct
+        from mun_card import validate
+
+        def chunk(kind, body):
+            return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body) & 0xFFFFFFFF)
+
+        def with_chunks(staging, *chunks):
+            cover = (staging / "cover.png").read_bytes()
+            (staging / "cover.png").write_bytes(cover[:33] + b"".join(chunks) + cover[33:])
+            return staging
+
+        text = chunk(b"zTXt", b"Comment\0\0" + zlib.compress(b"A" * 7_999_000, 9))
+        bomb = with_chunks(self.staged("valid"), *[text] * 120)
+        self.assertLess((bomb / "cover.png").stat().st_size, validate.COVER_MAX_BYTES)
+        with self.assertRaises(CardError) as ctx:
+            validate_card(DirectorySource(bomb))
+        self.assertEqual(ctx.exception.code, "cover_invalid")
+        self.assertIn("auxiliares", ctx.exception.detail)
+        # one small chunk that inflates past the bound is enough
+        deep = with_chunks(self.staged("valid"), chunk(b"zTXt", b"k\0\0" + zlib.compress(
+            bytes(validate.PNG_EXPANDED_MAX_BYTES + 1), 9)))
+        with self.assertRaises(CardError) as ctx:
+            validate_card(DirectorySource(deep))
+        self.assertEqual(ctx.exception.code, "cover_invalid")
+        # A cover as common tools write it stays valid: a profile, the
+        # program's name, an XMP packet, the resolution.
+        usual = with_chunks(self.staged("valid"),
+                            chunk(b"pHYs", struct.pack(">IIB", 2835, 2835, 1)),
+                            chunk(b"iCCP", b"sRGB\0\0" + zlib.compress(bytes(range(256)) * 12, 9)),
+                            chunk(b"tEXt", b"Software\0An ordinary image editor 1.0"),
+                            chunk(b"iTXt", b"XML:com.adobe.xmp\0\0\0\0\0" + b"<x:xmpmeta/>" * 300))
+        self.assertEqual(validate_card(DirectorySource(usual)).cover, "cover.png")
+        # and so does the largest cover this tool writes
+        self.assertEqual(validate_card(DirectorySource(self.staged("cover-near-limit"))).cover, "cover.png")
+
     def test_game_gl_variant_names_the_entry_after_the_binary_and_carries_the_provisional_profile(self):
         tmp = Path(tempfile.mkdtemp(prefix="mun-gl-")); self.addCleanup(shutil.rmtree, tmp, True)
         fake = tmp / "mun-gl-probe"; fake.write_bytes(b"\x7fELF fake"); fake.chmod(0o755)

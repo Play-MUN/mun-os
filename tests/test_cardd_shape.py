@@ -191,6 +191,31 @@ class ShapeExportTests(unittest.TestCase):
         self.assertFalse((export / "world").exists(), "a dropped block's files never reach the shell")
         self.assertNotIn("world", json.loads((export / "shape.json").read_text()))
 
+    def test_an_image_whose_text_would_fill_memory_never_reaches_the_shell(self):
+        # A backdrop within its size whose header carries hundreds of text
+        # chunks, each a few KiB that inflate to megabytes: the checker
+        # drops its block, so the file is not exported.
+        import struct
+        import zlib
+        package = self.tmp / "text-heavy"
+        shutil.copytree(SEA, package)
+        backdrop = package / "world" / "backdrop.png"
+        body = b"Comment\0\0" + zlib.compress(b"A" * 7_999_000, 9)
+        text = struct.pack(">I", len(body)) + b"zTXt" + body + struct.pack(">I", zlib.crc32(b"zTXt" + body) & 0xFFFFFFFF)
+        image = backdrop.read_bytes()
+        count = (4 * 1024 * 1024 - len(image)) // len(text)
+        self.assertGreater(count, 100)
+        backdrop.write_bytes(image[:33] + text * count + image[33:])
+        h = ShapeHarness(self.tmp, {"vdc": package})
+        self.insert(h)
+        h.pump(until=h.settled())
+        record = h.card()["shape"]
+        self.assertEqual(record["state"], "partial")
+        self.assertIn(("shape_png", "world"), [(n["code"], n["block"]) for n in record["notes"]])
+        export = Path(record["path"])
+        self.assertFalse((export / "world").exists(), "a dropped block's files never reach the shell")
+        self.assertNotIn("world", json.loads((export / "shape.json").read_text()))
+
     def test_an_unusable_package_publishes_nothing(self):
         h = ShapeHarness(self.tmp, {"vdc": self.fixture("not-json")})
         self.insert(h)

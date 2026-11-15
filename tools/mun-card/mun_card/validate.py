@@ -2,6 +2,7 @@
 
 import re
 import struct
+import zlib
 from dataclasses import dataclass, asdict
 from typing import Any, Dict, List, Optional
 
@@ -29,6 +30,23 @@ MANIFEST_MAX_BYTES = 64 * 1024
 COVER_MAX_BYTES = 1024 * 1024
 COVER_MAX_SIDE = 1024
 TITLE_MAX_CHARS = 120
+
+# What a PNG may carry besides its pixels, for every image the console opens
+# (a cover, and each image of a Shape package: shape.png_header). A PNG
+# reader keeps the text and the colour profile it finds while it reads the
+# header, and inflates the compressed ones, before a pixel is decoded and
+# outside any limit on the decoded image: a few KiB of compressed text
+# become megabytes, hundreds of times over in one small file. So the
+# ancillary chunks are bounded, in number and in bytes as stored, the text
+# chunks (tEXt, zTXt, iTXt) more tightly, the profile (iCCP) to one, and what
+# the text and the profile inflate to. The shell holds the bounds on what is
+# stored again before it opens an image (services/mun-shell/src/pngchunks.h).
+PNG_ANCILLARY_MAX_CHUNKS = 64
+PNG_ANCILLARY_MAX_BYTES = 256 * 1024
+PNG_TEXT_MAX_CHUNKS = 16
+PNG_TEXT_MAX_BYTES = 32 * 1024
+PNG_PROFILE_MAX_CHUNKS = 1
+PNG_EXPANDED_MAX_BYTES = 1024 * 1024
 
 _ID = re.compile(r"[a-z0-9][a-z0-9._-]{2,63}")
 _VERSION = re.compile(r"[0-9]+(\.[0-9]+){0,3}([-+][0-9A-Za-z.-]{1,32})?")
@@ -300,14 +318,90 @@ def _check_cover(source, relative: str) -> None:
     if info.size > COVER_MAX_BYTES:
         raise CardError("cover_too_large", "La portada supera el tamaño permitido",
                         f"{info.size} bytes > {COVER_MAX_BYTES}")
-    # Only the header is needed to reject oversized images before anything decodes them.
-    head = source.read(relative, 32)
+    # The header rejects oversized images before anything decodes them; the
+    # chunks after it, what would make the cover's reader hold far more than
+    # the cover (png_ancillary_excess).
+    data = source.read(relative, COVER_MAX_BYTES)
+    head = data[:32]
     if len(head) < 24 or not head.startswith(_PNG_SIGNATURE) or head[12:16] != b"IHDR":
         raise CardError("cover_invalid", "La portada no es un PNG válido", relative)
     width, height = struct.unpack(">II", head[16:24])
     if width == 0 or height == 0 or width > COVER_MAX_SIDE or height > COVER_MAX_SIDE:
         raise CardError("cover_too_large", "La portada supera las dimensiones permitidas",
                         f"{width}×{height} > {COVER_MAX_SIDE}")
+    excess = png_ancillary_excess(data)
+    if excess is not None:
+        raise CardError("cover_invalid", "La portada lleva más datos auxiliares de los permitidos", excess)
+
+
+def _inflated_size(stream: bytes, limit: int) -> int:
+    """How many bytes the zlib `stream` inflates to, counted up to `limit`
+    + 1 and never inflated further. Its two-byte header and its checksum
+    are not judged, so that no reader counts more than this does; a stream
+    that does not inflate counts for nothing (a PNG reader discards such a
+    chunk)."""
+    try:
+        return len(zlib.decompressobj(-zlib.MAX_WBITS).decompress(stream[2:], limit + 1))
+    except zlib.error:
+        return 0
+
+
+def png_ancillary_excess(data: bytes) -> Optional[str]:
+    """Why a PNG carries more ancillary data than the console accepts, or
+    None when it is within every bound (the PNG_* limits above).
+
+    The chunks are walked as a reader walks them, by their lengths, from the
+    signature to IEND or to where the file stops making sense; nothing here
+    judges whether the file is a well-formed PNG. A chunk is counted with
+    the length it declares. Compressed text and the profile are inflated
+    only when everything stored is within its bounds, and never past the
+    bound on what they inflate to."""
+    chunks = stored = texts = text_bytes = profiles = 0
+    expanding = []      # (compressed, bytes) of each text chunk and profile, in order
+    offset = len(_PNG_SIGNATURE)
+    while offset + 8 <= len(data):
+        length, kind = struct.unpack(">I4s", data[offset:offset + 8])
+        if length > 0x7FFFFFFF or kind == b"IEND":
+            break
+        if kind[0] & 0x20:      # ancillary: a lowercase first letter
+            body = data[offset + 8:offset + 8 + length]
+            chunks += 1
+            stored += length
+            if kind in (b"tEXt", b"zTXt", b"iTXt"):
+                texts += 1
+                text_bytes += length
+                # keyword, NUL, then: zTXt a method byte and the stream; iTXt
+                # a flag, a method, two more NUL-ended strings and the text
+                end = body.find(b"\0")
+                if kind == b"zTXt" and end >= 0:
+                    expanding.append((True, body[end + 2:]))
+                elif kind == b"iTXt" and end >= 0 and body[end + 1:end + 2] not in (b"", b"\0"):
+                    text = body[end + 3:].split(b"\0", 2)
+                    expanding.append((True, text[2] if len(text) == 3 else b""))
+                else:
+                    expanding.append((False, body))
+            elif kind == b"iCCP":
+                profiles += 1
+                end = body.find(b"\0")
+                expanding.append((True, body[end + 2:] if end >= 0 else b""))
+        offset += 12 + length
+    if chunks > PNG_ANCILLARY_MAX_CHUNKS:
+        return f"{chunks} bloques auxiliares; máximo {PNG_ANCILLARY_MAX_CHUNKS} (guárdala sin metadatos)"
+    if stored > PNG_ANCILLARY_MAX_BYTES:
+        return f"{stored} bytes en bloques auxiliares; máximo {PNG_ANCILLARY_MAX_BYTES} (guárdala sin metadatos)"
+    if texts > PNG_TEXT_MAX_CHUNKS:
+        return f"{texts} bloques auxiliares de texto; máximo {PNG_TEXT_MAX_CHUNKS} (guárdala sin metadatos)"
+    if text_bytes > PNG_TEXT_MAX_BYTES:
+        return f"{text_bytes} bytes en bloques auxiliares de texto; máximo {PNG_TEXT_MAX_BYTES} (guárdala sin metadatos)"
+    if profiles > PNG_PROFILE_MAX_CHUNKS:
+        return f"{profiles} bloques auxiliares de perfil de color; máximo {PNG_PROFILE_MAX_CHUNKS}"
+    expanded = 0
+    for compressed, content in expanding:
+        expanded += _inflated_size(content, PNG_EXPANDED_MAX_BYTES - expanded) if compressed else len(content)
+        if expanded > PNG_EXPANDED_MAX_BYTES:
+            return (f"el texto y el perfil de color de sus bloques auxiliares se expanden a más de "
+                    f"{PNG_EXPANDED_MAX_BYTES} bytes (guárdala sin metadatos)")
+    return None
 
 
 # The same path rules for the files a Shape package names (shape.py).

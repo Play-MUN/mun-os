@@ -5,7 +5,9 @@ A card may carry `<content.root>/mun-shape/shape.json` and the files it names.
 This module is the single reading of such a package: the host tool checks a
 folder with it, and the card service is to check the copy it makes of a
 card's package with it. It reads bytes and headers only. It never inflates an
-image or plays a sound: decoding belongs to the unprivileged shell.
+image's pixels or plays a sound: decoding belongs to the unprivileged shell.
+(It does inflate a PNG's compressed text and colour profile, up to the bound
+it holds them to: what their reader would otherwise inflate without one.)
 
 Nothing here raises for a defect in the package. A defect drops the aspect it
 concerns (the whole package, one block, or the game's surface colours) and is
@@ -25,7 +27,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from .errors import CardError
-from .validate import safe_path
+from .validate import png_ancillary_excess, safe_path
 
 PACKAGE_DIR = "mun-shape"
 MANIFEST = "shape.json"
@@ -542,10 +544,12 @@ _ROLE_KIND = {"window": "png", "backdrop": "png", "layer": "png", "sprite": "png
 # ------------------------------------------------------------ file structure
 
 def png_header(data: bytes) -> Dict[str, int]:
-    """Check a PNG's chunk structure without inflating it: signature, IHDR
-    first and well formed, every chunk's length and CRC, the critical chunks
-    in order, a zlib header on the image data, IEND last with nothing after.
-    Raises _Invalid("shape_png")."""
+    """Check a PNG's chunk structure without inflating its image: signature,
+    IHDR first and well formed, every chunk's length and CRC, the critical
+    chunks in order, a zlib header on the image data, IEND last with nothing
+    after, and its ancillary chunks within what the console accepts
+    (validate.png_ancillary_excess, which inflates text and profile up to
+    their bound). Raises _Invalid("shape_png")."""
     if not data.startswith(_PNG_SIGNATURE):
         raise _Invalid("shape_png", "sin firma PNG")
     offset, index = len(_PNG_SIGNATURE), 0
@@ -604,6 +608,9 @@ def png_header(data: bytes) -> Dict[str, int]:
     if len(first_idat) < 2 or first_idat[0] & 0x0F != 8 or first_idat[0] >> 4 > 7 \
             or (first_idat[0] << 8 | first_idat[1]) % 31 or first_idat[1] & 0x20:
         raise _Invalid("shape_png", "los datos no empiezan como zlib")
+    excess = png_ancillary_excess(data)
+    if excess is not None:
+        raise _Invalid("shape_png", excess)
     return header
 
 

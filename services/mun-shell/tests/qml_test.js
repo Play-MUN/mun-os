@@ -180,7 +180,106 @@ function startUpChecks() {
           "began at " + r.begunAt + " s");
 }
 
+// ---------------------------------------------------------------- awake
+
+// Main.qml keeps the sound device open while the interface is in use: a
+// binding on whether Home is powered and whether the start-up's layer is
+// shown. Here Main.qml's and BootLayer.qml's own functions hand the screen
+// over to each other, and `seen` holds every value the binding takes as they
+// write those two, one write at a time, as QML evaluates it.
+function handOver({ powered, shown, systemSounds = true }) {
+    const main = qml("Main.qml");
+    const layer = qml("BootLayer.qml");
+    const state = { powered: powered, shown: shown };
+    const seen = [];
+    const calls = [];
+    const note = (name) => () => { calls.push(name); };
+    const window = {
+        modal: "a dialog",
+        ShellSettings: { systemSounds: systemSounds },
+        PowerControl: { lastError: "it failed", busy: false, lastAction: "off", lastStatus: 0,
+                        powerOff: note("PowerControl.powerOff"), resetConsole: note("PowerControl.resetConsole") },
+        shutdownSound: { start: note("shutdownSound.start") },
+        panels: { powerOffFailed: () => "failed", resetConsoleRefused: () => "refused" },
+        sound: (name) => { calls.push("sound " + name); },
+        openModal: note("openModal"),
+        afterStart: note("afterStart")
+    };
+    const boot = {
+        t: 3, running: true, waiting: false, warming: false, before: false, leaving: false, canSkip: true,
+        warm: { stop() {} },
+        ready_: { stop() {} },
+        SystemSounds: { stop() {} }
+    };
+    const awake = bind(window, "function () { return " + /property: "awake"\n\s+value: ([^\n]+)\n/.exec(main)[1] + " }");
+    const watched = (object, name) => Object.defineProperty(object, name, {
+        enumerable: true,
+        get: () => state[name],
+        set: (value) => {
+            if (value === state[name])
+                return;
+            state[name] = value;
+            seen.push(awake());
+        }
+    });
+    watched(window, "powered");
+    watched(boot, "shown");
+    window.window = window;
+    window.boot = boot;
+    boot.root = boot;
+    for (const name of ["powerOff", "resetConsole"])
+        window[name] = bind(window, functionText(main, name, 4));
+    window.powerFailed = bind(window, functionText(main, "onLastErrorChanged", 8, main.indexOf("target: PowerControl\n")));
+    for (const name of ["leave", "skip", "powerOff"])
+        boot[name] = bind(boot, functionText(layer, name, 4));
+    // The layer's signal, received by Main.qml's handler on it.
+    boot.finished = bind(window, handlerText(main, "onFinished", 12, main.indexOf("id: boot\n")));
+    return { window: window, boot: boot, seen: seen, calls: calls, awake: awake };
+}
+
+function awakeChecks() {
+    const held = (seen) => seen.length > 0 && seen.every((value) => value === true);
+
+    let h = handOver({ powered: true, shown: false });
+    h.window.powerOff();
+    check("turning off: the sound device is kept open across the hand-over to the dark screen", held(h.seen), JSON.stringify(h.seen));
+    check("and the console turns off as before: the screen dark, no input, its sound asked for and waited for",
+          h.boot.shown && !h.window.powered && h.window.modal === null && h.boot.t === -1
+          && h.calls.join() === "sound shutdown,shutdownSound.start", h.calls.join());
+
+    h = handOver({ powered: true, shown: false });
+    h.window.resetConsole();
+    check("resetting: the same hand-over, the device kept open", held(h.seen), JSON.stringify(h.seen));
+    check("and the console resets as before", h.boot.shown && !h.window.powered && h.calls.join() === "PowerControl.resetConsole",
+          h.calls.join());
+
+    h = handOver({ powered: false, shown: true });
+    h.boot.leave();
+    check("the start-up ending: the device is kept open across the hand-over to Home", held(h.seen), JSON.stringify(h.seen));
+    check("and Home comes in as before: powered, the layer gone, what follows the start run once",
+          h.window.powered && !h.boot.shown && h.boot.leaving && !h.boot.running && h.calls.join() === "afterStart", h.calls.join());
+
+    h = handOver({ powered: false, shown: true });
+    h.boot.skip();
+    check("the start-up skipped: the same", held(h.seen) && h.window.powered && !h.boot.shown, JSON.stringify(h.seen));
+
+    h = handOver({ powered: false, shown: true });
+    h.window.powerFailed();
+    check("turning off failed: the device is kept open as the screen comes back", held(h.seen), JSON.stringify(h.seen));
+    check("and the screen comes back as before, with its dialog", h.window.powered && !h.boot.shown
+          && h.calls.join() === "sound error,openModal", h.calls.join());
+
+    // The binding still lets the device go when it should.
+    h = handOver({ powered: true, shown: false, systemSounds: false });
+    h.window.powerOff();
+    check("System sounds off: the device is not held, and the console turns off at once",
+          h.seen.every((value) => value === false) && h.calls.join() === "PowerControl.powerOff", h.calls.join());
+    h = handOver({ powered: false, shown: false });
+    check("neither Home nor the start-up's layer: not awake", h.awake() === false);
+}
+
 startUpChecks();
+awakeChecks();
 
 console.log("interface logic: " + passed + " passed, " + failed + " failed");
 process.exit(failed === 0 ? 0 : 1);

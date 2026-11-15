@@ -127,7 +127,11 @@ Window {
     // first move after the input that undims, is heard (src/systemsounds.h);
     // with System sounds off (every sound the shell plays follows it) it is
     // let go. During the start-up too: main.cpp opened it before the
-    // interface loaded, for the start-up's sound (BootLayer.qml).
+    // interface loaded, for the start-up's sound (BootLayer.qml). Home and
+    // the start-up's layer hand the screen over to each other with the one
+    // that takes it said first, so that this never drops between the two: a
+    // device let go and opened again there would have the next sound (turning
+    // off's) start a new stream, which a display may take a moment to hear.
     Binding {
         target: SystemSounds
         property: "awake"
@@ -582,8 +586,8 @@ Window {
     function confirmResetConsole() { openModal(panels.resetConsoleConfirm()) }
     function resetConsole() {
         modal = null
-        powered = false
         boot.powerOff()
+        powered = false
         PowerControl.resetConsole()
     }
     function askPowerOff() { openModal(panels.powerOff()) }
@@ -591,8 +595,8 @@ Window {
     // before the system goes down.
     function powerOff() {
         modal = null
-        powered = false
         boot.powerOff()
+        powered = false
         if (ShellSettings.systemSounds) {
             sound("shutdown")
             shutdownSound.start()
@@ -635,8 +639,8 @@ Window {
         function onLastErrorChanged() {
             if (PowerControl.lastError === "" || PowerControl.busy)
                 return
-            boot.shown = false
             window.powered = true
+            boot.shown = false
             window.sound("error")
             window.openModal(PowerControl.lastAction === "reset"
                              ? panels.resetConsoleRefused(PowerControl.lastStatus, PowerControl.lastError)

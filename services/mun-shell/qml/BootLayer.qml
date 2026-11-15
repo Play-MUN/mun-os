@@ -145,8 +145,10 @@ Rectangle {
         running = false
         warm.stop()
         ready_.stop()
-        shown = false
+        // Home takes the screen before the layer lets it go (Main.qml keeps
+        // the sound device open while either has it).
         finished()
+        shown = false
     }
     function powerOff() {
         running = false

@@ -83,6 +83,25 @@ class MountTimeoutTests(unittest.TestCase):
         self.assertNotIn(target, self.mounter.stalled)
         self.assertIn(["umount", "-l", target], self.lazy)
 
+    def test_a_late_remount_never_detaches_the_card_in_use(self):
+        # A remount is a mount command too; ending late, it leaves the card
+        # mounted and in use, which must not be taken for a stray mount.
+        target = str(self.root / "c1")
+        Path(target).mkdir()
+        self.mounted.add(target)
+        card = Card(mount=target)
+        self.behaviour["mount"] = "sleep 0.6"
+        with self.assertRaises(CardError) as failed:
+            self.mounter.remount(card, rw=False)
+        self.assertEqual(failed.exception.code, "sync_failed")
+        time.sleep(0.8)
+        self.mounter.reap()
+        self.assertEqual(self.mounter.stalled, {})
+        self.assertEqual(self.lazy, [], "the card in use was detached")
+        self.assertEqual(card.mount, target)
+        self.behaviour["mount"] = "exit 0"
+        self.mounter.remount(card, rw=False)      # and it can be remounted again
+
     def test_an_unmount_that_does_not_answer_never_reads_as_safe_removal(self):
         target = str(self.root / "c1")
         Path(target).mkdir()

@@ -939,6 +939,13 @@ def unit_check(check: str, data: bytes) -> Optional[str]:
         ElementTree.fromstring(declaration + b"<mun-unit>" + text + b"</mun-unit>")
     except ElementTree.ParseError as exc:
         return f"XML incompleto o dañado ({exc})"
+    except (LookupError, ValueError) as exc:
+        # The declaration names an encoding the parser cannot read: it knows
+        # UTF-8, UTF-16, US-ASCII and ISO-8859-1 itself and takes any other
+        # single-byte encoding from Python's codecs; a name they do not have
+        # is a LookupError there and a multibyte encoding (Shift-JIS, EUC-JP)
+        # a ValueError. Such a unit cannot be shown to be complete.
+        return f"codificación XML no admitida ({exc})"
     return None
 
 

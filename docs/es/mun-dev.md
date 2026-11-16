@@ -103,7 +103,7 @@ dirección por DHCP, y SSH solo acepta claves.
   microSD es una Game Card en la ranura de la placa (`MUN_CARDD_SLOTS`,
   [servicio de tarjetas](../../services/mun-cardd/README.md), en inglés).
 - **Red.** El enlace por cable se mantiene fuera de los estados de ahorro de
-  PCIe que lo tiraban al sacar una tarjeta de la ranura.
+  PCIe L1.1 y L1.2. Aun así puede caerse: ver *Límites conocidos*.
 - **Soporte.** Un volcado de diagnóstico en la partición de arranque en
   cada arranque y apagado, y una línea por arranque sobre cómo arrancó la
   consola (tiempos, sonido, arranque, unidades fallidas), que se lee por SSH
@@ -123,7 +123,7 @@ candidato es aquí aquel del que se hace la versión de esta página.
 | Llegada de una tarjeta, navegación, jugar a MUN Collect y volver, un guardado escrito en la tarjeta física, retirada segura y brusca | Comprobado el 13 de noviembre de 2026, con una construcción anterior de esta versión preliminar instalada entera en la eMMC |
 | Reef detrás de los menús (el movimiento de MUN Shape), atenuación a los diez minutos, *Reducir movimiento* | Comprobado el mismo día: 33,6 minutos en marcha sin ningún reinicio del shell ni de los servicios, con la pantalla atenuada a los diez. En esa prueba no se registraron los tiempos de fotograma y no dice nada de una tasa de fotogramas: lo medido en esta placa, donde el movimiento no mantiene 60 fotogramas por segundo, está en [dónde está el movimiento](../shape-motion.md#where-it-stands), en inglés |
 | Arranque: un solo cambio de imagen tras el del firmware, imagen de espera, sonido desde su primera nota | Comprobado el 14 de noviembre de 2026 en tres tipos de arranque (tras desenchufar, tras un corte de corriente, con el botón), con un televisor; con el shell y los archivos de placa del candidato puestos sobre la instalación anterior |
-| La imagen del candidato instalada entera, y el recorrido completo sobre ella | Pendiente |
+| La imagen del candidato instalada entera, y un recorrido sobre ella | Comprobado el 16 de noviembre de 2026: construcción `20261115T203329Z-4fcdda77249c` (commit `4fcdda7`) instalada entera en la eMMC y leída de vuelta; arranque (imagen y sonido), Reef en Home, una tarjeta metida y sacada con la placa en marcha, retirada segura, jugar a MUN Collect y volver, un guardado escrito en la tarjeta y apagado desde el menú. El cambio de resolución y la lectura del guardado tras una nueva inserción no formaron parte de ese recorrido |
 | Un arranque sin dispositivo de sonido | Pendiente en la placa; lo cubren las comprobaciones del propio shell |
 | Pantallas | Un monitor 1080p, un monitor 3440x1440 (el shell a 1080p) y un televisor, todos por HDMI |
 | Mandos | Un mando, un GameSir Nova Lite por Bluetooth, manejó los menús en esta placa con una imagen de laboratorio anterior, con el Bluetooth configurado a mano. El perfil no configura Bluetooth, y con el candidato no se ha probado ningún mando |
@@ -135,6 +135,13 @@ candidato es aquí aquel del que se hace la versión de esta página.
 - El reinicio del enlace de un DSP cuyos servicios no llegan se hizo a mano
   en el único arranque que lo necesitó; el automático aún no se ha
   encontrado con un arranque así.
+- **La red por cable puede caerse.** En nuestra placa, en su carcasa, el
+  enlace por cable se cayó con la placa en marcha, en momentos en que se
+  tocaba la placa (al meter o sacar una tarjeta, el botón de encendido) y
+  una vez sin ninguna tarjeta (16 de noviembre de 2026). El kernel registra
+  errores de *completion timeout* en el PCIe de la red, y el enlace vuelve
+  en el siguiente arranque. La causa sigue sin determinarse. La consola
+  sigue funcionando: tarjetas, juegos y guardados van bien.
 - La placa no tiene pila de reloj: sin un servidor de hora, su reloj
   empieza en una hora antigua en cada arranque.
 - El sonido es solo por HDMI. Sin Wi-Fi ni configuración de Bluetooth.

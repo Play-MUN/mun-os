@@ -99,8 +99,8 @@ accepts keys only.
 - **Game Cards.** A card image written whole to a microSD card is a Game
   Card in the board's slot (`MUN_CARDD_SLOTS`,
   [card service](../services/mun-cardd/README.md)).
-- **Network.** The wired link keeps out of the PCIe power states that took
-  it down when a card was pulled from the slot.
+- **Network.** The wired link keeps out of the PCIe power states L1.1 and
+  L1.2. It can still go down: see *Known limits*.
 - **Support.** A diagnostic dump on the boot partition at every boot and
   shutdown, and one line per boot about how the console started (times,
   sound, start-up, failed units), read over SSH with
@@ -120,7 +120,7 @@ page's release is made from.
 | Arrival of a card, navigation, playing MUN Collect and coming back, a save written to the physical card, safe and abrupt removal | Checked on 13 November 2026, with an earlier build of this preview installed whole on the eMMC |
 | Reef behind the menus (MUN Shape's motion), dimming after ten minutes, *Reduce motion* | Checked the same day: left running for 33.6 minutes with no restart of the shell or of the services, the display dimming after ten. Frame times were not recorded in that run and it says nothing about a frame rate: [where the motion stands](shape-motion.md#where-it-stands) has what was measured on this board, where the motion does not hold 60 frames a second |
 | Start-up: one change of picture after the firmware's, standby picture, sound from its first note | Checked on 14 November 2026 on three kinds of start (after unplugging, after a power cut, power button), with a television; with the candidate's shell and board files put over the earlier installation |
-| The candidate's image installed whole, and the whole walk on it | Pending |
+| The candidate's image installed whole, and a walk on it | Checked on 16 November 2026: build `20261115T203329Z-4fcdda77249c` (commit `4fcdda7`) installed whole on the eMMC and read back; start-up (picture and sound), Reef on Home, a card put in and pulled while running, safe removal, playing MUN Collect and coming back, a save written to the card, power-off from the menu. A change of resolution and a save read back after a new insertion were not part of that walk |
 | A start with no sound device | Pending on the board; the shell's own checks cover it |
 | Displays | A 1080p monitor, a 3440x1440 monitor (the shell at 1080p) and a television, all on HDMI |
 | Controllers | One pad, a GameSir Nova Lite over Bluetooth, drove the menus on this board with an earlier laboratory image, Bluetooth set up by hand. The profile sets up no Bluetooth, and no controller has been tried with the candidate |
@@ -132,6 +132,12 @@ page's release is made from.
 - The reset of a DSP whose services do not arrive has been done by hand on
   the one boot that needed it; the automatic one has not met such a boot
   yet.
+- **The wired network can go down.** On our board, in its case, the wired
+  link went down while the board ran, at moments when the board was touched
+  (a card put in or taken out, the power button) and once with no card in
+  (16 November 2026). The kernel reports PCIe completion timeouts on the
+  network's link, and the link comes back at the next start. The cause
+  remains undetermined. The console goes on: cards, games and saves work.
 - The board has no clock battery: without a time server its clock starts
   from an old time at every boot.
 - Sound is HDMI only. No Wi-Fi, no Bluetooth setup.

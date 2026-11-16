@@ -158,16 +158,15 @@ lenta.
 
 | Tu ordenador | El procesador de la consola | Comprobado |
 | --- | --- | --- |
-| macOS, Apple Silicon | Virtualizado (HVF) | La v0.1.0-dev.5 en un Mac (macOS 27): su descarga instalada, arrancar, MUN Collect y la tarjeta vestida con Reef, jugar y apagar, sin pantalla, y el sonido del arranque grabado; con ventana, teclado y sonido, una construcción anterior de esta versión preliminar. La v0.1.0-dev.4, además, en CI en macOS 15, sin pantalla y emulado (no hay HVF dentro de una VM) |
-| Linux, x86_64 o ARM64 | Emulado; KVM en ARM64 aún sin probar | La v0.1.0-dev.5, pendiente. La v0.1.0-dev.4 en CI, sin pantalla; la v0.1.0-dev.2, además, en máquinas virtuales Ubuntu 24.04 |
-| Windows, x86_64 o ARM64 | Emulado | La v0.1.0-dev.5, pendiente. La v0.1.0-dev.4 en CI (Windows Server 2025; Windows 11 ARM64), sin pantalla |
+| macOS, Apple Silicon | Virtualizado (HVF) | La v0.1.0-dev.5 en un Mac (macOS 27): su descarga instalada, arrancar, MUN Collect y la tarjeta vestida con Reef, jugar y apagar, sin pantalla, y el sonido del arranque grabado; con ventana, teclado y sonido, una construcción anterior de esta versión preliminar. La v0.1.0-dev.5, además, en CI en macOS 15, sin pantalla y emulado (no hay HVF dentro de una VM) |
+| Linux, x86_64 o ARM64 | Emulado; KVM en ARM64 aún sin probar | La v0.1.0-dev.5 en CI, sin pantalla; la v0.1.0-dev.2, además, en máquinas virtuales Ubuntu 24.04 |
+| Windows, x86_64 o ARM64 | Emulado | La v0.1.0-dev.5 en CI (Windows Server 2025; Windows 11 ARM64), sin pantalla |
 
 «En CI» es el flujo de trabajo Hosts: descargar una versión preliminar,
 arrancar la consola, jugar su tarjeta y apagar, en las máquinas virtuales de
-GitHub, sin ventana. Comprueba cada versión preliminar cuando se publica, y
-las notas de esa versión dan el resultado: la v0.1.0-dev.4 pasó en los cinco
-([su ejecución](https://github.com/Play-MUN/mun-os/actions/runs/38839513795));
-el de la v0.1.0-dev.5 se añade cuando se haya ejecutado. Todavía no se ha
+GitHub, sin ventana. Comprueba los archivos de cada versión preliminar antes
+de publicarlos, y las notas de esa versión dan el resultado: la v0.1.0-dev.5
+pasó en los cinco ([su ejecución](https://github.com/Play-MUN/mun-os/actions/runs/43887723257)). Todavía no se ha
 probado en ningún ordenador con Linux o Windows, ni con ventana, teclado y
 sonido fuera de macOS.
 

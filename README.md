@@ -145,16 +145,15 @@ the same console, slower.
 
 | Your computer | The console's processor | Checked |
 | --- | --- | --- |
-| macOS, Apple Silicon | Virtualized (HVF) | v0.1.0-dev.5 on a Mac (macOS 27): its bundle installed, start, MUN Collect and the card dressed in Reef, play and power-off, headless, and the start-up's sound recorded; a window, keyboard and sound with an earlier build of this preview. v0.1.0-dev.4 also in CI on macOS 15, headless and emulated (no HVF in a VM) |
-| Linux, x86_64 or ARM64 | Emulated; KVM on ARM64 not tried yet | v0.1.0-dev.5 pending. v0.1.0-dev.4 in CI, headless; v0.1.0-dev.2 also in Ubuntu 24.04 virtual machines |
-| Windows, x86_64 or ARM64 | Emulated | v0.1.0-dev.5 pending. v0.1.0-dev.4 in CI (Windows Server 2025; Windows 11 ARM64), headless |
+| macOS, Apple Silicon | Virtualized (HVF) | v0.1.0-dev.5 on a Mac (macOS 27): its bundle installed, start, MUN Collect and the card dressed in Reef, play and power-off, headless, and the start-up's sound recorded; a window, keyboard and sound with an earlier build of this preview. v0.1.0-dev.5 also in CI on macOS 15, headless and emulated (no HVF in a VM) |
+| Linux, x86_64 or ARM64 | Emulated; KVM on ARM64 not tried yet | v0.1.0-dev.5 in CI, headless; v0.1.0-dev.2 also in Ubuntu 24.04 virtual machines |
+| Windows, x86_64 or ARM64 | Emulated | v0.1.0-dev.5 in CI (Windows Server 2025; Windows 11 ARM64), headless |
 
 "In CI" is the Hosts workflow: download a preview, start the console, play
 its card, power off, in GitHub's virtual machines, without a window. It
-checks each preview once it is published, and that preview's release notes
-give the result: v0.1.0-dev.4 passed on all five
-([its run](https://github.com/Play-MUN/mun-os/actions/runs/38839513795));
-v0.1.0-dev.5's result is added when it has run. No Linux or Windows
+checks each preview's own files before they are published, and that
+preview's release notes give the result: v0.1.0-dev.5 passed on all five
+([its run](https://github.com/Play-MUN/mun-os/actions/runs/43887723257)). No Linux or Windows
 computer has been tried yet, and no window, keyboard or sound outside
 macOS.
 

@@ -15,21 +15,28 @@ con una imagen descargada, hacer Game Cards y construir una imagen.
 | Ordenador | Procesador de la consola | Sin pantalla (descarga, arranque, tarjeta, juego, apagado) | Ventana, teclado, sonido |
 | --- | --- | --- | --- |
 | macOS 27, Apple Silicon | Virtualizado (HVF) | Comprobado en un Mac (v0.1.0-dev.5, con MUN Collect y con la tarjeta vestida con Reef, cuyo movimiento debe reproducir el shell; v0.1.0-dev.4) | La v0.1.0-dev.5: su sonido grabado desde una consola sin pantalla; ventana, teclado y sonido (Cocoa, CoreAudio) con una construcción anterior de la versión preliminar. Comprobado en un Mac con la v0.1.0-dev.4 |
-| macOS 15, ARM64 (la máquina virtual de GitHub) | Emulado: no hay HVF dentro de una VM | La v0.1.0-dev.5, pendiente; comprobado en CI (v0.1.0-dev.4) | Sin probar |
-| Linux x86_64, Ubuntu 24.04 | Emulado | La v0.1.0-dev.5, pendiente; comprobado en CI (v0.1.0-dev.4) y en una máquina virtual (v0.1.0-dev.2) | Sin probar (GTK o SDL) |
-| Linux ARM64, Ubuntu 24.04 | Emulado (sin `/dev/kvm` en ninguno de los dos) | La v0.1.0-dev.5, pendiente; comprobado en CI (v0.1.0-dev.4) y en una máquina virtual (v0.1.0-dev.2) | Sin probar |
+| macOS 15, ARM64 (la máquina virtual de GitHub) | Emulado: no hay HVF dentro de una VM | Comprobado en CI (v0.1.0-dev.5) | Sin probar |
+| Linux x86_64, Ubuntu 24.04 | Emulado | Comprobado en CI (v0.1.0-dev.5) y en una máquina virtual (v0.1.0-dev.2) | Sin probar (GTK o SDL) |
+| Linux ARM64, Ubuntu 24.04 | Emulado (sin `/dev/kvm` en ninguno de los dos) | Comprobado en CI (v0.1.0-dev.5) y en una máquina virtual (v0.1.0-dev.2) | Sin probar |
 | Linux ARM64 con KVM | Virtualizado (KVM) | Sin probar | Sin probar |
-| Windows Server 2025, x86_64 | Emulado, QEMU para Windows | La v0.1.0-dev.5, pendiente; comprobado en CI (v0.1.0-dev.4) | Sin probar |
-| Windows 11, ARM64 | Emulado, el QEMU ARM64 de MSYS2 | La v0.1.0-dev.5, pendiente; comprobado en CI (v0.1.0-dev.4) | Sin probar |
+| Windows Server 2025, x86_64 | Emulado, QEMU para Windows | Comprobado en CI (v0.1.0-dev.5) | Sin probar |
+| Windows 11, ARM64 | Emulado, el QEMU ARM64 de MSYS2 | Comprobado en CI (v0.1.0-dev.5) | Sin probar |
 
 «Comprobado en CI» es el flujo de trabajo Hosts del repositorio
 (`.github/workflows/hosts.yml`) en las máquinas virtuales de GitHub:
 descarga una versión preliminar como lo haría un jugador, arranca la consola,
-inserta MUN Collect, lo juega y sale, retira la tarjeta y apaga. Se ejecuta
-sobre cada versión preliminar cuando se publica, y las notas de esa versión
-dan el resultado: la v0.1.0-dev.4 pasó en los cinco
-([su ejecución](https://github.com/Play-MUN/mun-os/actions/runs/38839513795));
-la v0.1.0-dev.5 queda pendiente hasta que el flujo se ejecute sobre ella.
+inserta MUN Collect, lo juega y sale, retira la tarjeta y apaga, y otra vez
+con la tarjeta vestida con Reef, cuyo movimiento debe reproducir el shell. Se
+ejecuta sobre los archivos de cada versión preliminar, desde un borrador de
+la versión, antes de publicarlos, y las notas de esa versión dan el
+resultado: la v0.1.0-dev.5 pasó en los cinco ([su ejecución](https://github.com/Play-MUN/mun-os/actions/runs/43887723257)). En
+Windows comprueba además el canal de control de la consola: sus pruebas,
+tres arranques seguidos y otra cuenta rechazada mientras el usuario de la
+consola se conecta; y una carpeta de perfil con acentos y espacios en el
+nombre, que funcionó por su nombre corto (8.3) en Windows 11 ARM64 y se
+rechazó, con un mensaje que dice por qué, en Windows Server 2025, cuyo
+volumen no guarda nombres cortos
+([las herramientas de la consola virtual](../../vm/README.md), en inglés).
 Dice que las herramientas y la imagen funcionan en
 ese sistema; no mide la velocidad, y no se ha probado ningún ordenador físico
 con Linux o Windows. Las consolas

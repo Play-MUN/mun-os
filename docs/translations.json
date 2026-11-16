@@ -13,8 +13,8 @@
       "translation": "README.es.md",
       "source": "README.md",
       "language": "es",
-      "reviewed": "2026-11-14",
-      "source_sha256": "ed1a3d0f6e561c976e6daa0742532e8a3291131b27f0a9dba5910d0025a6d666"
+      "reviewed": "2026-11-16",
+      "source_sha256": "963c3c62033de3b9a650dee9c25457b19f981325031884f21f3390308eb36463"
     },
     {
       "translation": "SECURITY.es.md",
@@ -34,8 +34,8 @@
       "translation": "docs/es/compatibility.md",
       "source": "docs/compatibility.md",
       "language": "es",
-      "reviewed": "2026-11-14",
-      "source_sha256": "c61530fe25463a1ab6ee82717fb9612ee53ddbf102fa7a5000ff4f89d4cc32ec"
+      "reviewed": "2026-11-16",
+      "source_sha256": "f84a37cd954622762f66b8f22bf051d326e718cb88813ef2009ffe76acab0b2a"
     },
     {
       "translation": "docs/es/getting-started.md",

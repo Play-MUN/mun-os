@@ -18,6 +18,26 @@ import cardd  # noqa: E402
 from mun_card.errors import CardError  # noqa: E402
 
 
+def popen_from(run):
+    """A stand-in for subprocess.Popen answering as `run` (a stand-in for
+    subprocess.run) does: the service starts mount commands with Popen, to
+    keep one that does not end within its bound."""
+    class Command:
+        def __init__(self, argv, **kwargs):
+            result = run(argv, **kwargs)
+            self.returncode, self.output = result.returncode, (result.stdout, result.stderr)
+
+        def communicate(self, timeout=None):
+            return self.output
+
+        def poll(self):
+            return self.returncode
+
+        def wait(self, timeout=None):
+            return self.returncode
+    return Command
+
+
 class FakeMounter:
     def __init__(self, fail_for=()):
         self.mounted = {}
@@ -26,6 +46,14 @@ class FakeMounter:
 
     def device_path(self, device):
         return f"/dev/{device}"
+
+    # Nothing is ever left running, and the kernel's table is not consulted:
+    # unknown, so closing a card remounts it, as the service does then.
+    def settled(self, target):
+        return True
+
+    def read_only(self, target):
+        return None
 
     def mount(self, card, path):
         if card.device in self.fail_for:
@@ -48,9 +76,17 @@ class FakeMounter:
             self.log.append(("umount", card.slot))
             card.mount = None
 
+    # The kernel refuses a remount to read-only while a file removed from the
+    # card is still open (docs/saves.md); tests turn this on and off.
+    refuse_read_only = False
+
     def remount(self, card, rw):
         if not card.mount:
             raise CardError("card_removed", "La tarjeta ya no está montada")
+        if not rw and self.refuse_read_only:
+            self.log.append(("remount-refused", card.slot, "ro"))
+            raise CardError("sync_failed", "No se pudo cambiar el modo de la tarjeta",
+                            f"mount: {card.mount}: mount point is busy.")
         self.log.append(("remount", card.slot, "rw" if rw else "ro"))
 
 
@@ -570,6 +606,50 @@ class SaveWriteTests(unittest.TestCase):
         self.assertEqual(ctx.exception.code, "save_path_unsafe")
         self.assertEqual(sorted(p.name for p in (self.tmp / "content").iterdir()), ["mun-collect"])
 
+    # --- a card without its saves directory (docs/game-cards.md: "if present ... a directory") ---
+    def test_a_card_without_a_saves_directory_gets_one_at_its_first_save(self):
+        (self.tmp / "saves").rmdir()
+        self.assertEqual(self.handout()[0], {"present": False})
+        self.assertFalse((self.tmp / "saves").exists(), "reading a save creates nothing")
+        outcome = self.write()
+        self.assertTrue(outcome["ok"], outcome)
+        self.assertEqual(self.names(), ["save.json"])
+        for made in (self.tmp / "saves", self.game_dir):
+            info = os.lstat(made)
+            self.assertTrue(statmod.S_ISDIR(info.st_mode)); self.assertEqual(oct(info.st_mode & 0o777), "0o755")
+        self.assertEqual(self.mounter.log, [("remount", "c1", "rw"), ("remount", "c1", "ro")])
+        self.assert_loadable_old_save()
+
+    def test_a_saves_location_of_several_folders_is_made_one_at_a_time(self):
+        (self.tmp / "saves").rmdir()
+        self.info["saves"] = "data/slot/saves"
+        (self.tmp / "data").mkdir()                       # the first exists, the others do not
+        self.assertTrue(self.write()["ok"])
+        self.assertEqual(sorted(p.name for p in (self.tmp / "data" / "slot" / "saves" / "mun.collect").iterdir()), ["save.json"])
+        self.assertEqual(sorted(p.name for p in self.tmp.iterdir()), ["content", "data"])
+
+    def test_a_missing_saves_directory_is_never_made_through_a_link(self):
+        (self.tmp / "saves").rmdir()
+        (self.tmp / "saves").symlink_to(self.tmp / "content" / "elsewhere", target_is_directory=True)   # points at nothing
+        with self.assertRaises(CardError) as ctx:
+            self.write()
+        self.assertEqual(ctx.exception.code, "save_path_unsafe")
+        (self.tmp / "saves").unlink()
+        self.info["saves"] = "data/saves"
+        (self.tmp / "data").symlink_to(self.tmp / "content", target_is_directory=True)
+        with self.assertRaises(CardError) as ctx:
+            self.write()
+        self.assertEqual(ctx.exception.code, "save_path_unsafe")
+        self.assertEqual(sorted(p.name for p in (self.tmp / "content").iterdir()), ["mun-collect"], "nothing made in content")
+        self.assertEqual(self.mounter.log[-1], ("remount", "c1", "ro"))
+
+    def test_a_file_where_the_saves_directory_should_be_is_refused(self):
+        (self.tmp / "saves").rmdir(); (self.tmp / "saves").write_bytes(b"not a folder")
+        with self.assertRaises(CardError) as ctx:
+            self.write()
+        self.assertEqual(ctx.exception.code, "save_path_unsafe")
+        self.assertEqual((self.tmp / "saves").read_bytes(), b"not a folder")
+
     def test_restore_never_follows_links(self):
         (self.tmp / "saves" / "mun.collect").symlink_to(self.tmp / "content", target_is_directory=True)
         outcome, copy = self.handout()
@@ -638,6 +718,15 @@ class SaveWriteTests(unittest.TestCase):
         outcome, copy = self.handout()
         self.assertTrue(outcome["copied"]); self.assertTrue(b'"n": 2' in copy.read_bytes() or b'"n": 1' in copy.read_bytes())
 
+    def test_an_unforeseen_failure_leaves_no_temporary_and_the_card_read_only(self):
+        self.write(self.envelope(1))
+        with patch.object(cardd, "_is_envelope", side_effect=RuntimeError("not a failure the protocol expects")):
+            with self.assertRaises(RuntimeError):
+                self.write(self.envelope(2))
+        self.assertEqual(self.names(), ["save.json"]); self.assertIn(b'"n": 1', self.target.read_bytes())
+        self.assertEqual(self.mounter.log[-1], ("remount", "c1", "ro"), "never left writable")
+        self.assert_loadable_old_save()
+
     def test_stale_temporary_from_an_earlier_crash_is_replaced(self):
         self.write(self.envelope(1))
         (self.game_dir / "save.json.tmp").write_bytes(b"half written")
@@ -661,6 +750,13 @@ class SaveWriteTests(unittest.TestCase):
 class ReleaseUnmountTests(unittest.TestCase):
     """R3: safe release confirms only a strict unmount; removed-device cleanup stays best effort."""
 
+    def setUp(self):
+        # The card is mounted, as far as the kernel's table says: this host's
+        # own table (Linux) knows nothing of /run/mun/cards.
+        stand_in = patch.object(cardd.Mounter, "mounted", lambda self, target: True)
+        stand_in.start()
+        self.addCleanup(stand_in.stop)
+
     def card(self):
         return cardd.Card(slot="c1", device="vdc", serial="NPT-game", state="valid", active=True, info=game_info(), mount="/run/mun/cards/c1")
 
@@ -669,7 +765,7 @@ class ReleaseUnmountTests(unittest.TestCase):
         card = self.card(); calls = []
         def run(cmd, **kwargs):
             calls.append(cmd); return Mock(returncode=32, stderr="umount: target is busy.", stdout="")
-        with patch.object(cardd.subprocess, "run", run):
+        with patch.object(cardd.subprocess, "run", run), patch.object(cardd.subprocess, "Popen", popen_from(run)):
             with self.assertRaises(CardError) as ctx:
                 mounter.unmount(card, strict=True)
         self.assertEqual(ctx.exception.code, "unmount_failed"); self.assertIn("busy", ctx.exception.detail)
@@ -681,7 +777,8 @@ class ReleaseUnmountTests(unittest.TestCase):
         card = self.card(); calls = []
         def run(cmd, **kwargs):
             calls.append(cmd); return Mock(returncode=32, stderr="umount: target is busy.", stdout="")
-        with patch.object(cardd.subprocess, "run", run), patch.object(Path, "rmdir", lambda self: None):
+        with patch.object(cardd.subprocess, "run", run), patch.object(cardd.subprocess, "Popen", popen_from(run)), \
+                patch.object(Path, "rmdir", lambda self: None):
             mounter.unmount(card)
         self.assertIsNone(card.mount)
         self.assertEqual(calls, [["umount", "/run/mun/cards/c1"], ["umount", "-l", "/run/mun/cards/c1"]])
@@ -751,6 +848,20 @@ class SaveRequestTests(unittest.TestCase):
         self.assertEqual(self.save(schema=0)["error"]["code"], "save_invalid")
         self.assertEqual(self.save(schema=True)["error"]["code"], "save_invalid")
         self.assertEqual(self.save(payload={"big": "x" * (64 * 1024)})["error"]["code"], "save_too_large")
+
+    def test_text_that_utf8_cannot_carry_is_refused_before_any_write(self):
+        # JSON spells a lone surrogate in plain ASCII ("\\ud800"); no file can hold it as UTF-8.
+        for payload in ({"n": "\ud800"}, {"\udfff": 1}, {"deep": [{"name": "ok\ud83d"}]}):
+            reply = self.save(payload=payload)
+            self.assertEqual((reply["ok"], reply["error"]["code"]), (False, "save_invalid"), payload)
+        self.assertEqual(self.save(session="s\ud800")["error"]["code"], "save_invalid")
+        self.assertFalse((self.tmp / "c1" / "saves" / "mun.collect").exists())
+        self.assertNotIn(("remount", "c1", "rw"), self.mounter.log)
+        # Text UTF-8 does carry is saved as before, and the card is not left busy.
+        reply = self.save(payload={"name": "ñ 収集 \U0001f642"})
+        self.assertTrue(reply["ok"], reply)
+        saved = json.loads((self.tmp / "c1" / "saves" / "mun.collect" / "save.json").read_text(encoding="utf-8"))
+        self.assertEqual(saved["payload"], {"name": "ñ 収集 \U0001f642"})
 
     def test_one_save_at_a_time_and_release_waits_for_it(self):
         gate = threading.Event()
@@ -823,7 +934,9 @@ class SaveRequestTests(unittest.TestCase):
         self.assertEqual(replies[-1]["content"], {"device": self.mounter.device_path(card.device), "root": "content"})
 
     def test_mount_options_load_the_journal_read_only(self):
-        self.assertEqual(cardd.MOUNT_OPTIONS, "ro,nosuid,nodev,noexec", "no noload: a later rw remount must be journaled")
+        options = cardd.MOUNT_OPTIONS.split(",")
+        self.assertEqual(options[:4], ["ro", "nosuid", "nodev", "noexec"])
+        self.assertNotIn("noload", options, "no noload: a later rw remount must be journaled")
 
 
 if __name__ == "__main__":
@@ -834,7 +947,9 @@ class DirectorySaveCardTests(unittest.TestCase):
     """Directory saves on the card side: the payload file, per-card bounds, integrity,
     a damaged envelope never becomes the previous copy, restore falls back."""
 
-    SPEC = {"saves_directory": ".Sample/save", "saves_units": ["*.sav"], "saves_checks": ["zlib-xml"],
+    # "any": the units these tests write are placeholders, not a game's files;
+    # what a unit's check refuses is tested beside the launcher's restore.
+    SPEC = {"saves_directory": ".Sample/save", "saves_units": ["*.sav"], "saves_checks": ["any"],
             "saves_max_bytes": 1024 * 1024}
 
     def setUp(self):
@@ -909,6 +1024,13 @@ class DirectorySaveCardTests(unittest.TestCase):
         self.assertIn(self.save_files(payload=big)["error"]["code"], ("save_invalid", "save_too_large"))
         self.assertFalse((self.save_dir() / "save.json").exists())
 
+    def test_a_files_payload_with_text_utf8_cannot_carry_is_refused(self):
+        payload = self.payload({"save-0000.sav": b"abc"}); payload["captured_at"] = "\ud800"
+        reply = self.save_files(payload=payload)      # in the payload file it is the ASCII escape
+        self.assertEqual((reply["ok"], reply["error"]["code"]), (False, "save_invalid"))
+        self.assertFalse((self.save_dir() / "save.json").exists())
+        self.assertTrue(self.save_files({"save-0000.sav": b"abc"})["ok"])
+
     def test_single_object_saves_are_refused_on_a_directory_card(self):
         before = len(self.replies)
         self.h.manager.save({"type": "save", "slot": "c1", "insertion": self.card["insertion"], "serial": "NPT-game",
@@ -966,11 +1088,13 @@ class NamingGenerationSaveTests(unittest.TestCase):
     def envelope(self, fmt, n=1, **extra):
         return (json.dumps({"format": fmt, "game": "mun.collect", "schema": 1, "payload": {"n": n}, **extra}) + "\n").encode()
 
-    def files_envelope(self, fmt, data=b"<Save/>"):
-        import base64, hashlib
+    def files_envelope(self, fmt, data=b"<Save/>", compress=True, **extra):
+        # The card declares its units zlib-xml: a unit is what such a game writes.
+        import base64, hashlib, zlib
+        data = zlib.compress(data) if compress else data
         payload = {"files": [{"path": "save-0000.sav", "size": len(data), "sha256": hashlib.sha256(data).hexdigest(),
                               "data": base64.b64encode(data).decode()}]}
-        return self.envelope(fmt, payload_kind="files").replace(b'{"n": 1}', json.dumps(payload).encode())
+        return self.envelope(fmt, payload_kind="files", **extra).replace(b'{"n": 1}', json.dumps(payload).encode())
 
     def handout(self, info):
         target = self.tmp / "work" / "save.json"
@@ -1052,3 +1176,310 @@ class NamingGenerationSaveTests(unittest.TestCase):
         # The same envelopes are valid on a card of the earlier generation.
         out, target = self.handout(game_info(naming="earlier", **self.DIRECTORY))
         self.assertEqual((out["copied"], out["recovered"]), (True, False))
+
+
+    def test_a_previous_copy_is_handed_out_only_if_the_launcher_would_restore_it(self):
+        # A directory-save game cannot tell the player its save is damaged:
+        # the console falls back to save.json.prev, and must not hand out one
+        # the launcher then refuses (docs/saves.md).
+        info = game_info(naming="mun", **self.DIRECTORY)
+        refused = {
+            "a unit failing its check": self.files_envelope("mun-save/1", b"<prev/>", compress=False),
+            "another game's": self.files_envelope("mun-save/1", b"<prev/>", game="other.game"),
+            "another schema": self.files_envelope("mun-save/1", b"<prev/>", schema=2),
+        }
+        for what, previous in refused.items():
+            with self.subTest(what):
+                (self.game_dir / "save.json").write_bytes(b"{torn")
+                (self.game_dir / "save.json.prev").write_bytes(previous)
+                out, target = self.handout(info)
+                self.assertEqual((out["copied"], out["error"]["code"]), (False, "save_damaged"))
+                self.assertFalse(target.exists())
+        (self.game_dir / "save.json.prev").write_bytes(self.files_envelope("mun-save/1", b"<prev/>"))
+        out, target = self.handout(info)
+        self.assertEqual((out["copied"], out["recovered"]), (True, True))
+
+    def test_a_save_of_countless_small_values_is_refused_without_parsing_it(self):
+        import time, tracemalloc
+        info = game_info(naming="mun", **dict(self.DIRECTORY, saves_max_bytes=8 * 1024 * 1024))
+        _, limit = cardd.save_bounds(info)
+        (self.game_dir / "save.json").write_bytes(b"{torn")
+        (self.game_dir / "save.json.prev").write_bytes(b"[" + b"0," * (limit // 2 - 8) + b"0]")
+        tracemalloc.start()
+        started = time.perf_counter()
+        try:
+            out, _ = self.handout(info)
+            seconds, peak = time.perf_counter() - started, tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+        self.assertEqual(out["error"]["code"], "save_damaged")
+        self.assertLess(peak, 64 * 1024 * 1024, "parsed into objects")
+        self.assertLess(seconds, 1.0)
+
+
+class ReaderSlotTests(unittest.TestCase):
+    """A board's card reader (MUN_CARDD_SLOTS): only a whole disk under the
+    named controller is a card, named by its CID; the board's other disks,
+    the system's eMMC among them, never are. Checked on a sysfs tree laid out
+    as the Dragon Q6A's (2026-11-12)."""
+
+    SLOT = "devices/platform/soc@0/8804000.mmc"
+    CID = "1b534d454231515430c1b2c3d40169b2"
+
+    def setUp(self):
+        import tempfile
+        self.sys = Path(tempfile.mkdtemp())
+        self.addCleanup(__import__("shutil").rmtree, self.sys)
+        (self.sys / "block").mkdir()
+        self.disk("mmcblk1", f"{self.SLOT}/mmc_host/mmc1/mmc1:aaaa", cid=self.CID)               # the microSD slot
+        self.disk("mmcblk0", "devices/platform/soc@0/7c4000.mmc/mmc_host/mmc0/mmc0:0001",
+                  cid="45010044413230313601d7a3b2c10e2d")                                         # the eMMC: the system
+        self.disk("sda", "devices/platform/soc@0/a600000.usb/xhci-hcd.1.auto/usb2/2-1/2-1:1.0/host0/target0:0:0/0:0:0:0")
+        self.disk("vdc", "devices/platform/a003c00.virtio_mmio/virtio1", serial="NPT-card01")
+        # A controller whose name starts like the slot's, to catch a prefix of a name.
+        self.disk("mmcblk2", "devices/platform/soc@0/8804000.mmc2/mmc_host/mmc2/mmc2:aaaa", cid=self.CID)
+
+    def disk(self, name, parent, cid=None, serial=None):
+        real = self.sys / parent / "block" / name
+        real.mkdir(parents=True)
+        if cid is not None:
+            (self.sys / parent / "cid").write_text(cid + "\n")
+            (real / "device").symlink_to(self.sys / parent)
+        if serial is not None:
+            (real / "serial").write_text(serial + "\n")
+        (self.sys / "block" / name).symlink_to(real)
+
+    def found(self, slots):
+        with patch.object(cardd, "SYS_ROOT", self.sys), patch.object(cardd, "SLOTS", slots):
+            return {name: serial for name, serial, _ in cardd.enumerate_devices()}
+
+    def test_without_a_reader_only_virtio_cards_are_found(self):
+        self.assertEqual(self.found(()), {"vdc": "NPT-card01"})
+
+    def test_the_slots_card_is_found_by_its_cid_and_nothing_else_of_the_board(self):
+        self.assertEqual(self.found((self.SLOT,)), {"vdc": "NPT-card01", "mmcblk1": f"NPT-sd-{self.CID}"})
+
+    def test_a_card_without_a_readable_cid_is_not_a_card(self):
+        (self.sys / self.SLOT / "mmc_host/mmc1/mmc1:aaaa/cid").write_text("not hex\n")
+        self.assertEqual(self.found((self.SLOT,)), {"vdc": "NPT-card01"})
+
+    def test_the_reader_is_read_from_the_environment(self):
+        script = ("import os, sys; sys.path.insert(0, sys.argv[1]); os.environ['MUN_CARDD_SLOTS'] = "
+                  "'/devices/platform/soc@0/8804000.mmc/:/x/'; import cardd; print(cardd.SLOTS)")
+        import subprocess
+        out = subprocess.run([sys.executable, "-c", script, str(ROOT / "services" / "mun-cardd")],
+                             capture_output=True, text=True, env=dict(os.environ, PYTHONPATH=str(ROOT / "tools" / "mun-card")))
+        self.assertEqual(out.stdout.strip(), "('devices/platform/soc@0/8804000.mmc', 'x')", out.stderr)
+
+
+class UnmountWithoutProcessesTests(unittest.TestCase):
+    """A card refused, or gone, whose unmount cannot even start: no process
+    and no thread to be had, as when the card service has reached its task
+    limit. The shell still hears the refusal or the removal; the mount is
+    kept as it really is, never forgotten while it stands; a safe release
+    meanwhile is refused, not reported as done; and once processes can
+    start again the service's loop gets the unmount it owes through."""
+
+    TARGET = "/run/mun/cards/c1"
+
+    def setUp(self):
+        self.mounted = set()
+        self.processes = True
+        self.failures = []
+        mounted = self.mounted
+        real_start = threading.Thread.start
+
+        def start(thread):
+            if not self.processes:
+                raise RuntimeError("can't start new thread")
+            return real_start(thread)
+
+        class Mounter(cardd.Mounter):
+            def mount(self, card, path):
+                target = f"/run/mun/cards/{card.slot}"
+                mounted.add(target)
+                return target
+
+            def mounted(self, target):
+                return target in mounted
+
+        def run(argv, **kwargs):
+            if not self.processes:
+                raise BlockingIOError(11, "Resource temporarily unavailable")
+            if argv[0] == "umount":
+                mounted.discard(argv[-1])
+            return Mock(returncode=0, stdout="", stderr="")
+
+        def refuse(mount):
+            raise CardError("image_has_errors", "El sistema de archivos está marcado con errores")
+
+        for p in (patch.object(cardd.subprocess, "Popen", popen_from(run)),
+                  patch.object(cardd.threading.Thread, "start", start),
+                  patch.object(Path, "rmdir", lambda self: None)):
+            p.start()
+            self.addCleanup(p.stop)
+        self.h = Harness(mounter=Mounter(Path("/run/mun/cards")), validator=refuse)
+
+    def pump(self):
+        # As the service runs its callbacks: one that fails is logged and the
+        # loop goes on (main's guard), so a failure shows here as a missing effect.
+        for _ in range(500):
+            if self.h.pending:
+                break
+            threading.Event().wait(0.01)
+        while self.h.pending:
+            try:
+                self.h.pending.pop(0)()
+            except Exception as exc:  # noqa: BLE001
+                self.failures.append(exc)
+
+    def wake(self):
+        # What the service's loop does on a wake once a retry is due: the
+        # timers that had no thread of their own, then the owed unmounts
+        # (main()); then what they scheduled.
+        for step in ("run_due", "retry_unmounts"):
+            if hasattr(self.h.manager, step):
+                getattr(self.h.manager, step)(now=float("inf"))
+        self.pump()
+
+    def states(self):
+        return [event["card"]["state"] for event in self.h.events if event.get("type") == "card"]
+
+    def test_the_refusal_is_said_and_the_mount_kept_until_it_can_go(self):
+        self.h.manager.device_added("vdc", "NPT-bad", "/dev/vdc")
+        self.processes = False                  # validation refuses; no umount can start
+        self.pump()
+        card = self.h.manager.cards["vdc"]
+        self.assertEqual(self.states()[-1], "invalid", "the shell must hear the refusal")
+        self.assertEqual(card.mount, self.TARGET, "a mount that stands is not forgotten")
+        self.assertIn(self.TARGET, self.mounted)
+        self.assertEqual(self.failures, [])
+        replies = []
+        self.h.manager.release({"type": "release", "serial": "NPT-bad"}, replies.append)
+        self.assertFalse(replies[-1]["ok"], "not safe to remove while it is mounted")
+        self.assertNotIn("released", self.states())
+        self.wake()                             # still no process: still owed
+        self.assertEqual(card.mount, self.TARGET)
+        self.processes = True
+        self.wake()
+        self.assertIsNone(card.mount)
+        self.assertNotIn(self.TARGET, self.mounted)
+        self.h.manager.release({"type": "release", "serial": "NPT-bad"}, replies.append)
+        self.assertTrue(replies[-1]["ok"], replies[-1])
+        self.assertEqual(self.states()[-1], "released")
+        self.assertEqual(self.h.manager.unmounts_owed, {}, "nothing is tried again once it is unmounted")
+
+    def test_a_card_gone_while_its_unmount_cannot_start_is_unmounted_later(self):
+        self.h.manager.device_added("vdc", "NPT-bad", "/dev/vdc")
+        self.pump()
+        self.mounted.add(self.TARGET)           # refused and unmounted; mounted again for this case
+        card = next(iter(self.h.manager.cards.values()))
+        card.mount = self.TARGET
+        self.processes = False
+        try:                                    # as main's guard runs it
+            self.h.manager.device_removed("vdc")
+        except Exception as exc:  # noqa: BLE001
+            self.failures.append(exc)
+        self.assertIn("removed", [event.get("type") for event in self.h.events], "the shell must hear the removal")
+        self.assertIn(self.TARGET, self.mounted, "the mount stands")
+        self.assertIn("c1", self.h.manager.unmounts_owed)
+        replies = []
+        self.h.manager.release({"type": "release", "serial": "NPT-bad"}, replies.append)
+        self.assertFalse(replies[-1]["ok"], "gone but still mounted: not a safe removal either")
+        self.processes = True
+        self.wake()
+        self.assertNotIn(self.TARGET, self.mounted)
+        self.assertEqual(self.h.manager.unmounts_owed, {})
+
+    def test_a_timer_without_a_thread_runs_from_the_loop(self):
+        ran = []
+        self.processes = False
+        try:                                    # as main's guard runs a callback
+            self.h.manager.later(5.0, lambda: ran.append(True))
+        except Exception as exc:  # noqa: BLE001
+            self.failures.append(exc)
+        self.assertEqual(ran, [], "not before it is due")
+        self.processes = True
+        self.wake()
+        self.assertEqual(ran, [True], "a timer that had no thread still runs")
+
+    def test_a_timer_that_fails_costs_the_others_nothing(self):
+        ran = []
+
+        def broken():
+            raise OSError("broken")
+
+        self.processes = False
+        for fn in (broken, lambda: ran.append(True)):
+            try:
+                self.h.manager.later(1.0, fn)
+            except Exception as exc:  # noqa: BLE001
+                self.failures.append(exc)
+        self.processes = True
+        try:                                    # as main's guard runs the loop's step
+            self.wake()
+        except Exception as exc:  # noqa: BLE001
+            self.failures.append(exc)
+        self.assertEqual(ran, [True], "the timer after the failing one still runs")
+
+    def test_an_export_that_cannot_be_removed_inline_does_not_stop_its_caller(self):
+        self.processes = False
+        with patch.object(cardd, "_remove_tree", side_effect=OSError(30, "Read-only file system")):
+            cardd._remove_in_background(Path("/run/mun/shape/0000000000000000.1"))
+
+    def test_an_export_removed_without_a_thread_is_removed_at_once(self):
+        import tempfile
+        export = Path(tempfile.mkdtemp()) / "insertion.1"
+        (export / "world").mkdir(parents=True)
+        (export / "world" / "a.png").write_bytes(b"x")
+        self.processes = False
+        cardd._remove_in_background(export)
+        self.assertFalse(export.exists())
+
+
+class SaveThreadStartTests(unittest.TestCase):
+    """A save that cannot even start its worker (the system refuses a new
+    thread) fails at once and leaves the card free, as a save that fails."""
+
+    def test_a_save_whose_worker_cannot_start_fails_and_frees_the_card(self):
+        import tempfile
+        root = Path(tempfile.mkdtemp())
+        info = game_info(naming="mun")
+        h = Harness(mounter=RealDirMounter(root), validator=lambda mount, info=info: dict(info))
+        h.manager.device_added("vdc", "NPT-game", "/dev/vdc"); h.pump()
+        card = h.manager.snapshot()["cards"][0]
+        request = {"type": "save", "slot": "c1", "insertion": card["insertion"], "serial": "NPT-game",
+                   "version": "0.1.0", "game": "mun.collect", "session": "s1", "schema": 1, "payload": {"x": 1}}
+        replies = []
+        with patch.object(cardd.threading.Thread, "start", side_effect=RuntimeError("can't start new thread")):
+            h.manager.save(dict(request), replies.append)
+        h.pump()
+        self.assertEqual((replies[-1]["ok"], replies[-1]["error"]["code"]), (False, "write_failed"))
+        self.assertFalse(h.manager.cards["vdc"].saving, "the card is not left saving")
+        h.manager.save(dict(request), replies.append)      # and the next save goes through
+        h.pump()
+        self.assertTrue(replies[-1]["ok"], replies[-1])
+
+    def test_a_card_whose_validation_cannot_start_is_refused_not_left_reading(self):
+        h = Harness()
+        with patch.object(cardd.threading.Thread, "start", side_effect=RuntimeError("can't start new thread")):
+            h.manager.device_added("vdc", "NPT-game", "/dev/vdc")
+            h.pump(timeout=0.2)
+        card = h.manager.snapshot()["cards"][0]
+        self.assertEqual((card["state"], card["error"]["code"]), ("invalid", "internal_error"))
+        self.assertNotIn("c1", h.mounter.mounted, "and not left mounted")
+
+    def test_a_stage_whose_worker_cannot_start_is_answered_at_once(self):
+        import tempfile
+        root = Path(tempfile.mkdtemp())
+        info = game_info(naming="mun")
+        h = Harness(mounter=RealDirMounter(root), validator=lambda mount, info=info: dict(info))
+        h.manager.device_added("vdc", "NPT-game", "/dev/vdc"); h.pump()
+        card = h.manager.snapshot()["cards"][0]
+        replies = []
+        with patch.object(cardd, "LAUNCH_ROOT_PREFIX", str(root) + "/"), \
+                patch.object(cardd.threading.Thread, "start", side_effect=RuntimeError("can't start new thread")):
+            h.manager.stage({"type": "stage", "slot": "c1", "insertion": card["insertion"], "serial": "NPT-game",
+                             "version": "0.1.0", "session": "s1", "dest": str(root / "launch" / "s1")},
+                            replies.append)
+        self.assertEqual((replies[-1]["ok"], replies[-1]["error"]["code"]), (False, "stage_failed"))

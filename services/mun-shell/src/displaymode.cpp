@@ -463,6 +463,63 @@ QString pickNote(Pick pick, const Cap &limit)
 
 } // namespace
 
+int capLink()
+{
+    const QByteArray capText = qgetenv("MUN_DISPLAY_MAX_BPC");
+    if (capText.isEmpty()) {
+        qInfo("mun-shell: display: no cap on bits per channel to set (MUN_DISPLAY_MAX_BPC)");
+        return 0;
+    }
+    const std::optional<int> cap = parseMaxBpc(capText.toStdString());
+    if (!cap) {
+        qWarning("mun-shell: display: MUN_DISPLAY_MAX_BPC \"%s\" is not a number of bits from 6 to 16; no cap applies",
+                 capText.constData());
+        return 0;
+    }
+    Card0 card;
+    const int fd = card.fd();
+    if (fd < 0 || !drmIsMaster(fd)) {
+        qWarning("mun-shell: display: card0 cannot be set (%s); the cap is left for the shell's start",
+                 fd < 0 ? "not there" : "held by another program");
+        return 0;
+    }
+    drmModeResPtr resources = drmModeGetResources(fd);
+    if (!resources) {
+        qWarning("mun-shell: display: card0's outputs cannot be read; the cap is left for the shell's start");
+        return 0;
+    }
+    // Every outcome is said: without a line, the journal could not tell an
+    // output whose cap was set from none that takes one.
+    bool capped = false;
+    for (int i = 0; i < resources->count_connectors; ++i) {
+        drmModeConnectorPtr connector = drmModeGetConnectorCurrent(fd, resources->connectors[i]);
+        if (!connector)
+            continue;
+        const std::optional<Property> bpc = connector->connection == DRM_MODE_CONNECTED
+            ? property(fd, connector->connector_id, DRM_MODE_OBJECT_CONNECTOR, "max bpc") : std::nullopt;
+        if (bpc) {
+            capped = true;
+            const char *type = drmModeGetConnectorTypeName(connector->connector_type);
+            const uint64_t value = std::clamp<uint64_t>(uint64_t(*cap), bpc->min, std::max(bpc->min, bpc->max));
+            if (bpc->value == value)
+                qInfo("mun-shell: display: %s-%u is at most %llu bits per channel already", type ? type : "connector",
+                      connector->connector_type_id, static_cast<unsigned long long>(value));
+            else if (drmModeObjectSetProperty(fd, connector->connector_id, DRM_MODE_OBJECT_CONNECTOR, bpc->id, value) == 0)
+                qInfo("mun-shell: display: %s-%u set to at most %llu bits per channel (it was %llu), before anything is shown",
+                      type ? type : "connector", connector->connector_type_id, static_cast<unsigned long long>(value),
+                      static_cast<unsigned long long>(bpc->value));
+            else
+                qWarning("mun-shell: display: the cap of %llu bits per channel failed (%s)",
+                         static_cast<unsigned long long>(value), qPrintable(failure()));
+        }
+        drmModeFreeConnector(connector);
+    }
+    drmModeFreeResources(resources);
+    if (!capped)
+        qInfo("mun-shell: display: no connected output takes a cap on bits per channel (none has \"max bpc\"); nothing is set");
+    return 0;
+}
+
 bool awaitDisplay()
 {
     if (!drawsOnCard0())

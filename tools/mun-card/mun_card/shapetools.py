@@ -17,7 +17,7 @@ import zlib
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from . import shape
+from . import motion, shape
 from .errors import CardError
 from .validate import COVER_MAX_BYTES, COVER_MAX_SIDE
 
@@ -745,7 +745,8 @@ def write_fixture(folder: Path, name: str) -> Path:
 
 def named_files(document: Dict[str, object]) -> List[str]:
     """Every file a package's document names, whether the checker keeps its
-    block or not: the card's window, the sounds and the world's images."""
+    block or not: the card's window, the sounds and the world's images,
+    and from format 1.1 the motion's (motion.named_files)."""
     names: List[str] = []
 
     def take(value) -> None:
@@ -773,6 +774,14 @@ def named_files(document: Dict[str, object]) -> List[str]:
             take(emitter.get("sprite"))
         for light in items(world.get("light")):
             take(light.get("texture"))
+    # A 1.1 document's motion names files of its own; an older or unreadable
+    # format names none, as a console that reads it would see none.
+    try:
+        _, minor = shape.format_version(document)
+    except shape._Unusable:
+        minor = 0
+    if minor >= 1:
+        names.extend(motion.named_files(document))
     return sorted(set(names))
 
 
@@ -844,6 +853,17 @@ def clone_image(source: Path, destination: Path) -> None:
     shutil.copyfile(source, destination)
 
 
+def _debugfs_argument(text: str) -> str:
+    """`text` as one argument of a debugfs command: double-quoted, which keeps
+    spaces in it. A name holding a double quote or a line break is refused
+    rather than escaped: refusing is safe on a disposable copy, and the read
+    back afterwards (replace_package) catches a name debugfs listed escaped."""
+    if any(c in text for c in '"\n\r\0'):
+        from .errors import CardError
+        raise CardError("shape_write_failed", "Un nombre no se puede escribir en la copia de la tarjeta", repr(text))
+    return f'"{text}"'
+
+
 def replace_package(image_path: Path, content_root: str, staged: Path) -> None:
     """Replace `<content_root>/mun-shape/` on a card image with the folder
     `staged` (what stage_package wrote), with debugfs, without mounting.
@@ -874,19 +894,19 @@ def replace_package(image_path: Path, content_root: str, staged: Path) -> None:
                 if kind == "dir":
                     pending.append(path)
         for path, kind in sorted(found, key=lambda item: item[0].count("/"), reverse=True):
-            commands.append(f"{'rmdir' if kind == 'dir' else 'rm'} /{path}")
-        commands.append(f"rmdir /{base}")
+            commands.append(f"{'rmdir' if kind == 'dir' else 'rm'} {_debugfs_argument('/' + path)}")
+        commands.append(f"rmdir {_debugfs_argument('/' + base)}")
     elif existing is not None:
-        commands.append(f"rm /{base}")
+        commands.append(f"rm {_debugfs_argument('/' + base)}")
     staged = Path(staged)
     wanted: Dict[str, int] = {}
-    commands.append(f"mkdir /{base}")
+    commands.append(f"mkdir {_debugfs_argument('/' + base)}")
     for path in sorted(staged.rglob("*"), key=lambda item: (item.relative_to(staged).as_posix().count("/"), str(item))):
         relative = f"{base}/{path.relative_to(staged).as_posix()}"
         if path.is_dir():
-            commands.append(f"mkdir /{relative}")
+            commands.append(f"mkdir {_debugfs_argument('/' + relative)}")
         else:
-            commands.append(f"write {path} /{relative}")
+            commands.append(f"write {_debugfs_argument(str(path))} {_debugfs_argument('/' + relative)}")
             wanted[relative] = path.stat().st_size
     with tempfile.NamedTemporaryFile("w", suffix=".debugfs", delete=False) as script:
         script.write("\n".join(commands) + "\n")

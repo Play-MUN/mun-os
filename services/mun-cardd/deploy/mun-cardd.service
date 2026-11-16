@@ -6,11 +6,19 @@ Description=MUN card service (Game Card detection and validation)
 Documentation=file:///opt/mun/cardd/README.md
 After=systemd-udevd.service local-fs.target
 Before=mun-shell.service
+# No start limit. With the default one (five starts in ten seconds) a service
+# that ended quickly a few times stayed failed until the next boot, and with
+# it the console's only reader: no card was seen, no game could start or
+# save, and a card could not be released safely. A service that comes back
+# reads again the card that is in.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 ExecStart=/usr/bin/python3 /opt/mun/cardd/cardd.py
-Restart=on-failure
+# Always, and after a pause: at most one start every two seconds however it
+# keeps ending, which cannot keep the processor busy.
+Restart=always
 RestartSec=2
 Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=PYTHONUNBUFFERED=1

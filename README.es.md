@@ -5,10 +5,11 @@
 MUN™ es una consola de videojuegos que construimos en abierto, para juegos
 que posees en Game Cards. MUN OS es su sistema operativo, de código abierto y
 desarrollado en público. Ya puedes ejecutarlo en tu ordenador como consola
-virtual, probarlo, desmontarlo y participar; el hardware oficial de la consola
-llegará más adelante.
+virtual, probarlo, desmontarlo y participar. También lo ejecutamos en una
+placa de desarrollo, MUN Dev; el hardware propio de la consola llegará más
+adelante.
 
-![La pantalla principal de MUN Shell con la Game Card de MUN Collect insertada](docs/images/mun-shell-home.jpg)
+![La pantalla principal de MUN Shell en la consola virtual, con la Game Card de MUN Collect insertada](docs/images/home-collect.es.jpg)
 
 ## Lo que puedes hacer hoy
 
@@ -52,16 +53,29 @@ virtual, con imágenes de disco en lugar de tarjetas:
 - **Retírala con seguridad,** y la tarjeta sale de la ranura con todo lo que
   lleva.
 - **La consola no guarda una biblioteca.** Su almacenamiento es para el
-  sistema; *Mis juegos* lo dice claro: tus juegos viven en sus Game Cards.
+  sistema; *Universo*, en la pantalla principal, lo dice claro: tus juegos
+  viajan en sus propios soportes.
 
 ## Lo que funciona hoy, y lo que todavía no
 
-MUN OS v0.1.0-dev.4 es una versión preliminar de desarrollo. En la consola
+MUN OS v0.1.0-dev.5 es una versión preliminar de desarrollo. En la consola
 virtual:
 
-- **MUN Shell**, la interfaz propia de la consola, arranca sola: la pantalla
-  principal, Configuración (inglés o español, de 720p a 1440p, sonidos;
-  restablecer los ajustes o toda la consola), menús con sonido.
+- **MUN Shell**, la interfaz propia de la consola, arranca sola: su arranque
+  con sonido y después la pantalla principal, una órbita con cuatro
+  entradas: MUN Disk (la tarjeta que hay en la ranura), Universo,
+  Configuración y Apagar. *MUN Disk* es el nombre que está tomando el
+  soporte de la consola y la pantalla principal ya lo usa; el formato, las
+  herramientas y estas páginas siguen diciendo Game Card.
+  Configuración tiene inglés o español, de 720p a 1440p, sonidos, *Reducir
+  movimiento*, y restablecer los ajustes o toda la consola. Si se deja diez
+  minutos sin tocar, la pantalla se atenúa.
+- **Teclado y mandos.** El teclado maneja todos los menús. También un
+  mando: su cruceta o su palanca izquierda, su botón inferior para aceptar
+  y el de su derecha para volver (la disposición de Nintendo en los mandos
+  de ese estilo). Se ha probado con un mando, por Bluetooth en MUN Dev, no
+  en la consola virtual. Los juegos siguen recibiendo solo el teclado y el
+  puntero.
 - **Las Game Cards** se validan antes de que se ejecute nada de ellas. Un
   juego arranca aislado y devuelve la consola acabe como acabe, sus partidas
   van a la tarjeta y una tarjeta se retira con seguridad. Los juegos hechos
@@ -72,16 +86,41 @@ virtual:
   la tarjeta está dentro; nada de la tarjeta se ejecuta. MUN conserva la
   disposición, los textos, Configuración y la legibilidad, y el jugador decide
   cuánto se muestra.
+- **El movimiento de MUN Shape, un borrador experimental.** Un paquete puede
+  traer además una escena que se mueve detrás de los menús y les responde:
+  planos a distintas profundidades, criaturas que siguen recorridos,
+  partículas y luz, declarados como datos y reproducidos por el reproductor
+  de la propia consola. **Reef** es su ejemplo: un mar con bancos de peces,
+  un tiburón, cangrejos y algas detrás de la pantalla principal, y un banco
+  que se reúne cuando el foco está en Jugar. Los nombres y los límites del
+  borrador pueden cambiar en cualquier versión; v1 es el contrato estable, y
+  un paquete con movimiento conserva un aspecto v1 para las consolas que
+  solo leen v1 ([el movimiento de MUN Shape](docs/shape-motion.md), en
+  inglés).
 - **Ejemplos:** MUN Collect, un juego pequeño; una prueba de gráficos y
-  audio; dos paquetes de MUN Shape.
+  audio; tres paquetes de MUN Shape (`sea`, `paper` y Reef, con el estudio
+  que lo hace).
 
-| MUN Collect, sin paquete | La misma tarjeta con el ejemplo `sea` |
+| MUN Collect, sin paquete | La misma tarjeta vestida con Reef |
 | --- | --- |
-| ![La pantalla principal con la Game Card de MUN Collect, con el aspecto de MUN y los colores leídos de su portada](docs/images/mun-shape-before.jpg) | ![La misma pantalla con MUN Collect llevando el ejemplo sea: un mundo bajo el agua, placas de cristal y el objeto de la tarjeta mostrando el mar](docs/images/mun-shape-after.jpg) |
+| ![La pantalla principal con la Game Card de MUN Collect, con el aspecto propio de MUN](docs/images/home-collect.es.jpg) | ![La misma pantalla con MUN Collect llevando Reef: el arrecife detrás de los menús, con los colores del juego](docs/images/home-reef.es.jpg) |
 
-**Todavía no:** mandos, actualizaciones de tarjetas y del sistema, ni ningún
-hardware físico. La [arquitectura](docs/architecture.md) (en inglés) dice qué
-existe y qué está previsto.
+Son capturas de la consola virtual
+([de dónde sale cada imagen](docs/images/README.md), en inglés). Una imagen
+deja a Reef quieto: `./mun play --card collect-reef` lo muestra en
+movimiento ([primeros pasos](docs/es/getting-started.md#7-mira-mun-shape)).
+
+**En MUN Dev,** nuestra placa de desarrollo (una Radxa Dragon Q6A), el mismo
+sistema funciona en hardware real: 1080p a 60 Hz por HDMI con la GPU de la
+placa, sonido, Game Cards en tarjetas microSD en su ranura y partidas
+escritas en ellas. Es un perfil experimental que construyes tú, sin imagen
+para descargar, y no es la consola: [MUN Dev](docs/es/mun-dev.md) dice qué
+se ha comprobado allí y qué no.
+
+**Todavía no:** actualizaciones de tarjetas y del sistema, mandos en los
+juegos y en la consola virtual, emparejamiento de mandos en el sistema, el
+hardware propio de la consola y su lector de tarjetas. La [arquitectura](docs/architecture.md)
+(en inglés) dice qué existe y qué está previsto.
 
 ## Abierto, y hacia dónde va
 
@@ -93,15 +132,19 @@ terceros conservan sus propios términos, y los nombres y logotipos de MUN y
 Play MUN tienen [los suyos](NAME-AND-LOGO.txt)
 ([licencias](docs/licensing.md), en inglés).
 
-Hoy hay una imagen experimental, ARM64 como lo será la consola, que QEMU
-ejecuta como consola virtual; la propia imagen lo dice
-(`environment = "qemu-arm64"`, `release = false`). MUN -1, la primera consola,
-tendrá **una única configuración de hardware con soporte oficial**, todavía
-sin elegir; la consola montada y las versiones DIY sobre esa configuración
-usarán la misma imagen oficial. Abierto y adaptable no significa que hoy
-funcione en cualquier placa: un port físico necesita su propia integración
-(arranque, pantalla, entrada, almacenamiento, el lector de tarjetas), y los
-ports a otro hardware son bienvenidos como forks mantenidos por separado.
+Hoy una versión preliminar lleva una imagen experimental, ARM64 como lo será
+la consola, que QEMU ejecuta como consola virtual; la propia imagen lo dice
+(`environment = "qemu-arm64"`, `release = false`). El código fuente tiene
+además el perfil de MUN Dev, nuestra placa de desarrollo
+([MUN Dev](docs/es/mun-dev.md)). MUN -1, la primera consola, tendrá **una
+única configuración de hardware con soporte oficial**. Se diseña alrededor
+de la Radxa Dragon Q8B, una placa distinta de la de MUN Dev, en la que MUN
+OS todavía no se ha ejecutado; la consola montada y las versiones DIY sobre
+esa configuración usarán la misma imagen oficial. Abierto y adaptable no
+significa que hoy funcione en cualquier placa: un port físico necesita su
+propia integración (arranque, pantalla, sonido, entrada, almacenamiento, el
+lector de tarjetas), como muestra el perfil de MUN Dev, y los ports a otro
+hardware son bienvenidos como forks mantenidos por separado.
 
 ## Dónde funciona
 
@@ -115,16 +158,21 @@ lenta.
 
 | Tu ordenador | El procesador de la consola | Comprobado |
 | --- | --- | --- |
-| macOS, Apple Silicon | Virtualizado (HVF) | La v0.1.0-dev.4 en un Mac (macOS 27), con ventana, teclado y sonido, y en CI en macOS 15, sin pantalla y emulado (no hay HVF dentro de una VM) |
-| Linux, x86_64 o ARM64 | Emulado; KVM en ARM64 aún sin probar | La v0.1.0-dev.4 en CI, sin pantalla; la v0.1.0-dev.2, además, en máquinas virtuales Ubuntu 24.04 |
-| Windows, x86_64 o ARM64 | Emulado | La v0.1.0-dev.4 en CI (Windows Server 2025; Windows 11 ARM64), sin pantalla |
+| macOS, Apple Silicon | Virtualizado (HVF) | La v0.1.0-dev.5 en un Mac (macOS 27): su descarga instalada, arrancar, MUN Collect y la tarjeta vestida con Reef, jugar y apagar, sin pantalla, y el sonido del arranque grabado; con ventana, teclado y sonido, una construcción anterior de esta versión preliminar. La v0.1.0-dev.4, además, en CI en macOS 15, sin pantalla y emulado (no hay HVF dentro de una VM) |
+| Linux, x86_64 o ARM64 | Emulado; KVM en ARM64 aún sin probar | La v0.1.0-dev.5, pendiente. La v0.1.0-dev.4 en CI, sin pantalla; la v0.1.0-dev.2, además, en máquinas virtuales Ubuntu 24.04 |
+| Windows, x86_64 o ARM64 | Emulado | La v0.1.0-dev.5, pendiente. La v0.1.0-dev.4 en CI (Windows Server 2025; Windows 11 ARM64), sin pantalla |
 
 «En CI» es el flujo de trabajo Hosts: descargar una versión preliminar,
 arrancar la consola, jugar su tarjeta y apagar, en las máquinas virtuales de
 GitHub, sin ventana. Comprueba cada versión preliminar cuando se publica, y
 las notas de esa versión dan el resultado: la v0.1.0-dev.4 pasó en los cinco
-([su ejecución](https://github.com/Play-MUN/mun-os/actions/runs/38839513795)). Todavía no se ha probado en ningún ordenador con
-Linux o Windows, ni con ventana, teclado y sonido fuera de macOS.
+([su ejecución](https://github.com/Play-MUN/mun-os/actions/runs/38839513795));
+el de la v0.1.0-dev.5 se añade cuando se haya ejecutado. Todavía no se ha
+probado en ningún ordenador con Linux o Windows, ni con ventana, teclado y
+sonido fuera de macOS.
+
+Fuera de QEMU, MUN OS funciona en MUN Dev, nuestra placa de desarrollo, con
+un perfil propio: [qué se ha comprobado allí](docs/es/mun-dev.md#qué-se-ha-comprobado).
 
 ## Principios
 
@@ -153,9 +201,11 @@ Linux o Windows, ni con ventana, teclado y sonido fuera de macOS.
   Shape, y [verlo en acción](docs/es/guides/see-shape-in-action.md)
 - Para autores de tarjetas y juegos: [Game Cards](docs/game-cards.md),
   [partidas](docs/saves.md), [ejecutar un juego](docs/runtime.md),
-  [MUN Shape](docs/shape.md) (en inglés)
+  [MUN Shape](docs/shape.md) y [su movimiento](docs/shape-motion.md)
+  (borrador), en inglés
 - [Arquitectura](docs/architecture.md), [construcción de la imagen](os/README.md),
-  [laboratorio](vm/README.md) (en inglés) y [todos los documentos](docs/es/README.md)
+  [laboratorio](vm/README.md) (en inglés), [MUN Dev](docs/es/mun-dev.md) y
+  [todos los documentos](docs/es/README.md)
 - [Licencias](docs/licensing.md) (en inglés), [seguridad](SECURITY.es.md),
   [contribuir](CONTRIBUTING.es.md)
 
@@ -165,7 +215,7 @@ Linux o Windows, ni con ventana, teclado y sonido fuera de macOS.
 | --- | --- |
 | `services/` | MUN Shell, el servicio de tarjetas y el lanzador |
 | `tools/` | `mun-card` y el paquete compartido de tarjetas |
-| `os/` | La composición de la imagen de MUN OS: entradas con versión fijada, configuración de mkosi, scripts del constructor |
+| `os/` | La composición de la imagen de MUN OS: entradas con versión fijada, configuración de mkosi, scripts del constructor, los perfiles (el de la consola virtual y el de MUN Dev) |
 | `vm/` | El laboratorio: VM constructoras, invitados de imagen, tarjetas virtuales, descargas |
 | `mun` | El punto de entrada de las herramientas: `./mun get`, `./mun play`, `./mun card`, `./mun dev` |
 | `examples/` | Juegos de ejemplo y paquetes de MUN Shape |

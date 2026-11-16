@@ -30,9 +30,43 @@
 // that undims was not heard in time for the move pressed right after it),
 // and the device is let go when the shell stops for a game. A device that
 // fails is opened afresh at once; no device, or one that fails again, means
-// silence and one line in the journal, never an error in the interface, and
-// the next sound tries again after kRetry. With MUN_SHELL_TIMING set, the
+// silence and one line in the journal (after ALSA's own about that failure),
+// never an error in the interface; it is tried again after kRetry, by the
+// next sound or, awake, by itself, and those tries say nothing, ALSA's
+// messages included, until a device plays. With MUN_SHELL_TIMING set, the
 // journal says when the device is opened and let go.
+//
+// The start-up sound is the one case where that moment is never available
+// later: a display that was given no stream before it would swallow its
+// first notes while the picture already moves (measured on a board's HDMI
+// display: about two seconds). So at the first start of a boot main() makes
+// the one instance before the application, awake, and the device plays its
+// silence while the interface loads; the start-up waits until the device
+// has played well for long enough (playingFor(), BootLayer.qml). Open is not
+// enough: after every write the worker checks that what the device has
+// played advances at its rate (src/playbackhealth.h: not stalled, slow, fast
+// or going back, and able to say what it holds).
+//
+// Where the sound card comes up after the shell starts (a board's audio
+// DSP), expectDevice() says one is coming: until then a device that is not
+// there is tried every kExpectRetry instead of kRetry, those attempts stay
+// out of the journal (ALSA's own messages included; the kinds of failure
+// are said once each), and openAfter() may name a file whose existence says
+// the system has the device ready (a board's route to HDMI set), before which
+// it is not opened. A device that fails after it opened is always reported.
+//
+// The journal follows the device (times in seconds since boot, few lines):
+// when the shell starts looking for it, when it opens and after how many
+// attempts, when it starts playing and when it plays at its rate, the first
+// problems seen while it plays, a failed write with its error and the
+// recovery's, a failed query of what it holds, and when it is let go.
+// recoveries() counts the times an open device failed (a write that needed
+// recovering, or the device opened afresh): the start-up stops following a
+// sound whose device keeps recovering (src/startupclock.h). A device that
+// opens and fails without playing anything, twice in a row (on a board: its
+// route to the display not set), is not opened without end: it is tried
+// again after kRetry (kExpectRetry while one is expected), and the journal
+// says so once and nothing more until it plays.
 //
 // stop() fades a sound out over kFadeFrames instead of cutting it.
 //
@@ -49,10 +83,15 @@
 // again) is over: heard() says NaN for it from then on, and dropped() says
 // so, as it does for a sound asked for while the device is being retried.
 //
-// Thread contract: play(), stop(), useGameSounds(), playGame() and heard() on
-// the GUI thread (heard() reads what the worker wrote under a lock), started()
-// and dropped() delivered on it; the worker owns the ALSA handle and is joined
-// by the destructor, before any member it reads is destroyed.
+// Thread contract: play(), stop(), useGameSounds(), playGame(), heard(),
+// playingFor(), deviceOpen(), sinceFirstOpen(), recoveries() and expecting() on
+// the GUI thread
+// (heard() reads what the worker wrote under a lock, the others atomics),
+// started() and dropped() delivered on it; expectDevice(), openAfter() and
+// setAwake() also on the thread that makes the instance before the
+// application exists. The worker owns the
+// ALSA handle and is joined by the destructor, before any member it reads is
+// destroyed.
 #pragma once
 
 #include <QByteArray>
@@ -62,14 +101,19 @@
 #include <QVariantMap>
 #include <QtQml/qqmlregistration.h>
 
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <deque>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <thread>
 #include <vector>
+
+class QJSEngine;
+class QQmlEngine;
 
 class SystemSounds : public QObject {
     Q_OBJECT
@@ -87,8 +131,16 @@ class SystemSounds : public QObject {
     Q_PROPERTY(bool awake READ awake WRITE setAwake NOTIFY awakeChanged)
 
 public:
-    explicit SystemSounds(QObject *parent = nullptr);
+    // No default argument: QML makes a default-constructible singleton
+    // itself, without asking create(), and would play through a second
+    // instance beside main()'s.
+    explicit SystemSounds(QObject *parent);
     ~SystemSounds() override;
+
+    // The instance QML gets: the one main() made and provided (owned by
+    // main(), outliving the engine), or a new one the engine owns.
+    static void provide(SystemSounds *one);
+    static SystemSounds *create(QQmlEngine *, QJSEngine *);
 
     // Queues one of the named sounds; unknown names are ignored.
     Q_INVOKABLE void play(const QString &name);
@@ -108,6 +160,26 @@ public:
     // playing (not yet started, played out, or dropped). A device that stalls
     // leaves it where it was until it plays again or the sound is dropped.
     Q_INVOKABLE double heard(const QString &name) const;
+    // Seconds the device has been open and fed without a break; below zero
+    // while it is closed.
+    // Seconds the device has been playing well (see above); below zero when
+    // it is not: closed, not playing yet, or since a problem.
+    Q_INVOKABLE double playingFor() const;
+    // The device is open (playing well or not).
+    Q_INVOKABLE bool deviceOpen() const;
+    // Seconds since the device was first opened since the shell started,
+    // whatever became of it; below zero if it never was.
+    Q_INVOKABLE double sinceFirstOpen() const;
+    // Times an open device failed since the shell started (see above).
+    Q_INVOKABLE int recoveries() const;
+    // Within expectDevice()'s wait: a device may still come, or recover.
+    Q_INVOKABLE bool expecting() const;
+    // A sound device is expected within `wait`, though there may be none yet
+    // (see above). Zero or less: none is expected.
+    void expectDevice(std::chrono::milliseconds wait);
+    // While a device is expected, it is opened only once `path` exists (the
+    // system says the device is ready). Empty: no such wait.
+    void openAfter(const QString &path);
     int latency() const { return int(kLatencyMicroseconds / 1000); }
     bool gameSounds() const { return m_gameSounds; }
     void setGameSounds(bool on);
@@ -151,6 +223,9 @@ private:
     static constexpr size_t kFadeFrames = kRate / 10;   // 100 ms
     static constexpr std::chrono::seconds kIdle{3};
     static constexpr std::chrono::seconds kRetry{5};
+    static constexpr std::chrono::milliseconds kExpectRetry{250};
+    // No advance for this long: the device is not playing (src/playbackhealth.h).
+    static constexpr double kHealthGap = 0.25;
 
     static SoundPtr parse(const QByteArray &wav, const QString &name, int gain, double maxSeconds);
     void load(const QString &name, int gain);
@@ -177,5 +252,17 @@ private:
     bool m_keepOpen = false;          // guarded by m_mutex: the worker's
     mutable std::mutex m_progressMutex;
     std::map<QString, Progress> m_progress;  // guarded by m_progressMutex: the worker writes, heard() reads
+    // steady_clock ticks: when the open device was opened (0: closed), the
+    // worker's; until when a device is expected (0: none), expectDevice()'s.
+    std::atomic<std::chrono::steady_clock::rep> m_openedAt{0};
+    std::atomic<std::chrono::steady_clock::rep> m_expectUntil{0};
+    // The worker's PlaybackHealth, published: seconds on the steady clock
+    // since it played well and when it last advanced (below zero: never).
+    std::atomic<double> m_healthySince{-1};
+    std::atomic<double> m_lastAdvanceAt{-1};
+    std::atomic<int> m_recoveries{0};
+    std::atomic<double> m_firstOpenedAt{-1};
+    std::string m_readyFile;  // guarded by m_mutex: openAfter()'s
+    std::atomic<bool> m_finished{false};  // the worker has left run()
     std::thread m_worker;
 };

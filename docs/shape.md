@@ -17,6 +17,10 @@ and [How the console uses a package](#how-the-console-uses-a-package); what
 it was measured to cost, in a virtual machine, is under
 [Measured](#measured).
 
+A draft of motion for packages (format `mun-shape/1.1`, experimental:
+v0.1.0-dev.5 and consoles built from this source play it, the previews up
+to v0.1.0-dev.4 do not) is described in [MUN Shape motion](shape-motion.md).
+
 ## Where the package lives
 
 The package is the directory `mun-shape/` at the root of the card's content
@@ -251,6 +255,20 @@ actions on the menus only; alerts and system sounds stay MUN's.
   The largest side is 2048 for a backdrop, a layer or a light texture, 1024
   for the card window and 256 for a sprite, checked from `IHDR` before
   anything decodes the image.
+- **What a PNG carries besides its pixels** is bounded: at most 64 ancillary
+  chunks holding 256 KiB as stored; of them at most 16 text chunks (`tEXt`,
+  `zTXt`, `iTXt`) holding 32 KiB, and one colour profile (`iCCP`). The text
+  and the profile together may inflate to 1 MiB; the checker inflates them,
+  never past that bound, to know. A PNG reader keeps the text and the
+  profile it finds, and inflates them, before it decodes a pixel: a few KiB
+  of compressed text can become megabytes, hundreds of times over in one
+  small file. An image saved without metadata is far inside these bounds;
+  an animated PNG, whose frames are ancillary chunks, usually is not, nor
+  is one with more than 256 KiB of an application's own data (`shape_png`).
+- **What an image decodes to** is at most 16 MiB in the format the console
+  reads it into (`shape_png_dimensions`). Within its sides an image of 8
+  bits a channel always is; one of 16 bits a channel in colour takes 8 bytes
+  a pixel, so at most about 1448 × 1448: save it at 8 bits or smaller.
 - **Sounds**: WAV with exactly two chunks, `fmt ` (PCM, 48 kHz, 16-bit,
   stereo) and `data`, at most 1 MiB each; `move`, `enter` and `back` at most
   1 s, `insert` at most 3 s; peaks at or under −1 dBFS. A silent sound
@@ -263,16 +281,40 @@ actions on the menus only; alerts and system sounds stay MUN's.
 
 ## Limits
 
-**Enforced** by the checker, and by the console once it reads packages:
+**Enforced** by the checker: `mun-card` runs it on the host, and the
+console's card service runs the same one on the card before it exports
+anything, so the shell reads only what the checker accepted
+([how the console uses a package](#how-the-console-uses-a-package)).
 
 | Item | Limit |
 | --- | --- |
 | `shape.json` | 64 KiB, 6 levels, strings of 512 characters |
 | Package | 32 MiB of named files |
 | Image | 4 MiB; 2048 × 2048 (backdrop, layer, light), 1024 × 1024 (window), 256 × 256 (sprite) |
+| Image, besides its pixels | 64 ancillary chunks and 256 KiB as stored; of them 16 text chunks and 32 KiB, and one colour profile; text and profile inflating to 1 MiB in all |
+| Image, decoded | 16 MiB in the format it is read into (16 bits a channel in colour: about 1448 × 1448) |
 | World | 3 layers, 2 emitters with 128 sprites in all, 2 light textures, 10 or 20 fps |
 | Sound | 1 MiB; 1 s (`move`, `enter`, `back`), 3 s (`insert`); −1 dBFS |
 | Transition | 0.8–4 s |
+
+The shell does not lean on the card service alone for what could take it
+down. Before any image reader opens a file of an export, or the cover, it
+holds these again itself:
+
+- an image's ancillary chunks, counted from the chunk headers alone: the
+  numbers and the bytes stored, as above. It does not inflate anything, so
+  what text and profile inflate to is the checker's bound only;
+- an image's sides, from its header, before its pixels: 1024 for the card
+  window and the cover, 2048 and 256 in a world;
+- 16 MiB for any one decode, and the display's budget for a world
+  (*Objectives* below);
+- the exported document's 256 KiB, the cover's 1 MiB, and a sound's 1 MiB
+  and duration.
+
+The other limits (the package's 32 MiB, a file's 4 MiB, the PNG and WAV
+structure, a sound's peak, the counts of a world) are the checker's alone.
+An image the shell refuses is not shown, as one that does not decode
+([When something is wrong](#when-something-is-wrong)).
 
 **Objectives**, not yet measured, which the console is to meet when it renders
 packages: with a world in motion, navigation latency and menu frame pacing
@@ -353,7 +395,8 @@ what a release tells the player shows as with any card.
 | A named file missing, a link, not a regular file, over its size, not a well-formed PNG or WAV, over its dimensions, duration or peak; the package over its budget | The block that names it is dropped |
 | The palette's colours do not keep contrast (below) | The dressed surfaces use MUN's colours, text, plate and focus together; the palette still tones the world |
 | An unknown field, or a later minor version | Ignored, with a note; what is known is used |
-| An image that fails to decode in the console, or exceeds the display's budget | That block, at run time, falls back to MUN (the card object whole, its outline and light too) or to a lower level |
+| An image that fails to decode in the console, carries more ancillary data than the shell accepts, or exceeds the display's budget | That block, at run time, falls back to MUN (the card object whole, its outline and light too) or to a lower level |
+| The shell ended while it read an insertion's images | Its later starts skip that insertion's identity, until the card is put in again or the console restarts ([how the console uses a package](#how-the-console-uses-a-package)) |
 
 A block is taken or dropped whole, so what a player sees is either the
 block as designed or MUN's: one defective layer, emitter or light texture
@@ -467,7 +510,9 @@ The algorithm, exact so that the console and the checker agree:
   identity are checked between chunks. The service never decodes an image
   or a sound.
 - The export holds only the files the checker accepted and the normalised
-  `shape.json`, bound to the insertion and content version; files are 0440,
+  `shape.json`, bound to the insertion and content version (the bytes the
+  checker measured with that version: within the shell's 256 KiB, or the
+  motion is dropped, or nothing is published); files are 0440,
   folders 0550 and the export's own folder 0750 (group: the shell's, which
   reads and never writes), sealed before it is published,
   as the last step, with one rename as `/run/mun/shape/<insertion>.<attempt>/`.
@@ -498,9 +543,18 @@ The algorithm, exact so that the console and the checker agree:
 
 - It reads only the service's copy for the insertion in the card's record,
   decodes the window image, the cover and the world's images off the
-  interface thread with their dimensions checked first and an allocation
-  limit, and verifies the surfaces' colours again with the same rule,
-  falling back to MUN's set.
+  interface thread, and verifies the surfaces' colours again with the same
+  rule, falling back to MUN's set. Every image has its chunks scanned
+  before any reader opens it, then its dimensions checked from its header,
+  and is decoded under an allocation limit ([Limits](#limits)).
+- While it reads an insertion's images (the window, the cover, the world's)
+  a marker names that insertion, and they are read only if the marker could
+  be written. If reading one ends the shell, its next start finds the marker
+  and skips that insertion's identity, showing MUN's, instead of reading
+  the same image again at every restart, and so do its later starts, the
+  ones after each game included: the insertion stays skipped until the card
+  is put in again, which is another insertion, or the console restarts. The
+  shell ending for another reason while it reads has the same effect.
 - Dressed:
   - the world behind Home;
   - the main arc's entries, the game's panel and the bands of the status
@@ -622,7 +676,80 @@ On a card, the package is the folder `content/mun-shape/`.
   only in a console with no other card in. The console's build must record
   the MUN Shape it reads (`shape` in its BUILD-INFO); an older guest is
   refused, with the way to one that shows it
-  ([the laboratory](../vm/README.md#mun-shape-preview)).
+  ([the laboratory](../vm/README.md#mun-shape-preview)). A package with
+  motion on a console that plays none is a warning: it shows the v1 look.
+
+### Exporting a package
+
+A package used outside this repository (a website that shows it, a
+development kit that starts from it) is taken from one commit, whole, so
+that no copy is edited apart from its source:
+
+```sh
+./mun card shape export examples/shape/reef OUT \
+  --sources examples/shape/reef-studio \
+  --sources examples/shape/sea/world/caustics.png --sources examples/shape/sea/world/bubble.png
+./mun card shape verify-export OUT/reef-<commit>      # exit 0: whole, as exported
+```
+
+`export` writes `OUT/<name>-<first 12 digits of the commit>/`: `package/`
+(`shape.json` and every file the checker uses), `sources/` (what Git tracks
+under each `--sources` path, by its path in the repository, so a relative
+reference between them still holds), `notices/` (the repository's
+`LICENSE`, `NOTICE` and `NAME-AND-LOGO.txt`) and `export.json`. That
+manifest holds only what the commit and the paths decide: the commit, the
+paths, the package's declared `format` and `motion_draft`, and every file
+with its SHA-256 and size. The same commit and paths give the same bytes,
+and the SHA-256 of `export.json` names the export. What the checkout knows
+besides (its `origin`, the remote branches that hold the commit as last
+fetched) and the checker's verdict are said when exporting, not written: a
+remote branch seen locally is information, not an authorisation to use the
+export anywhere.
+
+It takes everything from the commit of the package's own repository (never
+the working tree, nor the repository a Git hook running it points at): the
+package is checked, and the files it uses chosen, from the commit's bytes.
+It refuses:
+
+- a package or source with changes not committed, or with files Git is
+  told not to compare (`assume-unchanged`, `skip-worktree`)
+  (`export_uncommitted`);
+- a new file Git does not track under them, or a file the package uses
+  that the commit does not have (`export_untracked`; ignored files, such
+  as a bake's output, are not sources);
+- a `--sources` path the commit does not have or that gives no file
+  (`export_source_missing`), or one that is the package, holds it, is
+  inside it or is inside another source (`export_source`);
+- a symbolic link (`export_symlink`) or a submodule (`export_submodule`)
+  in the package or a source: Git keeps neither as a file of this
+  repository, and a link is never written as a file holding its target;
+- a name `verify-export` would not accept (`export_path`): every part of
+  every path letters, digits, `.`, `_` or `-`, and no two paths that
+  differ only in case;
+- a package no console would use (`export_unused`).
+
+The sources are sorted and repeated ones dropped, so the same paths in any
+order give the same export. `export.json` is written as the same bytes on
+every system (ASCII, one `\n` at the end). The export is written beside
+its final name (`.<name>-<commit>.part-…`), checked with `verify-export`,
+and only then given its name; an export that fails, is refused or cannot
+be written (`export_write`, `export_verify`) leaves nothing. It records a
+commit, not a branch: whoever uses it takes a new version only by
+exporting again.
+
+`verify-export` takes nothing for an export but a whole one, and exactly
+what `export` writes: a manifest of this format with no other key, its
+commit, package and sources (repository paths, each source giving at least
+one file), its package's format and draft, and its files (`package/shape.json`
+among them, every path inside `package/`, `sources/` under a declared
+source, or `notices/` for the repository's notices); every file there with
+its digest and size and no other file, link or folder; and the package in it
+one a console would use, as declared, with every file it uses and no other.
+It answers with what differs (exit 2), never with a failure of its own, for
+a manifest or `shape.json` that is not JSON or not an object, or a file it
+cannot read. With `--expect SHA256` it also requires the identity pinned.
+Whoever uses the export pins that identity and runs the same check in its
+own tests.
 
 ### Defective packages
 
@@ -696,14 +823,23 @@ around any of them stays valid.
 | `shape_path_type` | block | a named path is not a regular file |
 | `shape_file_too_large` | block | a file over its size |
 | `shape_budget` | block | the package over 32 MiB |
-| `shape_png` | block | not a well-formed PNG |
-| `shape_png_dimensions` | block | an image over its dimensions |
+| `shape_png` | block | not a well-formed PNG, or one carrying more ancillary data (text, profile) than the console accepts |
+| `shape_png_dimensions` | block | an image over its dimensions, or one whose decoding would take more than 16 MiB |
 | `shape_wav` | block | not PCM WAV at 48 kHz, 16-bit, stereo, with only `fmt ` and `data` |
 | `shape_wav_duration` | block | a sound too long |
 | `shape_wav_peak` | block | a peak over −1 dBFS |
 | `shape_contrast` | colours | the game's set does not keep contrast; MUN's set is used |
 | `shape_unknown_field` | note | an unknown field, ignored |
 | `shape_minor_newer` | note | a later minor version; what is known is used |
+| `shape_motion_field` | motion | a missing or mistyped field in the motion (draft, [motion](shape-motion.md)) |
+| `shape_motion_reference` | motion | the motion names something that does not exist |
+| `shape_motion_count` | motion | the motion over one of its limits |
+| `shape_motion_budget` | motion | the motion's images over their budget |
+| `shape_motion_not_drawn` | note | the motion uses something this console reads and does not draw yet (the motion is used) |
+| `shape_motion_draft` | motion | the motion written for another revision of its draft (`motion_draft`), or for none |
+| `shape_motion_empty` | motion | the motion declares nothing to draw; the v1 look stays |
+| `shape_export_size` | package | the exported document, measured with the card's content version, over the shell's 256 KiB even without the motion |
+| `shape_motion_error` | motion | the checker failed reading the motion (its own failure, said in the detail); the motion is dropped, the v1 look stays |
 
 Messages are in Spanish, the console's language; the list is `NOTE_CODES` in
 [`mun_card/shape.py`](../tools/mun-card/mun_card/shape.py).

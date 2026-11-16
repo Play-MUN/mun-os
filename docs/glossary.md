@@ -8,10 +8,13 @@ Terms used across the MUN™ documentation and code.
 | --- | --- |
 | BOP | Buy. Own. Play. A legitimate Game Card is enough to own and play its game offline; accounts are optional |
 | MUN | The console and the project |
-| MUN -1 | The first physical console generation, with one officially supported hardware configuration, not selected yet |
-| MUN OS | The console's operating system. So far only a development image for QEMU exists |
+| MUN -1 | The first physical console generation, with one officially supported hardware configuration, being designed around the Radxa Dragon Q8B |
+| MUN Dev | Our development board, a Radxa Dragon Q6A, and MUN OS's experimental profile for it ([MUN Dev](mun-dev.md)). Not the console |
+| MUN OS | The console's operating system. So far only development images exist: one for QEMU, and one you build for MUN Dev |
 | MUN Shell | The console's interface, `mun-shell` |
 | Game Card | Removable medium holding a game, its presentation and its saves ([game-cards.md](game-cards.md)). In the laboratory, a raw ext4 image hot-plugged into a QEMU guest |
+| MUN Disk | The name the console's medium is taking. MUN Shell's Home already uses it for the card in the slot; the format, the tools, the services and these pages still say Game Card. Both name the same thing |
+| Universe | Home's entry for what the console has at hand: today, the game on the card in the slot. The console itself holds no games |
 | Manifest | The card's descriptor at its root, `mun.toml` (or `neptune.toml` on an earlier card), validated as untrusted input |
 | Naming generation | Earlier cards carry `neptune.toml` and save as `neptune-save/1`; current ones `mun.toml` and `mun-save/1`. The console reads both and writes each card's own ([game-cards.md](game-cards.md#naming-generations)) |
 | Insertion | One insertion of a card, identified by a random token the card service mints; a session is bound to it |

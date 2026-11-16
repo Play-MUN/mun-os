@@ -2,8 +2,9 @@
 
 [English](CONTRIBUTING.md) · **Español**
 
-MUN™ OS está en una fase temprana: una imagen de desarrollo para QEMU,
-ninguna versión con soporte y ningún hardware elegido. Las contribuciones son
+MUN™ OS está en una fase temprana: una imagen de desarrollo para QEMU y un
+perfil experimental para una placa de desarrollo, ninguna versión con
+soporte y ningún hardware con soporte. Las contribuciones son
 bienvenidas: correcciones, pruebas, documentación, herramientas de tarjetas y
 de juegos, y llevar el laboratorio a más ordenadores. Lee primero el
 [README](README.es.md), los [primeros pasos](docs/es/getting-started.md) y la

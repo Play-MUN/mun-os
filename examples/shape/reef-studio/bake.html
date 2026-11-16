@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Reef bake</title>
+<script type="importmap">
+{ "imports": {
+  "three": "./node_modules/three/build/three.module.js",
+  "three/examples/jsm/": "./node_modules/three/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<script type="module">
+  import { bake } from './bake.js'
+  // raw RGBA as base64, a slice at a time (a whole sheet is too long for one call)
+  const encode = (bytes) => {
+    let text = ''
+    for (let i = 0; i < bytes.length; i += 0x8000) text += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000))
+    return btoa(text)
+  }
+  window.runBake = async () => {
+    const { images, layout } = await bake()
+    const out = {}
+    for (const [name, img] of Object.entries(images)) out[name] = { w: img.w, h: img.h, rgba: encode(new Uint8Array(img.data.buffer)) }
+    return { images: out, layout }
+  }
+  window.bakeReady = true
+</script>
+</body>
+</html>

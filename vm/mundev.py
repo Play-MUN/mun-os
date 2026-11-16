@@ -230,8 +230,8 @@ growpart:
             "-smp", str(BUILDER_VCPUS),
             "-m", BUILDER_MEMORY,
             "-rtc", "base=utc",
-            "-drive", f"if=pflash,format=raw,readonly=on,file={vm.firmware_path()}",
-            "-drive", f"if=pflash,format=raw,file={self.efivars}",
+            "-drive", f"if=pflash,format=raw,readonly=on,file={vm.option_path(vm.firmware_path())}",
+            "-drive", f"if=pflash,format=raw,file={vm.option_path(self.efivars)}",
             "-blockdev", json.dumps({"driver": "qcow2", "node-name": "sys",
                                      "file": {"driver": "file", "filename": str(self.disk)}}),
             "-device", "virtio-blk-pci,drive=sys,bootindex=0",
@@ -242,9 +242,9 @@ growpart:
             "-netdev", f"user,id=net0,hostfwd=tcp:127.0.0.1:{self.port}-:22",
             "-device", "virtio-net-pci,netdev=net0",
             "-display", "none",
-            "-serial", f"file:{self.console}",
+            "-serial", f"file:{vm.option_path(self.console)}",
             "-monitor", "none",
-            "-qmp", f"unix:{self.qmp},server,nowait",
+            "-qmp", f"unix:{vm.option_path(self.qmp)},server,nowait",
             "-pidfile", str(self.pidfile),
             "-daemonize",
         ]
@@ -262,7 +262,15 @@ growpart:
         return pid if vm.pid_alive(pid) else None
 
     def ssh_base(self) -> List[str]:
-        return [vm.which("ssh"), "-i", str(self.key), "-p", str(self.port),
+        # Nothing of the user's or the system's ssh configuration applies to
+        # the builder: no file is read (-F), only this builder's key is
+        # offered, the user's key store is neither asked nor forwarded
+        # (IdentityAgent, ForwardAgent), and no jump host is used. A
+        # `Host *` block would otherwise send a build through a proxy or
+        # let the builder sign with the user's keys.
+        return [vm.which("ssh"), "-F", os.devnull, "-i", str(self.key), "-p", str(self.port),
+                "-o", "IdentitiesOnly=yes", "-o", "IdentityAgent=none", "-o", "ForwardAgent=no",
+                "-o", "ProxyJump=none",
                 "-o", f"UserKnownHostsFile={self.known_hosts}", "-o", "StrictHostKeyChecking=accept-new",
                 "-o", "ConnectTimeout=10", "-o", "LogLevel=ERROR", "-o", "BatchMode=yes",
                 "-o", "ServerAliveInterval=30", f"{BUILDER_USER}@127.0.0.1"]
@@ -598,6 +606,11 @@ def cmd_shape(args: argparse.Namespace) -> int:
     build_dir, recorded = guest_build(args.guest, args.build)
     available = [b for b in builds() if runs_in_guest(b)]
     shapepreview.check_build(args.guest, build_dir, available[-1] if available else None, recorded)
+    # A package with motion on a console that plays none: said before the
+    # console starts, and again with each card the preview makes.
+    notice = shapepreview.folder_notice(args.guest, build_dir, folder)
+    if notice:
+        print(f"[shape] warning: {notice}", flush=True)
     build_dir = ensure_guest(args.guest, args.build)
     base = None
     if args.base:
@@ -674,7 +687,11 @@ def shape_of(build: Path) -> str:
     import shapepreview
     if not (build / "BUILD-INFO.json").is_file():
         return "unknown (build not here)"
-    return shapepreview.build_shape(build) or "not recorded"
+    found = shapepreview.build_shape(build)
+    if found is None:
+        return "not recorded"
+    draft = shapepreview.build_motion(build)
+    return found + (f" with motion (draft {draft})" if draft is not None else "")
 
 
 # ------------------------------------------------------------ downloads
@@ -683,14 +700,20 @@ def shape_of(build: Path) -> str:
 # third-party game (from a recipe, `--recipe`) is not bundled, whatever that
 # game's terms.
 OWN_GAMES = {"mun-collect", "mun-gl-probe"}
-# The cards a bundle carries, made from the build's own example game. The
-# third is MUN Collect dressed in the sea sample, under a name of its own, so
-# a player sees MUN Shape without the card tools (which need e2fsprogs).
+# The game on a bundle's cards: the build's own example game.
+BUNDLED_GAME = "mun-collect"
+# The cards a bundle carries, made from the build's own example game. Two are
+# MUN Collect dressed in a MUN Shape package, each under a name of its own,
+# so a player sees MUN Shape without the card tools (which need e2fsprogs):
+# collect-sea in the sea sample (mun-shape/1), collect-reef in Reef, the
+# example with motion (mun-shape/1.1, a draft; a console without the motion
+# player shows its v1 look). Installing a bundle never replaces a card that
+# exists (vm/bundle.py): it may hold saves.
 BUNDLED_CARDS = {
     "demo": ("MUN Test Card", []),
-    "collect": ("MUN Collect", ["--variant", "game", "--game", "{games}/mun-collect/mun-collect"]),
-    "collect-sea": ("MUN Collect", ["--variant", "game", "--game", "{games}/mun-collect/mun-collect",
-                                    "--shape", "{repo}/examples/shape/sea"]),
+    "collect": ("MUN Collect", ["--variant", "game", "--game", "{game}"]),
+    "collect-sea": ("MUN Collect", ["--variant", "game", "--game", "{game}", "--shape", "{repo}/examples/shape/sea"]),
+    "collect-reef": ("MUN Collect", ["--variant", "game", "--game", "{game}", "--shape", "{repo}/examples/shape/reef"]),
 }
 
 
@@ -716,22 +739,43 @@ def cmd_bundle(args: argparse.Namespace) -> None:
     if others:
         raise vm.LabError(f"build {args.build} also built {', '.join(others)}: a download carries MUN's own software "
                           "only; bundle a build made without it")
-    if not info.get("source", {}).get("clean", False):
+    # The image and the game come from the build. The cards' MUN Shape
+    # packages, the card tool and the licence texts come from this checkout,
+    # and release.json names the build's commit for all of it: so a build of
+    # a commit is bundled from that commit, with nothing changed.
+    source = info.get("source", {})
+    one_commit = bool(source.get("clean", False))
+    if one_commit:
+        checkout = source_state()
+        if checkout["commit"] != source.get("commit") or not checkout["clean"]:
+            state = "has uncommitted changes" if checkout["commit"] == source.get("commit") \
+                else f"is at {checkout['commit'][:12]}"
+            raise vm.LabError(f"build {args.build} was made from commit {str(source.get('commit'))[:12]} and this "
+                              f"checkout {state}: the cards, the card tool and the licence texts of a bundle come "
+                              "from the checkout, so bundle it from that commit with a clean working tree")
+    elif info.get("release"):
+        raise vm.LabError(f"build {args.build} is a release image of uncommitted changes (clean: false in "
+                          "BUILD-INFO): it is not bundled")
+    else:
         log(f"warning: build {args.build} is of uncommitted changes (clean: false in BUILD-INFO); fine for a "
-            "local test, not for publication")
+            "local test, not for publication: its release.json says the bundle is not of one commit")
+    game = build / "games" / BUNDLED_GAME / BUNDLED_GAME
+    if not game.is_file() or sha256_file(game) != (info.get("games", {}).get(BUNDLED_GAME) or {}).get("sha256"):
+        raise vm.LabError(f"{game} is not the {BUNDLED_GAME} that build {args.build} recorded in BUILD-INFO: "
+                          "the cards of a bundle carry the game the build compiled")
     destination = Path(args.out) if args.out else BUNDLES_ROOT / args.build
     with tempfile.TemporaryDirectory(prefix="mun-bundle-") as tmp:
         cards = {}
         for name, (title, extra) in BUNDLED_CARDS.items():
             image = Path(tmp) / f"{name}.img"
             command = [sys.executable, str(CARD_TOOL), "create", str(image), "--title", title]
-            command += [part.format(games=build / "games", repo=REPO_ROOT) for part in extra]
+            command += [part.format(game=game, repo=REPO_ROOT) for part in extra]
             result = subprocess.run(command, capture_output=True, text=True)
             if result.returncode:
                 raise vm.LabError(f"making the {name} card failed: {(result.stderr or result.stdout).strip()}")
             cards[name] = (image, title)
         try:
-            manifest = bundle.make(build, destination, cards, licence_texts())
+            manifest = bundle.make(build, destination, cards, licence_texts(), one_commit=one_commit)
         except bundle.BundleError as exc:
             raise vm.LabError(str(exc)) from exc
     total = sum(entry["size"] for entry in manifest["files"])
@@ -878,6 +922,40 @@ def screen_drawn(guest: str) -> bool:
     return any(value > 24 for value in pixels[::997])
 
 
+# What the shell says of a card's MUN Shape motion in this boot's journal: the
+# player's line once its images are decoded, or why the package's v1 look is
+# shown instead (services/mun-shell/src/motionscene.cpp).
+MOTION_SAID = ("journalctl -u mun-shell -b --no-pager -o cat | "
+               "grep -E 'mun-shell: motion: (backend |.*v1 look instead)' | tail -1")
+
+
+def shell_plays_motion(timeout: float) -> str:
+    """Wait up to `timeout` seconds for the selected guest's shell to say it
+    plays the inserted card's motion; what it said of it (backend, look,
+    images, memory). A LabError if it shows the package's v1 look instead, or
+    says nothing of the motion in time."""
+    deadline = time.monotonic() + timeout
+    while True:
+        said = vm.guest_command(MOTION_SAID, timeout=60).stdout.strip()
+        if said or time.monotonic() >= deadline:
+            break
+        time.sleep(3)
+    if "motion: backend " not in said:
+        raise vm.LabError(f"the shell does not play the card's motion: {said or 'it said nothing of it'}")
+    return said.split("motion: ", 1)[-1]
+
+
+def bundled_card_digest(source: str, card: str) -> Optional[str]:
+    """The SHA-256 of card `card` as the bundle at `source` carries it
+    (unpacked), from its manifest; None if the bundle has no such card or
+    its manifest cannot be read."""
+    try:
+        manifest = bundle.Source(source).manifest()
+    except (bundle.BundleError, OSError):
+        return None
+    return next((entry["image_sha256"] for entry in manifest["files"] if entry.get("card") == card), None)
+
+
 def cmd_smoke(args: argparse.Namespace) -> int:
     """Boot a build (a bundle installed first, if given) and play its MUN
     Collect card: start, card, game, exit, clean power-off. The check each
@@ -890,7 +968,18 @@ def cmd_smoke(args: argparse.Namespace) -> int:
         log(f"smoke: {name}" + (f" ({detail})" if detail else "") + f" at {steps[name]} s")
 
     if args.bundle:
+        # Installing a bundle never replaces a card that exists (it may hold
+        # saves), so the card played below may be an earlier one.
+        existing = vm.CARD_ROOT / f"{args.card}.img"
+        card_was_there = os.path.lexists(existing)
         build: Optional[str] = install(args.bundle).name
+        # Byte for byte the bundle's card (an earlier check of this bundle
+        # unpacked it and nothing has saved on it): nothing to remark.
+        if card_was_there and not (existing.is_file()
+                                   and sha256_file(existing) == bundled_card_digest(args.bundle, args.card)):
+            log(f"smoke: card {args.card} was already in {vm.CARD_ROOT}, is not the bundle's own byte for byte "
+                "(another card, or one with saves on it) and was kept: this check plays the card that was there "
+                "(docs/releasing.md checks a bundle from a fresh copy of the tools)")
     else:
         runnable = [b for b in builds() if runs_in_guest(b)]
         build = args.build or (runnable[-1].name if runnable else None)
@@ -926,6 +1015,10 @@ def cmd_smoke(args: argparse.Namespace) -> int:
         if vm.main(["--instance", guest, "card-attach", card]) != 0:
             raise vm.LabError(f"card {card} could not be inserted")
         step("card inserted")
+        if args.motion:
+            # A card dressed in a package with motion (collect-reef).
+            report["motion"] = shell_plays_motion(args.card_timeout)
+            step("motion drawn", report["motion"])
         launch = vm.guest_command(GUEST_LAUNCH.replace("SECONDS", str(args.card_timeout))
                                   .replace("SERIAL", vm.card_serial(card)), timeout=args.card_timeout + 60)
         if launch.returncode != 0:
@@ -1021,6 +1114,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--bundle", help="install this bundle first (address as for ./mun get)")
     p.add_argument("--guest", default="smoke", help="guest name (default smoke)")
     p.add_argument("--card", default="collect", help="game card to play (default collect)")
+    p.add_argument("--motion", action="store_true",
+                   help="the card's MUN Shape has motion (collect-reef): the shell must say it plays it")
     p.add_argument("--wait", type=int, default=1500, help="seconds to wait for the guest (emulated hosts are slow)")
     p.add_argument("--card-timeout", type=int, default=240, help="seconds for the card and for the game's end")
     p.add_argument("--play", type=int, default=15, help="seconds the game runs before Esc")

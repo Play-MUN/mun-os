@@ -44,6 +44,7 @@ qt_add_executable(mun-shell
     src/shellsettings.h
     src/systemsounds.cpp
     src/systemsounds.h
+    src/playbackhealth.h
     src/gamepadmap.cpp
     src/gamepadmap.h
     src/gamepads.cpp
@@ -57,6 +58,9 @@ qt_add_executable(mun-shell
     src/bootintro.cpp
     src/bootintro.h
     src/bootintroshapes.h
+    src/bootclock.cpp
+    src/bootclock.h
+    src/startupclock.h
     src/hairline.cpp
     src/hairline.h
     src/cssbox.cpp
@@ -81,6 +85,9 @@ qt_add_executable(mun-shell
     src/shapefront.h
     src/shapeworld.cpp
     src/shapeworld.h
+    src/motionscene.cpp
+    src/motionscene.h
+    src/motionclock.h
     src/framewatch.cpp
     src/framewatch.h
     src/renderinfo.cpp
@@ -171,6 +178,8 @@ qt_add_shaders(mun-shell "mun-shell-shaders"
         shaders/eclipse.frag
         shaders/wave.vert
         shaders/wave.frag
+        shaders/sprite.vert
+        shaders/sprite.frag
 )
 
 target_link_libraries(mun-shell PRIVATE Qt6::Core Qt6::Gui Qt6::Network Qt6::Qml Qt6::Quick PkgConfig::ALSA PkgConfig::DRM Threads::Threads)

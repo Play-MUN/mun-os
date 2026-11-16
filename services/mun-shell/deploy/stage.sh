@@ -1,7 +1,8 @@
 #!/bin/sh
 # Install a compiled MUN Shell and its system files under DESTDIR, the image
 # root in an image build (os/mkosi).
-# The binary, the unit, the power helper and its sudoers rule, the user, and
+# The binary, the unit, the power helper and its sudoers rule, the user, the
+# standby picture (when the build made it) with its unit and helper, and
 # the licence texts of the typefaces compiled into the binary. No packages,
 # boot configuration or activation here.
 #
@@ -22,11 +23,23 @@ for licence in "$SRC"/fonts/*-OFL.txt; do
     install -m 0644 "$licence" "$DESTDIR/usr/share/doc/mun-shell/$(basename "$licence")"
 done
 install -m 0755 "$SRC/deploy/mun-power" "$DESTDIR/usr/local/libexec/mun-power"
+# The standby picture while the console starts: drawn by the shell just
+# built (deploy/standby-frame.py, run by the image build after the shell's
+# checks), shown at boot by mun-standby.service.
+install -m 0755 "$SRC/deploy/mun-standby" "$DESTDIR/usr/local/libexec/mun-standby"
+install -m 0644 "$SRC/deploy/mun-standby.service" "$DESTDIR/etc/systemd/system/mun-standby.service"
+if [ -f "$BUILD_DIR/standby-1920x1080.xrgb" ]; then
+    install -m 0644 "$BUILD_DIR/standby-1920x1080.xrgb" "$DESTDIR$PREFIX/standby-1920x1080.xrgb"
+else
+    echo "stage.sh: no standby picture in $BUILD_DIR (deploy/standby-frame.py): the console starts on black" >&2
+fi
 install -m 0440 "$SRC/deploy/mun-shell.sudoers" "$DESTDIR/etc/sudoers.d/mun-shell"
 install -m 0644 "$SRC/deploy/mun-shell.service" "$DESTDIR/etc/systemd/system/mun-shell.service"
 install -m 0644 "$SRC/deploy/sysusers.conf" "$DESTDIR/usr/lib/sysusers.d/mun-shell.conf"
 {
     echo "component=mun-shell"
     echo "build_id=$(sed -n 's/^MUN_BUILD_ID:STRING=//p' "$BUILD_DIR/CMakeCache.txt")"
-    echo "source_sha256=$(cd "$SRC" && find src qml fonts sounds CMakeLists.txt deploy -type f | LC_ALL=C sort | xargs sha256sum | sha256sum | cut -d' ' -f1)"
+    # Everything the binary is made of: the sources and every directory
+    # CMakeLists.txt compiles into it (QML, fonts, sounds, images, shaders).
+    echo "source_sha256=$(cd "$SRC" && find src qml fonts sounds images shaders CMakeLists.txt deploy -type f | LC_ALL=C sort | xargs sha256sum | sha256sum | cut -d' ' -f1)"
 } > "$DESTDIR$PREFIX/BUILD-INFO"

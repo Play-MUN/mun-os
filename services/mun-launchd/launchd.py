@@ -33,11 +33,12 @@ import struct
 import subprocess
 import threading
 import time
+import traceback
 import uuid
-import xml.etree.ElementTree as ElementTree
 import zlib
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
+from xml.parsers import expat
 
 PROTOCOL = 1
 SOCKET_PATH = Path(os.environ.get("MUN_LAUNCHD_SOCKET", "/run/mun/launchd.sock"))
@@ -99,10 +100,30 @@ POLL_INTERVAL = 0.5
 # it serializes (a 1 MiB cover as base64 plus metadata). A longer unfinished
 # line means the peer is not speaking the protocol; the feed is reconnected.
 MAX_FRAME_BYTES = 2 * 1024 * 1024
-# A game's save payload (docs/saves.md); the request line may carry it plus a little framing.
+# Largest line accepted from a client of the launcher's own socket (the shell):
+# its requests are a few short fields.
+CLIENT_LINE_MAX = 64 * 1024
+# Deepest nesting of arrays and objects accepted in JSON the launcher did not
+# write (a game's request, the shell's, a card's save envelope). The parser
+# recurses once per level, and so does everything that later walks the value,
+# here and in the card service; nothing the console exchanges comes near this.
+JSON_MAX_DEPTH = 64
+# A game's save payload (docs/saves.md), measured as compact UTF-8. The request
+# line may spell it less compactly: a character escaped as \uXXXX takes up to
+# six times its bytes, so the line's limit leaves room for that and a little
+# framing, and the payload's own size is what a save is refused for.
 SAVE_MAX_BYTES = 64 * 1024
-SAVE_LINE_MAX = SAVE_MAX_BYTES + 4096
+SAVE_LINE_MAX = 6 * SAVE_MAX_BYTES + 4096
 SAVE_TIMEOUT = 20.0                   # the card service must answer a save within this
+# A session's save socket takes one request per connection. A connection has
+# this long to send its line, and only so many are held at once: connections
+# that never ask would otherwise use up the launcher's descriptors, which it
+# needs to run systemctl at every tick.
+SAVE_REQUEST_TIMEOUT = 10.0
+SAVE_CLIENTS_MAX = 8
+# Clients of the launcher's own socket held at once: the shell and, for a
+# moment, the safe-removal command.
+CLIENTS_MAX = 16
 # Save envelope formats by the card's naming generation (docs/game-cards.md), as the
 # card service validated it: "earlier" for cards with neptune.toml, "mun" for
 # cards with mun.toml. A session record without it is from before and is earlier.
@@ -116,6 +137,25 @@ def card_naming(record: dict) -> str:
 
 def log(message: str) -> None:
     print(message, flush=True)
+
+
+def run_step(seen: set, what: str, step: Callable, *args) -> bool:
+    """Run one step of the launcher's work (a request, a callback, a tick) so
+    that an exception nobody expected stays that step's failure: False is
+    returned and the traceback is written to the journal, once for each place
+    it comes from, since a tick may fail the same way twice a second. The
+    launcher supervises a running game and holds the way back to the shell;
+    nothing that reaches one step may end it."""
+    try:
+        step(*args)
+        return True
+    except Exception as exc:  # noqa: BLE001 - the purpose is to outlive what was not foreseen
+        frame = traceback.extract_tb(exc.__traceback__)[-1]
+        fault = (what, type(exc).__name__, frame.filename, frame.lineno)
+        if fault not in seen:
+            seen.add(fault)
+            log(f"{what} failed, the launcher goes on; reported once:\n{traceback.format_exc().rstrip()}")
+        return False
 
 
 # ---------------------------------------------------------------- state machine
@@ -180,7 +220,16 @@ class SessionManager:
         schema = request.get("schema")
         if not isinstance(schema, int) or isinstance(schema, bool) or schema < 1:
             return fail("save_invalid", "La versión del esquema de guardado no es válida")
-        if len(json.dumps(request["data"], separators=(",", ":")).encode("utf-8")) > SAVE_MAX_BYTES:
+        # Measured as the card service stores it (docs/saves.md): compact, in
+        # UTF-8. Escaped, every character outside ASCII would count double
+        # or more and a save well inside the bound be refused. Text that
+        # UTF-8 cannot carry (half of a surrogate pair, which JSON can
+        # spell) is no save the card could hold.
+        try:
+            size = len(json.dumps(request["data"], separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
+        except UnicodeEncodeError:
+            return fail("save_invalid", "La partida contiene texto que no se puede guardar")
+        if size > SAVE_MAX_BYTES:
             return fail("save_too_large", "La partida supera el tamaño permitido")
         if self.session.get("saving"):
             return fail("save_busy", "Ya hay un guardado en curso")
@@ -188,7 +237,7 @@ class SessionManager:
         forwarded = {"type": "save", "slot": self.session["slot"], "insertion": self.session.get("insertion"),
                      "serial": self.session["serial"], "version": self.session.get("version"),
                      "game": self.session.get("card_id"), "session": sid, "schema": schema, "payload": request["data"]}
-        log(f"session {sid}: save requested ({len(json.dumps(request['data']))} bytes, schema {schema})")
+        log(f"session {sid}: save requested ({size} bytes, schema {schema})")
         self.saver(forwarded, lambda outcome: self.schedule(lambda: self._save_done(sid, outcome, reply)))
 
     def _save_done(self, sid: str, outcome: dict, reply: Callable[[dict], None]) -> None:
@@ -678,14 +727,20 @@ class ResultStore:
         if not self.path:
             return
         tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(self._current))
-        os.chmod(tmp, 0o640)
         try:
-            import grp
-            os.chown(tmp, 0, grp.getgrnam(SOCKET_GROUP).gr_gid)
-        except (KeyError, PermissionError, ImportError):
-            pass
-        tmp.replace(self.path)
+            tmp.write_text(json.dumps(self._current))
+            os.chmod(tmp, 0o640)
+            try:
+                import grp
+                os.chown(tmp, 0, grp.getgrnam(SOCKET_GROUP).gr_gid)
+            except (KeyError, PermissionError, ImportError):
+                pass
+            tmp.replace(self.path)
+        except OSError as exc:
+            # The file shares its file system with the game's writable
+            # directory, which the game can fill. The shell is told the result
+            # over the socket either way; only a launcher restart would lose it.
+            log(f"warning: the session result could not be written to {self.path}: {exc}")
 
 
 # ---------------------------------------------------------------- platform pieces
@@ -694,8 +749,88 @@ class FrameTooLarge(Exception):
     """An unfinished line exceeded MAX_FRAME_BYTES."""
 
 
+_JSON_BRACES = bytes.maketrans(b"{}", b"[]")
+_JSON_NOT_STRUCTURE = bytes(byte for byte in range(256) if byte not in b'[]{}"')
+
+
+def json_too_deep(raw: bytes, limit: int = JSON_MAX_DEPTH) -> bool:
+    """Whether UTF-8 `raw` nests arrays and objects deeper than `limit`,
+    decided without parsing it, in time and memory linear in its size. For
+    text that is not JSON the answer covers the part a parser would read
+    before refusing it."""
+    if raw.count(b"[") + raw.count(b"{") <= limit:
+        return False
+    # Without escaped backslashes and then escaped quotes, every quote left
+    # delimits a string; then only quotes and brackets (as one kind) are kept.
+    marks = raw.replace(b"\\\\", b"").replace(b'\\"', b"").translate(_JSON_BRACES, _JSON_NOT_STRUCTURE)
+    if b'"' in marks:
+        # Drop what is inside strings, a bounded piece at a time: a line made
+        # of quotes alone must not become a list as long as the line.
+        outside, inside = [], False
+        for start in range(0, len(marks), 1 << 20):
+            pieces = marks[start:start + (1 << 20)].split(b'"')
+            outside.append(b"".join(pieces[inside::2]))
+            inside ^= not len(pieces) % 2
+        marks = b"".join(outside)
+    if b"[" * (limit + 1) in marks:
+        return True
+    # Each pass removes the innermost level of every group, so whatever is
+    # left after `limit` passes is nested deeper, or never closes.
+    for _ in range(limit):
+        if not marks:
+            return False
+        marks = marks.replace(b"[]", b"")
+    return bool(marks)
+
+
+# A save envelope holds a few named fields and one entry of four per unit
+# (docs/saves.md); everything big in it is a string. Commas and colons
+# outside strings count its values: a few hundred in any envelope the console
+# writes, millions in 16 MiB of tiny values that would parse into hundreds of
+# megabytes of objects before anything could refuse them. The bound is the
+# card tool's (mun_card.saves), which judges single-object envelopes too: as
+# many values as that envelope's file bound (112 KiB) has room for.
+ENVELOPE_MAX_SEPARATORS = 57344
+_JSON_NOT_SEPARATOR = bytes(byte for byte in range(256) if byte not in b',:"')
+
+
+def json_too_many_values(raw: bytes, limit: int = ENVELOPE_MAX_SEPARATORS) -> bool:
+    """Whether `raw` holds more than `limit` commas and colons outside its
+    strings, decided without parsing it, in time and memory linear in its size."""
+    if raw.count(b",") + raw.count(b":") <= limit:
+        return False
+    marks = raw.replace(b"\\\\", b"").replace(b'\\"', b"").translate(None, _JSON_NOT_SEPARATOR)
+    count, inside = 0, False
+    for start in range(0, len(marks), 1 << 20):
+        pieces = marks[start:start + (1 << 20)].split(b'"')
+        count += sum(len(piece) for piece in pieces[inside::2])
+        if count > limit:
+            return True
+        inside ^= not len(pieces) % 2
+    return False
+
+
+def parse_envelope(raw: bytes):
+    """parse_json for a save envelope from a card, refusing first, and
+    cheaply, what holds far more values than an envelope can."""
+    if json_too_many_values(raw):
+        raise ValueError(f"more than {ENVELOPE_MAX_SEPARATORS} values")
+    return parse_json(raw)
+
+
+def parse_json(raw: bytes):
+    """json.loads for bytes the launcher did not write: UTF-8 only, and
+    nesting beyond JSON_MAX_DEPTH is a ValueError like any other malformed
+    text instead of a RecursionError somewhere inside the parser."""
+    if json_too_deep(raw):
+        raise ValueError(f"nested deeper than {JSON_MAX_DEPTH} levels")
+    return json.loads(raw.decode("utf-8-sig"))
+
+
 class LineReader:
-    """Newline-delimited JSON from a stream, fed in whatever fragments arrive."""
+    """Newline-delimited JSON from a stream, fed in whatever fragments arrive.
+    A line that is not a JSON object within JSON_MAX_DEPTH is skipped; a line
+    longer than `limit`, finished or not, is a protocol break."""
 
     def __init__(self, limit: int = MAX_FRAME_BYTES):
         self.buffer = bytearray()
@@ -708,10 +843,13 @@ class LineReader:
             newline = self.buffer.find(b"\n")
             if newline < 0:
                 break
+            if newline > self.limit:
+                self.buffer.clear()
+                raise FrameTooLarge(f"line over {self.limit} bytes")
             line = bytes(self.buffer[:newline])
             del self.buffer[:newline + 1]
             try:
-                message = json.loads(line)
+                message = parse_json(line)
             except ValueError:
                 continue   # a malformed line is skipped, the stream stays in sync
             if isinstance(message, dict):
@@ -769,8 +907,23 @@ WATCH_MASK = (IN_MODIFY | IN_CLOSE_WRITE | IN_CREATE | IN_DELETE | IN_MOVED_FROM
 UNIT_CHECKS = ("zlib-xml", "zlib", "xml", "any")
 DIRECTORY_SAVES_MAX_BYTES = 8 * 1024 * 1024   # the card format's ceiling (validator)
 MAX_UNIT_FILES = 64                           # the card service's ceiling per snapshot
-INFLATE_LIMIT = 64 * 1024 * 1024              # a unit that inflates beyond this is not a save
+# How far a unit may inflate and still be a save. The launcher inflates every
+# unit of every capture on its own loop, so the work is bounded twice: by a
+# multiple of what the card declared for all its saves, and absolutely. XML
+# is also read in full, so it has a bound of its own. The figures leave a
+# wide margin over what was measured from an engine: saves of a few hundred
+# KiB of XML, and a thumbnail of 4 MiB that inflates five times, or over a
+# thousand times when the picture is black.
+INFLATE_LIMIT = 64 * 1024 * 1024
+INFLATE_FACTOR = 64
+XML_INFLATE_LIMIT = 16 * 1024 * 1024
 DIRECTORY_SAVE_SCHEMA = 1
+# Why a capture was given up when no read lease can be taken at all, and what
+# the session's result then carries: unlike a writer in the middle, whose
+# close brings the next save point, nothing can be copied while the game runs.
+NO_LEASE = "open files cannot be checked (no read lease)"
+SAVE_UNVERIFIED = {"code": "save_unverified",
+                   "message": "No se pudo comprobar si el juego estaba escribiendo sus partidas, y no se copiaron mientras se jugaba"}
 _SEGMENT = re.compile(r"[A-Za-z0-9._-]{1,128}")
 _UNIT_PATTERN = re.compile(r"[A-Za-z0-9._*-]{1,64}")
 
@@ -833,11 +986,39 @@ class Inotify:
             self.fd = -1
 
 
-def unit_check(check: str, data: bytes) -> Optional[str]:
-    """Why `data` is not one complete unit under `check` (docs/saves.md), or None."""
+def inflate_limit(max_bytes: int) -> int:
+    """How far a unit may inflate on a card that declares `max_bytes` for its saves."""
+    return min(INFLATE_LIMIT, INFLATE_FACTOR * max_bytes)
+
+
+_XML_SPACE = re.compile(rb"[ \t\n\r\x0b\x0c]*")
+
+
+# Units checked together share a budget of a few units' limit: each one may
+# still inflate to the whole limit, but a payload of many small zlib bombs
+# costs a few limits, not one each (64 units of 64 MiB were 4 GiB to inflate).
+INFLATE_TOTAL_FACTOR = 4
+
+
+INFLATING_CHECKS = ("zlib", "zlib-xml")
+
+
+def inflate_share(limit: int, units: int) -> int:
+    """How far each of `units` units checked together by inflating them
+    (INFLATING_CHECKS; the others take no share) may inflate."""
+    return min(limit, INFLATE_TOTAL_FACTOR * limit // max(units, 1))
+
+
+def unit_check(check: str, data: bytes, limit: int = INFLATE_LIMIT) -> Optional[str]:
+    """Why `data` is not one complete unit under `check` (docs/saves.md), or
+    None. `limit` is how far it may inflate (inflate_limit()). Never raises
+    for what `data` holds, and its memory is bounded by the limits: the
+    inflated bytes of an XML unit once, of any other unit a step at a time."""
     if check == "any":
         return None
     if check in ("zlib", "zlib-xml"):
+        if check == "zlib-xml":
+            limit = min(limit, XML_INFLATE_LIMIT)
         # Inflate in bounded steps and keep the output only when XML follows:
         # a thumbnail inflates to 4 MiB and is checked for its end marker only.
         inflater, pending, total, parts = zlib.decompressobj(), data, 0, []
@@ -845,7 +1026,7 @@ def unit_check(check: str, data: bytes) -> Optional[str]:
             while True:
                 chunk = inflater.decompress(pending, 1 << 20)
                 total += len(chunk)
-                if total > INFLATE_LIMIT:
+                if total > limit:
                     return "se descomprime más allá del límite"
                 if check == "zlib-xml":
                     parts.append(chunk)
@@ -861,28 +1042,43 @@ def unit_check(check: str, data: bytes) -> Optional[str]:
         if check == "zlib":
             return None
         data = b"".join(parts)
+        del parts
+    # The document is read where it lies, by position: no second copy of it.
     # Some engines write their XML with the C string terminator (measured on
     # one: a NUL at the very end); their own loaders stop there, so one final
     # NUL is not part of the document. A NUL anywhere else still fails the parse.
-    if data.endswith(b"\0"):
-        data = data[:-1]
-    # Some games' files have several top-level elements: wrap them in one
-    # root, after the XML declaration if there is one (it must stay first).
-    text, declaration = data, b""
-    if text.startswith(b"\xef\xbb\xbf"):
-        declaration, text = text[:3], text[3:]
-    if text.lstrip().startswith(b"<?xml"):
-        text = text.lstrip()
-        end = text.find(b"?>")
-        if end < 0:
+    end = len(data) - 1 if data.endswith(b"\0") else len(data)
+    # Some games' files have several top-level elements: they are wrapped in
+    # one root, after the XML declaration if there is one (it must stay first).
+    start = 3 if data.startswith(b"\xef\xbb\xbf") else 0
+    declared = _XML_SPACE.match(data, start, end).end()
+    body = start
+    if data.startswith(b"<?xml", declared, end):
+        body = data.find(b"?>", declared, end) + 2
+        if body < 2:
             return "declaración XML incompleta"
-        declaration, text = declaration + text[:end + 2], text[end + 2:]
-    if b"<!DOCTYPE" in text or b"<!ENTITY" in text:
+    if data.find(b"<!DOCTYPE", body, end) >= 0 or data.find(b"<!ENTITY", body, end) >= 0:
         return "XML con declaraciones no admitidas"
+    # Well-formedness only: the parser is given no handlers, so it builds
+    # nothing (a document tree of a unit made of millions of empty elements
+    # took gigabytes), and with the document inside a root element of ours
+    # no document type can be declared, so there are no entities to expand.
+    view, parser = memoryview(data), expat.ParserCreate(None, "}")
     try:
-        ElementTree.fromstring(declaration + b"<mun-unit>" + text + b"</mun-unit>")
-    except ElementTree.ParseError as exc:
+        for piece in (view[:start], view[declared:body] if body > start else b"", b"<mun-unit>", view[body:end]):
+            parser.Parse(piece, False)
+        parser.Parse(b"</mun-unit>", True)
+    except expat.ExpatError as exc:
         return f"XML incompleto o dañado ({exc})"
+    except (LookupError, ValueError) as exc:
+        # The declaration names an encoding the parser cannot read: it knows
+        # UTF-8, US-ASCII and ISO-8859-1 itself and takes any other
+        # single-byte encoding from Python's codecs; a name they do not have
+        # is a LookupError there and a multibyte encoding (Shift-JIS, EUC-JP)
+        # a ValueError. Such a unit cannot be shown to be complete. (UTF-16,
+        # which the parser also knows, never gets this far: the unit is
+        # checked inside a root element written in ASCII, so it is malformed.)
+        return f"codificación XML no admitida ({exc})"
     return None
 
 
@@ -935,6 +1131,7 @@ class DirectorySync:
         self.host, self.sender, self.wall, self.inotify_factory = host, sender, wall, inotify_factory
         self.patterns = list(zip(spec["units"], spec["checks"]))
         self.max_bytes = int(spec["max_bytes"])
+        self.inflate_limit = inflate_limit(self.max_bytes)
         self.sync_dir = dest / "sync"
         self.dir_fd = -1
         self.watch: Optional["Inotify"] = None
@@ -1075,7 +1272,7 @@ class DirectorySync:
     def _check_envelope(self, raw: bytes) -> "tuple[Optional[str], Dict[str, bytes], dict]":
         """Refuse the whole envelope for any flaw; nothing is unpacked outside the directory."""
         try:
-            document = json.loads(raw)
+            document = parse_envelope(raw)
         except ValueError:
             return "no es JSON", {}, {}
         if not isinstance(document, dict) or document.get("format") not in SAVE_FORMATS.values():
@@ -1095,6 +1292,10 @@ class DirectorySync:
             return "partida sin lista de archivos válida", {}
         files: Dict[str, bytes] = {}
         total = 0
+        share = inflate_share(self.inflate_limit, sum(
+            1 for entry in payload["files"]
+            if isinstance(entry, dict) and isinstance(entry.get("path"), str)
+            and self.unit_pattern(entry["path"]) in INFLATING_CHECKS))
         for entry in payload["files"]:
             name = entry.get("path") if isinstance(entry, dict) else None
             if not isinstance(name, str) or not _SEGMENT.fullmatch(name) or name in (".", "..") or name in files:
@@ -1111,7 +1312,7 @@ class DirectorySync:
                 return "la partida supera el tamaño declarado", {}
             if len(data) != entry.get("size") or hashlib.sha256(data).hexdigest() != entry.get("sha256"):
                 return f"{name}: tamaño o huella no coinciden", {}
-            problem = unit_check(check, data)
+            problem = unit_check(check, data, share)
             if problem:
                 return f"{name}: {problem}", {}
             files[name] = data
@@ -1166,10 +1367,11 @@ class DirectorySync:
             self._drain()
             if self.pending and self.in_flight is None and self.lost is None:
                 self._attempt(frozen=True)
-        except OSError as exc:
+        except Exception as exc:  # noqa: BLE001 - whatever it is, it is this capture's failure
             # The loop must go on; the failure is the player's to know.
             self.last_error = {"code": "save_failed", "message": "No se pudieron leer los archivos de partida", "detail": str(exc)}
-            log(f"session {self.sid}: save capture failed: {exc}")
+            log(f"session {self.sid}: save capture failed: {exc}"
+                + ("" if isinstance(exc, OSError) else "\n" + traceback.format_exc().rstrip()))
 
     # --- capture -------------------------------------------------------------
     def _read_units(self, check_writers: bool) -> "tuple[Dict[str, Optional[bytes]], bool, Optional[str]]":
@@ -1179,7 +1381,17 @@ class DirectorySync:
         or no way to tell), which abandons the capture."""
         found: Dict[str, Optional[bytes]] = {}
         total = 0
-        for name in sorted(os.listdir(self.dir_fd)):
+        # Listed through a descriptor opened for this listing. A directory
+        # descriptor remembers what it listed, and on overlayfs the one held
+        # for the whole session went on serving an earlier listing: a unit
+        # created since was not seen. "." from the held descriptor is that
+        # same directory, with no path resolved again and nothing to follow.
+        listing = os.open(".", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC, dir_fd=self.dir_fd)
+        try:
+            names = sorted(os.listdir(listing))
+        finally:
+            os.close(listing)
+        for name in names:
             if self.unit_pattern(name) is None:
                 continue
             if len(found) >= MAX_UNIT_FILES:
@@ -1199,7 +1411,7 @@ class DirectorySync:
                     # can even open it until the descriptor is closed.
                     free = self.lease(fd)
                     if free is None:
-                        return found, False, "open files cannot be checked (no read lease)"
+                        return found, False, NO_LEASE
                     if not free:
                         return found, False, f"{name} is open for writing"
                 chunks, size = [], 0
@@ -1232,6 +1444,8 @@ class DirectorySync:
             found, too_many, no_point = self._read_units(check_writers=frozen)
             if no_point:
                 log(f"session {self.sid}: no save point: {no_point}")
+                if no_point == NO_LEASE:
+                    self.last_error = dict(SAVE_UNVERIFIED)    # until a capture succeeds: summary()
                 return                    # the writer's close triggers the next attempt
         finally:
             if frozen:
@@ -1244,9 +1458,10 @@ class DirectorySync:
         previous = self.last_synced
         snapshot: Dict[str, bytes] = {}
         carried, omitted = [], []
+        share = inflate_share(self.inflate_limit, sum(1 for name in found if self.unit_pattern(name) in INFLATING_CHECKS))
         for name, data in found.items():
             check = self.unit_pattern(name) or "any"
-            problem = "no es un archivo normal" if data is None else unit_check(check, data)
+            problem = "no es un archivo normal" if data is None else unit_check(check, data, share)
             if problem is None:
                 snapshot[name] = data
             elif name in previous:
@@ -1337,8 +1552,10 @@ class DirectorySync:
             self._final_captured = True
             try:
                 self._attempt(frozen=False)
-            except OSError as exc:
+            except Exception as exc:  # noqa: BLE001 - the session must still end, with this as its last save
                 self.last_error = {"code": "save_failed", "message": "No se pudieron leer los archivos de partida", "detail": str(exc)}
+                log(f"session {self.sid}: the last save capture failed: {exc}"
+                    + ("" if isinstance(exc, OSError) else "\n" + traceback.format_exc().rstrip()))
             if self.in_flight is not None:
                 return                    # _written() comes back here with the answer
         self._finish_final()
@@ -1372,6 +1589,8 @@ class DirectorySync:
         if reason in ("card_removed", "reader_lost") and unsynced:
             lines.append(f"Se perdieron los cambios de la partida posteriores a las {held_at}" if held_at
                          else "Los cambios de la partida de esta sesión no llegaron a la Game Card")
+            if (self.last_error or {}).get("code") == SAVE_UNVERIFIED["code"]:
+                lines.append(self.last_error["message"])
             ok = False
         elif self.lost is not None:
             lines.append(f"La última partida no se guardó: {self.lost}")
@@ -1419,21 +1638,27 @@ def _write_all(fd: int, data: bytes) -> None:
 # node for Mesa, ALSA for audio, evdev for input; SDL is pointed at KMSDRM and
 # ALSA and OpenAL Soft at ALSA, because the console runs no display or sound
 # server and their probing would otherwise burn time before falling back.
+# Input devices are read-only in every profile: what is written to an event
+# device is delivered to the whole console as if a key had been pressed, so a
+# game with write access could type on the console's keyboard (Ctrl+Alt+Del
+# reboots it). Reading, and grabbing a device (an ioctl), need no write
+# access; force feedback and keyboard LEDs do, and games do not get them.
 # Memory and task ceilings are provisional lab figures for a software-rendered
-# 2D game, not console specifications.
+# 2D game, not console specifications. `shm_max` bounds the session's own
+# /dev/shm (unit_properties()), well inside its memory ceiling.
 FRAMEBUFFER_PROFILE = "linux-arm64-v0"
 GL_PROFILE = "linux-arm64-gl-v0"
 PROFILES = {
     FRAMEBUFFER_PROFILE: {
         "groups": ("video", "input"),
-        "devices": ("/dev/fb0 rw", "char-input rw"),
-        "memory_max": "512M", "tasks_max": "32",
+        "devices": ("/dev/fb0 rw", "char-input r"),
+        "memory_max": "512M", "tasks_max": "32", "shm_max": "128M",
         "environment": {},
     },
     GL_PROFILE: {
         "groups": ("video", "render", "audio", "input"),
-        "devices": ("char-drm rw", "char-alsa rw", "char-input rw"),
-        "memory_max": "2G", "tasks_max": "64",
+        "devices": ("char-drm rw", "char-alsa rw", "char-input r"),
+        "memory_max": "2G", "tasks_max": "64", "shm_max": "512M",
         "environment": {"SDL_VIDEODRIVER": "kmsdrm", "SDL_AUDIODRIVER": "alsa", "ALSOFT_DRIVERS": "alsa"},
     },
 }
@@ -1456,7 +1681,12 @@ def unit_properties(profile: Optional[str], sid: str, dest: Path, content: Optio
         # node's root:disk 0660 mode still keeps the game itself away from it.
         # The leading "-" makes a vanished device non-fatal for namespace
         # set-up; the launcher ends the session on removal anyway.
-        properties.append(f"MountImages=-{content['device']}:{CONTENT_MOUNT}:root:ro,nosuid,nodev,noexec")
+        # errors=remount-ro: without an error policy of the mount's own,
+        # ext4 takes the one written in the card's superblock, and a card
+        # may say "panic": the first damaged inode a game reads would then
+        # stop the kernel. The card service's mount fixes the policy the same
+        # way; this one must not be the mount that leaves it to the card.
+        properties.append(f"MountImages=-{content['device']}:{CONTENT_MOUNT}:root:ro,nosuid,nodev,noexec,errors=remount-ro")
     properties += [f"SupplementaryGroups={group}" for group in spec["groups"]]
     properties += [
         "NoNewPrivileges=yes", "CapabilityBoundingSet=", "ProtectSystem=strict", "ProtectHome=yes", "PrivateTmp=yes",
@@ -1464,6 +1694,17 @@ def unit_properties(profile: Optional[str], sid: str, dest: Path, content: Optio
         "ProtectControlGroups=yes", "RestrictNamespaces=yes", "RestrictRealtime=yes",
         "LockPersonality=yes", "RestrictSUIDSGID=yes", f"MemoryMax={spec['memory_max']}", f"TasksMax={spec['tasks_max']}",
         "DevicePolicy=closed",
+        # Shared memory and IPC of the session's own. In the system's
+        # /dev/shm a game's files outlived it: their memory was no longer
+        # counted against any session (MemoryMax= bounds one), it added up
+        # from session to session, and the next card's game could read them;
+        # System V IPC objects and POSIX message queues stayed the same way.
+        # The unit gets a tmpfs of its own on /dev/shm, world-writable with
+        # the sticky bit like the system's so that shm_open() works for the
+        # game user, bounded, charged to the unit's memory like anything the
+        # game writes, and gone with the unit's mount namespace; and an IPC
+        # namespace of its own, which also brings its own /dev/mqueue.
+        "PrivateIPC=yes", f"TemporaryFileSystem=/dev/shm:nosuid,nodev,size={spec['shm_max']},mode=1777",
     ]
     properties += [f"DeviceAllow={device}" for device in spec["devices"]]
     if content is not None:
@@ -1828,7 +2069,10 @@ def stage_via_cardd(request: dict, reply: Callable[[dict], None]) -> None:
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
                 sock.settimeout(PREPARE_TIMEOUT if request.get("type") == "stage" else SAVE_TIMEOUT)
                 sock.connect(str(CARDD_CONTROL))
-                sock.sendall((json.dumps(request) + "\n").encode("utf-8"))
+                # Unescaped, as the card service measures a save and stores
+                # it: escaped, every character outside ASCII became six bytes
+                # and a save well inside its bound outgrew the service's line.
+                sock.sendall((json.dumps(request, ensure_ascii=False) + "\n").encode("utf-8", "replace"))
                 data = b""
                 while b"\n" not in data:
                     chunk = sock.recv(65536)
@@ -1845,15 +2089,23 @@ def stage_via_cardd(request: dict, reply: Callable[[dict], None]) -> None:
     threading.Thread(target=work, name="stage", daemon=True).start()
 
 
+def encode_line(message: dict) -> bytes:
+    """One message as a line for the shell or a game. A title or a detail
+    that came from a card or a game may hold half of a surrogate pair (JSON
+    can spell one), which UTF-8 cannot carry: it is replaced, not raised."""
+    return (json.dumps(message, ensure_ascii=False) + "\n").encode("utf-8", "replace")
+
+
 # ---------------------------------------------------------------- shell-facing socket
 
 class Server:
     def __init__(self, path: Path, manager: SessionManager):
         self.path = path
         self.manager = manager
-        self.clients: Dict[socket.socket, bytes] = {}
+        self.clients: Dict[socket.socket, LineReader] = {}
         self.listener: Optional[socket.socket] = None
         self.selector: Optional[selectors.BaseSelector] = None
+        self.faults: set = set()             # run_step()'s record of what was reported
 
     def drop(self, conn: socket.socket) -> None:
         """Forget a client everywhere: a closed fd number is reused by the next accept."""
@@ -1884,45 +2136,54 @@ class Server:
 
     def accept(self) -> Optional[socket.socket]:
         conn, _ = self.listener.accept()
+        if len(self.clients) >= CLIENTS_MAX:
+            conn.close()         # the ones already served stay
+            return None
         conn.setblocking(False)
-        self.clients[conn] = b""
+        self.clients[conn] = LineReader(limit=CLIENT_LINE_MAX)
         self._send(conn, self.manager.snapshot())
         return conn if conn in self.clients else None
 
     def handle(self, conn: socket.socket) -> bool:
         try:
             data = conn.recv(65536)
-        except OSError:
-            data = b""
+            requests = self.clients[conn].feed(data) if data else []
+        except (OSError, FrameTooLarge):
+            data = b""           # a line with no end is not the shell's protocol
         if not data:
             self.drop(conn)
             return False
-        self.clients[conn] += data
-        while b"\n" in self.clients.get(conn, b""):
-            line, _, self.clients[conn] = self.clients[conn].partition(b"\n")
-            try:
-                request = json.loads(line)
-            except ValueError:
-                continue
-            if request.get("type") == "launch":
-                result = self.manager.launch(request)
-                if not result.get("accepted"):
-                    log(f"launch rejected: {result.get('error', {}).get('code')} (state {self.manager.state})")
-                self._send(conn, {"type": "launch_result", **result})
-                if result.get("accepted"):
-                    self.manager._emit()
-            elif request.get("type") == "ack":
-                self.manager.acknowledge()
-            elif request.get("type") == "status":
-                self._send(conn, self.manager.snapshot())
-            elif request.get("type") == "release":
-                refusal = self.manager.release_request(str(request.get("serial", "")))
-                if refusal is not None:
-                    self._send(conn, {"type": "released", **refusal})
-                else:
-                    stage_via_cardd({"type": "release", "serial": request.get("serial")},
-                                    lambda outcome, c=conn: self.manager.schedule(lambda: self._send(c, {"type": "released", **outcome})))
-        return True
+        for request in requests:
+            if conn not in self.clients:
+                return False     # dropped while an earlier request was answered
+            if not run_step(self.faults, "shell request", self._request, conn, request):
+                # The shell waits for these two answers.
+                error = {"code": "launcher_error", "message": "El lanzador no pudo atender la petición"}
+                if request.get("type") == "launch":
+                    self._send(conn, {"type": "launch_result", "accepted": False, "error": error})
+                elif request.get("type") == "release":
+                    self._send(conn, {"type": "released", "ok": False, "error": error})
+        return conn in self.clients
+
+    def _request(self, conn: socket.socket, request: dict) -> None:
+        if request.get("type") == "launch":
+            result = self.manager.launch(request)
+            if not result.get("accepted"):
+                log(f"launch rejected: {result.get('error', {}).get('code')} (state {self.manager.state})")
+            self._send(conn, {"type": "launch_result", **result})
+            if result.get("accepted"):
+                self.manager._emit()
+        elif request.get("type") == "ack":
+            self.manager.acknowledge()
+        elif request.get("type") == "status":
+            self._send(conn, self.manager.snapshot())
+        elif request.get("type") == "release":
+            refusal = self.manager.release_request(str(request.get("serial", "")))
+            if refusal is not None:
+                self._send(conn, {"type": "released", **refusal})
+            else:
+                stage_via_cardd({"type": "release", "serial": request.get("serial")},
+                                lambda outcome, c=conn: self.manager.schedule(lambda: self._send(c, {"type": "released", **outcome})))
 
     def broadcast(self, message: dict) -> None:
         for conn in list(self.clients):
@@ -1930,7 +2191,7 @@ class Server:
 
     def _send(self, conn: socket.socket, message: dict) -> None:
         try:
-            conn.sendall((json.dumps(message, ensure_ascii=False) + "\n").encode("utf-8"))
+            conn.sendall(encode_line(message))
         except OSError:
             self.drop(conn)
 
@@ -1990,8 +2251,11 @@ def reconcile_sessions(runner: "Runner", manager: SessionManager, root: Path,
                 manager.adopt(sid, json.loads(session_file.read_text()))
                 adopted = sid
                 continue
-            except (OSError, ValueError):
-                pass
+            except Exception:  # noqa: BLE001 - whatever keeps it from being supervised, it is ended
+                log(f"session {sid}: could not be adopted; ending it\n{traceback.format_exc().rstrip()}")
+                if manager.sync is not None:
+                    manager.sync.close()
+                manager.session, manager.sync, manager.reader_lost_at, manager.state = None, None, None, "idle"
         runner.stop_unit(sid)
         if (root / sid).is_dir():
             record_interrupted(manager.results, sid, root / sid, status, notices.pop(sid, None))
@@ -2155,10 +2419,6 @@ def main(argv=None) -> int:
     listener = server.start()
     log(f"mun-launchd ready: socket {args.socket}, launch root {LAUNCH_ROOT}, game user {GAME_USER}")
 
-    # Reconcile: adopt a surviving game unit, or make sure the shell is back.
-    if not reconcile_sessions(runner, manager, LAUNCH_ROOT, sweep_cleanups(runner, manager)):
-        ShellControl().start()
-
     # Card service feed: a client connection with reconnection.
     cardd_sock: Optional[socket.socket] = None
     cardd_reader = LineReader()
@@ -2187,12 +2447,14 @@ def main(argv=None) -> int:
     selector.register(wake_r, selectors.EVENT_READ, "wake")
 
     # Per-session save socket (docs/saves.md): opened right before the game starts,
-    # closed with the session. Each connection carries one bounded request line.
+    # closed with the session. Each connection carries one bounded request line;
+    # "clients" maps it to its line reader, the time by which the line must
+    # have come, and whether it has (the connection then waits for its answer).
     gate = {"listener": None, "sid": None, "clients": {}}
 
     def gate_send(conn: socket.socket, message: dict) -> None:
         try:
-            conn.sendall((json.dumps(message, ensure_ascii=False) + "\n").encode("utf-8"))
+            conn.sendall(encode_line(message))
         except OSError:
             pass
         gate_drop(conn)
@@ -2223,6 +2485,117 @@ def main(argv=None) -> int:
         selector.register(gate["listener"], selectors.EVENT_READ, "save-accept")
 
     manager.gate_open, manager.gate_close = gate_open, gate_close
+    faults: set = server.faults
+
+    # Reconcile: adopt a surviving game unit, or make sure the shell is back.
+    # Only now that the save socket can be opened: the one the adopted game
+    # holds the name of died with the previous launcher, and a game adopted
+    # before this point could not save for the rest of its session.
+    if not reconcile_sessions(runner, manager, LAUNCH_ROOT, sweep_cleanups(runner, manager)):
+        ShellControl().start()
+
+    def save_accept() -> None:
+        try:
+            conn, _ = gate["listener"].accept()
+        except OSError:
+            return
+        if len(gate["clients"]) >= SAVE_CLIENTS_MAX:
+            # Room is made by the connection that has kept silent longest, so
+            # that a save always gets in; one waiting for its answer stays.
+            silent = [held for held, client in gate["clients"].items() if not client["asked"]]
+            if not silent:
+                conn.close()
+                return
+            gate_drop(silent[0])
+        conn.setblocking(False)
+        gate["clients"][conn] = {"reader": LineReader(limit=SAVE_LINE_MAX), "asked": False,
+                                 "deadline": time.monotonic() + SAVE_REQUEST_TIMEOUT}
+        selector.register(conn, selectors.EVENT_READ, "save-client")
+
+    def save_expire() -> None:
+        now = time.monotonic()
+        for conn, client in list(gate["clients"].items()):
+            if not client["asked"] and now > client["deadline"]:
+                gate_drop(conn)
+
+    def save_line(conn: socket.socket) -> None:
+        client = gate["clients"].get(conn)
+        try:
+            data = conn.recv(65536)
+            # Anything after the request line is read and dropped.
+            requests = client["reader"].feed(data) if (data and client and not client["asked"]) else []
+        except FrameTooLarge:
+            # No save needs a line that long; the game is told, then dropped.
+            gate_send(conn, {"type": "saved", "ok": False, "error": {
+                "code": "save_too_large", "message": "La partida supera el tamaño permitido"}})
+            return
+        except OSError:
+            data = b""
+            requests = []
+        if not data:
+            gate_drop(conn)
+            return
+        for request in requests[:1]:   # one request per connection
+            client["asked"] = True
+            if not run_step(faults, "save request", manager.save_request, gate["sid"], request,
+                            lambda message, c=conn: gate_send(c, message)):
+                gate_send(conn, {"type": "saved", "ok": False, "error": {
+                    "code": "save_failed", "message": "El lanzador no pudo atender el guardado"}})
+
+    def card_feed() -> None:
+        nonlocal cardd_sock
+        try:
+            data = cardd_sock.recv(1 << 20)
+            messages = cardd_reader.feed(data) if data else []
+        except FrameTooLarge as exc:
+            log(f"card service feed: {exc}; reconnecting for a fresh snapshot")
+            data = b""
+        except OSError:
+            data = b""
+        if not data:
+            selector.unregister(cardd_sock)
+            cardd_sock.close()
+            cardd_sock = None
+            cards.connected = False
+            manager.reader_disconnected()
+            return
+        for message in messages:
+            run_step(faults, "card service message", card_message, message)
+
+    def card_message(message: dict) -> None:
+        was_connected = cards.connected
+        removed = cards.apply(message)
+        if message.get("type") == "snapshot" and not was_connected:
+            manager.reader_reconnected()
+        elif message.get("type") == "card":
+            manager.card_changed()
+        if removed:
+            manager.card_removed(removed, message.get("insertion"))
+
+    def event(key: selectors.SelectorKey) -> None:
+        if key.data == "accept":
+            conn = server.accept()
+            if conn is not None:
+                selector.register(conn, selectors.EVENT_READ, "client")
+        elif key.data == "client":
+            server.handle(key.fileobj)   # drop() unregisters on close
+        elif key.data == "save-accept":
+            save_accept()
+        elif key.data == "save-client":
+            save_line(key.fileobj)
+        elif key.data == "wake":
+            wake_r.recv(4096)
+            with lock:
+                pending, queue[:] = queue[:], []
+            for fn in pending:
+                run_step(faults, "scheduled step", fn)
+        elif key.data == "cardd":
+            card_feed()
+
+    # Every step runs through run_step(): what a game, a card or a client
+    # makes one of them raise is that step's failure. The wait itself does
+    # not: a selector that cannot wait is a launcher that cannot work, and
+    # ending is then what lets systemd start one that adopts the session.
     last_tick = time.monotonic()
     while not stop["flag"]:
         if cardd_sock is None and time.monotonic() - last_cardd_attempt > 1.0:
@@ -2232,67 +2605,13 @@ def main(argv=None) -> int:
                 selector.register(cardd_sock, selectors.EVENT_READ, "cardd")
                 cardd_reader = LineReader()
         for key, _ in selector.select(timeout=POLL_INTERVAL):
-            if key.data == "accept":
-                conn = server.accept()
-                if conn is not None:
-                    selector.register(conn, selectors.EVENT_READ, "client")
-            elif key.data == "client":
-                server.handle(key.fileobj)   # drop() unregisters on close
-            elif key.data == "save-accept":
-                try:
-                    conn, _ = gate["listener"].accept()
-                except OSError:
-                    continue
-                conn.setblocking(False)
-                gate["clients"][conn] = LineReader(limit=SAVE_LINE_MAX)
-                selector.register(conn, selectors.EVENT_READ, "save-client")
-            elif key.data == "save-client":
-                conn = key.fileobj
-                reader = gate["clients"].get(conn)
-                try:
-                    data = conn.recv(65536)
-                    requests = reader.feed(data) if (data and reader) else []
-                except (OSError, FrameTooLarge):
-                    data = b""
-                    requests = []
-                if not data:
-                    gate_drop(conn)
-                    continue
-                for request in requests[:1]:   # one request per connection
-                    manager.save_request(gate["sid"], request, lambda message, c=conn: gate_send(c, message))
-            elif key.data == "wake":
-                wake_r.recv(4096)
-                with lock:
-                    pending, queue[:] = queue[:], []
-                for fn in pending:
-                    fn()
-            elif key.data == "cardd":
-                try:
-                    data = cardd_sock.recv(1 << 20)
-                    messages = cardd_reader.feed(data) if data else []
-                except FrameTooLarge as exc:
-                    log(f"card service feed: {exc}; reconnecting for a fresh snapshot")
-                    data = b""
-                except OSError:
-                    data = b""
-                if not data:
-                    selector.unregister(cardd_sock)
-                    cardd_sock.close()
-                    cardd_sock = None
-                    cards.connected = False
-                    manager.reader_disconnected()
-                    continue
-                for message in messages:
-                    was_connected = cards.connected
-                    removed = cards.apply(message)
-                    if message.get("type") == "snapshot" and not was_connected:
-                        manager.reader_reconnected()
-                    elif message.get("type") == "card":
-                        manager.card_changed()
-                    if removed:
-                        manager.card_removed(removed, message.get("insertion"))
+            if not run_step(faults, f"event {key.data}", event, key):
+                # What failed may still be waiting (a connection that could
+                # not be accepted): the loop must not spin on it.
+                time.sleep(0.05)
         if time.monotonic() - last_tick >= POLL_INTERVAL:
-            manager.tick()
+            run_step(faults, "tick", manager.tick)
+            save_expire()
             last_tick = time.monotonic()
 
     try:

@@ -50,7 +50,7 @@ class Fixture(unittest.TestCase):
         self.enterContext(patch.object(vm, "GUESTS_ROOT", self.root / "guests"))
         self.enterContext(contextlib.redirect_stdout(io.StringIO()))
 
-    def build(self, name="b1", shape=None, image_format=None):
+    def build(self, name="b1", shape=None, image_format=None, motion=None):
         """A finished build: a qcow2 one as builds made before BUILD-INFO
         recorded the format, or one of `image_format`."""
         build = self.root / "builds" / name
@@ -66,6 +66,8 @@ class Fixture(unittest.TestCase):
             info["image_format"] = image_format
         if shape:
             info["shape"] = {"format": shape}
+        if motion is not None:
+            info["shape"].update(minor=1, motion={"draft": motion})
         (build / "BUILD-INFO.json").write_text(json.dumps(info))
         (build / "SHA256SUMS").write_text(f"{digest}  {image.name}\n")
         return build
@@ -253,6 +255,22 @@ class BuilderTests(Fixture):
         self.assertIn("ssh-ed25519 AAAA test", user_data)
         self.assertIn("ssh_pwauth: false", user_data)
 
+    def test_ssh_to_the_builder_takes_nothing_from_the_users_configuration(self):
+        # A Host * block of ~/.ssh/config (a jump host, forwarding of the
+        # user's keys, other identities) must not reach a build.
+        with patch.object(vm, "which", side_effect=lambda name: name):
+            builder = mundev.Builder("b1")
+            builder.port = 2222
+            command = builder.ssh_base()
+        self.assertEqual(command[:3], ["ssh", "-F", os.devnull], "no configuration file is read")
+        options = [command[index + 1] for index, part in enumerate(command) if part == "-o"]
+        for option in ("IdentitiesOnly=yes", "IdentityAgent=none", "ForwardAgent=no", "ProxyJump=none",
+                       "BatchMode=yes", f"UserKnownHostsFile={builder.known_hosts}"):
+            self.assertIn(option, options)
+        self.assertEqual(command[command.index("-i") + 1], str(builder.key), "the builder's own key and no other")
+        self.assertEqual(command[command.index("-p") + 1], "2222")
+        self.assertEqual(command[-1], "builder@127.0.0.1")
+
     def test_the_builder_image_must_match_its_pin(self):
         cache = self.root / "cache"
         cache.mkdir()
@@ -384,9 +402,24 @@ class ShapeConsoleTests(Fixture):
         preview.return_value.run.assert_called_once()
         self.assertIn("already on, so no window opens", out.getvalue())
 
+    def test_a_package_with_motion_on_a_console_that_plays_none_is_said_before_it_starts(self):
+        import shapepreview
+        self.build("b1", shape="mun-shape/1")
+        with patch.object(vm, "run"), patch.object(vm, "which", side_effect=lambda name: name):
+            mundev.create_guest("shape", self.root / "builds" / "b1")
+        args = self.shape_args("shape")
+        args.folder = str(ROOT / "examples" / "shape" / "reef")
+        out = io.StringIO()
+        with patch.object(vm, "select_instance"), patch.object(vm, "read_pid", return_value=4242), \
+                patch.object(vm, "main"), patch.object(shapepreview, "Preview"), contextlib.redirect_stdout(out):
+            self.assertEqual(mundev.cmd_shape(args), 0)
+        self.assertIn("[shape] warning: guest shape runs build b1, whose BUILD-INFO says it plays no Shape motion",
+                      out.getvalue())
+
     def test_the_list_says_which_builds_and_guests_show_shape(self):
         self.build("b1")
         self.build("b2", shape="mun-shape/1")
+        self.build("b3", shape="mun-shape/1", motion=1)
         with patch.object(vm, "run"), patch.object(vm, "which", side_effect=lambda name: name):
             mundev.create_guest("old", self.root / "builds" / "b1")
             mundev.create_guest("new", self.root / "builds" / "b2")
@@ -394,6 +427,8 @@ class ShapeConsoleTests(Fixture):
         with contextlib.redirect_stdout(out):
             mundev.cmd_list(argparse.Namespace())
         lines = out.getvalue().splitlines()
+        self.assertTrue(any(line.startswith("build b3") and line.endswith("shape mun-shape/1 with motion (draft 1)")
+                            for line in lines), lines)
         self.assertTrue(any(line.startswith("build b1") and line.endswith("shape not recorded") for line in lines))
         self.assertTrue(any(line.startswith("build b2") and line.endswith("shape mun-shape/1") for line in lines))
         self.assertTrue(any(line.startswith("guest new") and line.endswith("shape mun-shape/1") for line in lines))
@@ -413,6 +448,95 @@ class LicenceTests(unittest.TestCase):
         image = (ROOT / "os" / "mkosi" / "mkosi.build.chroot").read_text()
         for name in names[:3]:
             self.assertIn(f'"$MUN/{name}" "$DESTDIR/usr/share/doc/mun-os/{name}"', image)
+
+
+class SmokeCardTests(Fixture):
+    """`./mun dev smoke --bundle`: installing a bundle never replaces a card
+    that exists, so the check may play a card that is not the bundle's."""
+
+    BUNDLED = b"the bundle's card"
+
+    def smoke(self, install):
+        self.build("b1")
+        said = io.StringIO()
+        arguments = argparse.Namespace(bundle="https://example.invalid/bundle", build=None, card="collect",
+                                       guest="smoke", motion=False, wait=1, card_timeout=1, play=0)
+        # The check itself needs a guest: it is stopped where it would make one.
+        with patch.object(vm, "CARD_ROOT", self.root / "cards"), patch.object(mundev, "install", side_effect=install), \
+                patch.object(mundev, "bundled_card_digest", return_value=hashlib.sha256(self.BUNDLED).hexdigest()), \
+                patch.object(mundev, "create_guest", side_effect=vm.LabError("no guest in host tests")), \
+                contextlib.redirect_stdout(said), self.assertRaises(vm.LabError) as stopped:
+            mundev.cmd_smoke(arguments)
+        self.assertIn("no guest in host tests", str(stopped.exception))
+        return said.getvalue()
+
+    def card(self, data):
+        (self.root / "cards").mkdir(exist_ok=True)
+        (self.root / "cards" / "collect.img").write_bytes(data)
+
+    def test_a_card_that_was_there_and_is_not_the_bundles_is_said_to_be_the_one_played(self):
+        self.card(b"an earlier card, or the bundle's with saves on it")
+        said = self.smoke(lambda source: self.root / "builds" / "b1")
+        self.assertIn("card collect was already", said)
+        self.assertIn("plays the card that was there", said)
+
+    def test_a_card_that_was_there_and_is_the_bundles_byte_for_byte_is_not_remarked(self):
+        # The second check of a release (the card dressed in Reef) runs after
+        # the first has unpacked every card of the same bundle.
+        self.card(self.BUNDLED)
+        self.assertNotIn("already", self.smoke(lambda source: self.root / "builds" / "b1"))
+
+    def test_a_card_the_bundle_brought_is_not_remarked(self):
+        def install(source):
+            self.card(self.BUNDLED)
+            return self.root / "builds" / "b1"
+        self.assertNotIn("already", self.smoke(install))
+
+    def test_the_bundles_card_digest_comes_from_its_manifest(self):
+        made = self.root / "bundle"
+        made.mkdir()
+        digest = hashlib.sha256(self.BUNDLED).hexdigest()
+        image = {"name": "m.qcow2", "kind": "image", "size": 1, "sha256": "0" * 64}
+        record = {"name": "BUILD-INFO.json", "kind": "build-info", "size": 1, "sha256": "0" * 64}
+        card = {"name": "card-collect.img.xz", "kind": "card", "card": "collect", "size": 1, "sha256": "0" * 64,
+                "image_size": len(self.BUNDLED), "image_sha256": digest}
+        (made / "release.json").write_text(json.dumps({
+            "format": "mun-bundle/1", "name": "MUN OS", "version": "0", "environment": "qemu-arm64", "release": False,
+            "build_id": "20260929T123647Z-aee686f3d1fd", "files": [image, record, card]}))
+        self.assertEqual(mundev.bundled_card_digest(str(made), "collect"), digest)
+        self.assertIsNone(mundev.bundled_card_digest(str(made), "demo"), "a card the bundle does not carry")
+        self.assertIsNone(mundev.bundled_card_digest(str(self.root / "nowhere"), "collect"), "a bundle that is not there")
+
+
+class SmokeMotionTests(unittest.TestCase):
+    """`./mun dev smoke --motion`: the shell's own words decide whether it plays
+    the inserted card's motion (lines as services/mun-shell/src/motionscene.cpp
+    writes them)."""
+
+    def said(self, *outputs, timeout=30):
+        answers = iter(outputs)
+        with patch.object(vm, "guest_command",
+                          side_effect=lambda *a, **k: subprocess.CompletedProcess(a, 0, next(answers), "")), \
+                patch.object(mundev.time, "sleep"):
+            return mundev.shell_plays_motion(timeout)
+
+    def test_the_player_ready_passes_with_what_it_said(self):
+        line = ("mun-shell: motion: backend graph, look 640x360 (whole pixels), 32 images, 20.8 MiB decoded, "
+                "20 frames a second\n")
+        self.assertEqual(self.said("", "", line), line.strip().split("motion: ", 1)[1],
+                         "waited for the line while the images were decoded")
+
+    def test_the_v1_look_instead_fails_saying_why(self):
+        line = "mun-shell: motion: over its budget; nothing of it is drawn, the package's v1 look instead\n"
+        with self.assertRaises(vm.LabError) as failed:
+            self.said(line)
+        self.assertIn("over its budget", str(failed.exception))
+
+    def test_nothing_said_in_time_fails(self):
+        with self.assertRaises(vm.LabError) as failed:
+            self.said("", timeout=0)
+        self.assertIn("said nothing", str(failed.exception))
+        self.assertEqual(mundev.MOTION_SAID.count("-u mun-shell -b"), 1, "this boot's shell only")
 
 
 if __name__ == "__main__":

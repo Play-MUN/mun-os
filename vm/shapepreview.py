@@ -151,6 +151,45 @@ def build_shape(build_dir: Path) -> Optional[str]:
     return shape.get("format") if isinstance(shape, dict) and isinstance(shape.get("format"), str) else None
 
 
+def build_motion(build_dir: Path) -> Optional[int]:
+    """The revision of the Shape motion draft a build's shell plays, as its
+    BUILD-INFO records it; None for a build that plays none (every build
+    before builds recorded it)."""
+    try:
+        info = json.loads((build_dir / "BUILD-INFO.json").read_text())
+    except (OSError, ValueError):
+        return None
+    shape = info.get("shape")
+    motion = shape.get("motion") if isinstance(shape, dict) else None
+    draft = motion.get("draft") if isinstance(motion, dict) else None
+    return draft if isinstance(draft, int) and not isinstance(draft, bool) else None
+
+
+def motion_notice(guest: str, build_dir: Path, summary: dict) -> Optional[str]:
+    """What a console of `build_dir` does with a package's motion that this
+    checkout's tools would use, when that is less, as the build's
+    BUILD-INFO declares it (the guest is not asked): None when the package
+    has no motion used here, or the build declares this draft. A warning,
+    not a refusal: the console still shows the package's v1 look."""
+    if summary.get("blocks", {}).get("motion", {}).get("state") != "used":
+        return None
+    draft = summary["blocks"]["motion"].get("draft")
+    played = build_motion(build_dir)
+    if played == draft:
+        return None
+    what = (f"plays no Shape motion" if played is None
+            else f"plays Shape motion draft {played}, and the package is written for draft {draft}")
+    return (f"guest {guest} runs build {build_dir.name}, whose BUILD-INFO says it {what}: that console shows the "
+            f"package's v1 look "
+            f"(its still world, palette, window and sounds), not the motion this checkout reads. To see the motion, "
+            f"make a new image from this source (./mun dev build) and a guest from it (--guest NAME)")
+
+
+def folder_notice(guest: str, build_dir: Path, folder: Path) -> Optional[str]:
+    """motion_notice for the package in `folder`, as this checkout reads it."""
+    return motion_notice(guest, build_dir, card_cli.shape_summary(shape_rules.check_package(DirectorySource(folder))))
+
+
 def check_build(guest: str, build_dir: Path, latest: Optional[Path], recorded: bool) -> None:
     """Refuse a console that does not show MUN Shape as this checkout's tools
     describe it. `recorded`: the guest exists, made from `build_dir`."""
@@ -325,8 +364,9 @@ class Preview:
     # ------------------------------------------------------------ making a card
 
     def make_card(self, name: str):
-        """Make the preview card `name` from the folder; returns the console's
-        verdict on the package as it is on the card. The card is made aside and
+        """Make the preview card `name` from the folder; returns this
+        checkout's verdict on the package as it is on the card (checked here,
+        on the host, not by the console). The card is made aside and
         put at its name only if nothing is there: an earlier card of the
         preview's own is removed first, any other file is refused (NotOurs)."""
         destination = vm.card_path(name)
@@ -371,11 +411,25 @@ class Preview:
                 pass
         source = DebugfsSource(destination, card_image.find_tool("debugfs"))
         info = validate_card(source)
-        return card_cli.shape_summary(shape_rules.check_card(source, info.root))
+        return card_cli.shape_summary(shape_rules.check_card(source, info.root, version=info.version))
 
     def report(self, name: str, summary: dict) -> None:
+        """What is known of the card, and how: the verdict is this
+        checkout's checker, run here on the card as made; what the guest's
+        console plays is what its build's BUILD-INFO declares; what the
+        console shows is not observed (nothing here asks the guest)."""
         state = summary["state"]
-        self.say(f"{name}: {card_cli._STATE_WORDS[state]}")
+        self.say(f"{name}: {card_cli._STATE_WORDS[state]} (checked here, with this checkout's tools, on the card as "
+                 "made; not by the console)")
+        notice = motion_notice(self.guest, self.build_dir, summary)
+        if notice:
+            self.say("  in this console, by its BUILD-INFO: the v1 look only")
+            self.say(f"  warning: {notice}")
+        elif summary.get("blocks", {}).get("motion", {}).get("state") == "used":
+            draft = summary["blocks"]["motion"].get("draft")
+            self.say(f"  motion: build {self.build_dir.name}'s BUILD-INFO says its shell plays draft {draft}; whether "
+                     f"the console draws it is not observed here (./mun dev vm {self.guest} shell-log shows what the "
+                     "shell says of it)")
         for block, item in summary.get("blocks", {}).items():
             if item["state"] == "dropped":
                 self.say(f"  {block} dropped [{item['code']}] {item['message']}"

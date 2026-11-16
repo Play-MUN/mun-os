@@ -1,0 +1,8 @@
+# Development image for a board (profile q6a-dev): the laboratory's wired
+# network, by DHCP, for SSH from the development machine. Not part of MUN
+# OS's own design, which needs no network.
+[Match]
+Type=ether
+
+[Network]
+DHCP=yes

@@ -48,6 +48,17 @@ def shape_format() -> str:
     return shape.FORMAT
 
 
+def shape_record() -> dict:
+    """What the image's console reads of MUN Shape: its `format` (what every
+    tool reads, unchanged), and beside it the minor version and the revision
+    of the motion draft its shell plays (docs/shape-motion.md). A build
+    without them, as every build before them, plays no motion: a package
+    with motion shows its v1 look there."""
+    sys.path.insert(0, str(SOURCE_ROOT / "tools" / "mun-card"))
+    from mun_card import motion, shape
+    return {"format": shape_format(), "minor": shape.FORMAT_MINOR, "motion": {"draft": motion.DRAFT}}
+
+
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -134,6 +145,12 @@ def main(argv: list) -> int:
         if recipe["name"] in games:
             games[recipe["name"]]["recipe"] = recipe
 
+    # A release is one commit: a tree with uncommitted changes can be built
+    # for development, never recorded as a release.
+    if environment.get("MUN_RELEASE") == "true" and not source.get("clean"):
+        print("build_info: a release profile cannot build uncommitted changes", file=sys.stderr)
+        return 1
+
     info = {
         "format": FORMAT,
         "name": inputs["name"],
@@ -177,7 +194,7 @@ def main(argv: list) -> int:
             "packages": initrd_packages,
         },
         "games": games,
-        "shape": {"format": shape_format()},
+        "shape": shape_record(),
         "artifacts": {
             Path(args.image).name: {"sha256": sha256(Path(args.image)), "size": Path(args.image).stat().st_size},
             "raw_image": {"sha256": sha256(Path(args.raw)), "size": Path(args.raw).stat().st_size,

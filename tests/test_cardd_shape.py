@@ -66,11 +66,11 @@ class ShapeHarness:
     """CardManager with the Shape export on, fake timers and synchronous
     export removal; scheduled callbacks run on `pump()`."""
 
-    def __init__(self, root, packages):
+    def __init__(self, root, packages, info=None):
         self.events, self.pending, self.timers = [], [], []
         self.shape_root = root / "shape"
         self.mounter = PackageMounter(root, packages)
-        self.manager = cardd.CardManager(self.mounter, lambda mount: game_info(), self.events.append,
+        self.manager = cardd.CardManager(self.mounter, lambda mount: game_info(**(info or {})), self.events.append,
                                          self.pending.append, shape_root=self.shape_root,
                                          later=lambda seconds, fn: self.timers.append(fn),
                                          remove_export=cardd._remove_tree)
@@ -191,6 +191,61 @@ class ShapeExportTests(unittest.TestCase):
         self.assertFalse((export / "world").exists(), "a dropped block's files never reach the shell")
         self.assertNotIn("world", json.loads((export / "shape.json").read_text()))
 
+    def test_an_image_whose_text_would_fill_memory_never_reaches_the_shell(self):
+        # A backdrop within its size whose header carries hundreds of text
+        # chunks, each a few KiB that inflate to megabytes: the checker
+        # drops its block, so the file is not exported.
+        import struct
+        import zlib
+        package = self.tmp / "text-heavy"
+        shutil.copytree(SEA, package)
+        backdrop = package / "world" / "backdrop.png"
+        body = b"Comment\0\0" + zlib.compress(b"A" * 7_999_000, 9)
+        text = struct.pack(">I", len(body)) + b"zTXt" + body + struct.pack(">I", zlib.crc32(b"zTXt" + body) & 0xFFFFFFFF)
+        image = backdrop.read_bytes()
+        count = (4 * 1024 * 1024 - len(image)) // len(text)
+        self.assertGreater(count, 100)
+        backdrop.write_bytes(image[:33] + text * count + image[33:])
+        h = ShapeHarness(self.tmp, {"vdc": package})
+        self.insert(h)
+        h.pump(until=h.settled())
+        record = h.card()["shape"]
+        self.assertEqual(record["state"], "partial")
+        self.assertIn(("shape_png", "world"), [(n["code"], n["block"]) for n in record["notes"]])
+        export = Path(record["path"])
+        self.assertFalse((export / "world").exists(), "a dropped block's files never reach the shell")
+        self.assertNotIn("world", json.loads((export / "shape.json").read_text()))
+
+    def test_a_motion_that_would_cover_the_screen_too_often_is_not_exported(self):
+        # Within every count, each figure a whole screen: the checker drops
+        # the motion, and the shell is given the package's v1 look alone.
+        import struct
+        import zlib
+
+        def chunk(kind, body):
+            return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body) & 0xFFFFFFFF)
+        package = self.tmp / "walls"
+        (package / "sheets").mkdir(parents=True)
+        (package / "sheets" / "wall.png").write_bytes(
+            b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 1920, 1080, 8, 6, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(b"\0")) + chunk(b"IEND", b""))
+        actors = {f"wall-{i}": {"sheet": "wall", "at": [960, 540], "copies": {"count": 64}} for i in range(2)}
+        (package / "shape.json").write_text(json.dumps({
+            "format": "mun-shape/1.1", "motion_draft": 1,
+            "palette": {"light": "#E6FBFF", "mid": "#2A9DBA", "deep": "#02202E", "plate": "#04283A",
+                        "text": "#EFFFFF", "accent": "#F2B85C"},
+            "world": {"backdrop": {"gradient": ["#02202E", "#2A9DBA"]}},
+            "sheets": {"wall": {"image": "sheets/wall.png", "frame": [1920, 1080]}}, "actors": actors}))
+        h = ShapeHarness(self.tmp, {"vdc": package})
+        self.insert(h)
+        h.pump(until=h.settled())
+        record = h.card()["shape"]
+        self.assertEqual(record["state"], "partial")
+        self.assertIn(("shape_motion_count", "motion"), [(n["code"], n["block"]) for n in record["notes"]])
+        exported = json.loads((Path(record["path"]) / "shape.json").read_text())
+        self.assertEqual(("motion" in exported, "world" in exported), (False, True))
+        self.assertFalse((Path(record["path"]) / "sheets").exists(), "the dropped motion's files are not exported")
+
     def test_an_unusable_package_publishes_nothing(self):
         h = ShapeHarness(self.tmp, {"vdc": self.fixture("not-json")})
         self.insert(h)
@@ -200,6 +255,39 @@ class ShapeExportTests(unittest.TestCase):
         self.assertNotIn("path", record)
         self.assertEqual(h.exports(), [])
         self.assertEqual(h.card()["state"], "valid", "the card is unaffected")
+
+    def test_the_document_written_fits_what_the_shell_reads_with_the_cards_version(self):
+        # A motion within the shell's 256 KiB with a short content version
+        # and over it with a version of 2,000 digits, which the service adds
+        # to the document: the motion is dropped, the v1 look written, and
+        # the document is within what the shell reads.
+        import test_shape_motion as motion_tests
+        names = [a + b for a in "abcdefghijklmnopqrstuvwxyz" for b in "abcdefghijklmnopqrstuvwxyz"]
+        document = json.loads(json.dumps(motion_tests.BASE))
+        document.update(sheets={f"s{i}": {"image": "effects/bubble.png", "clips": {n: [0, 1, 1] for n in names[:268]}}
+                                for i in range(16)}, actors={"a": {"sheet": "s0", "at": [0, 0]}}, states={}, react={})
+        package = self.tmp / "near-the-limit"
+        for name, data in motion_tests.FILES.items():
+            (package / name).parent.mkdir(parents=True, exist_ok=True)
+            (package / name).write_bytes(data)
+        (package / "shape.json").write_text(json.dumps(document, separators=(",", ":")), encoding="utf-8")
+        for version, motion in (("0.1.0", True), ("1." + "0" * 2000, False)):
+            with self.subTest(version=version[:12]):
+                root = self.tmp / f"run-{len(version)}"
+                root.mkdir()
+                h = ShapeHarness(root, {"vdc": package}, info={"version": version})
+                self.insert(h)
+                h.pump(until=h.settled())
+                record = h.card()["shape"]
+                written = (Path(record["path"]) / "shape.json").read_bytes()
+                self.assertLessEqual(len(written), cardd.shape.EXPORT_MAX_BYTES, "the shell reads it")
+                exported = json.loads(written)
+                self.assertEqual((exported["version"], "motion" in exported, "world" in exported), (version, motion, True))
+                self.assertEqual(record["state"], "ready" if motion else "partial", record["notes"])
+                if not motion:
+                    self.assertIn(("shape_motion_count", "motion"), [(n["code"], n["block"]) for n in record["notes"]])
+                    self.assertFalse((Path(record["path"]) / "effects" / "bubble.png").exists(),
+                                     "the dropped motion's files are not exported")
 
     def test_links_and_fifos_on_the_card_are_never_followed_or_waited_on(self):
         package = self.tmp / "tricky"

@@ -103,6 +103,9 @@ public:
     // The settings file, for the display's choice before the application
     // exists (main.cpp).
     static QString filePath();
+    // System sounds as `file` has them, read as the instance reads them: for
+    // opening the sound device before the application exists (main.cpp).
+    static bool systemSoundsIn(const QSettings &file);
 
     // "auto" is kept at once; a mode is tried. Either restarts the shell.
     Q_INVOKABLE void changeResolution(const QString &resolution);

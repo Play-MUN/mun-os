@@ -7,7 +7,9 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 import re
+import shlex
 import shutil
 import stat
 import subprocess
@@ -125,7 +127,7 @@ class CompositionTests(unittest.TestCase):
         self.assertNotIn("Autologin", QEMU_DEV.read_text())
 
     def test_the_image_boots_quietly(self):
-        # Firmware, then a blank display, then the shell's splash.
+        # Firmware, then the shell's standby picture (deploy/mun-standby), then its start-up.
         cmdline = mkosi_list(QEMU_DEV, "KernelCommandLine")
         for parameter in ("quiet", "loglevel=3", "vt.global_cursor_default=0"):
             self.assertIn(parameter, cmdline)
@@ -134,7 +136,7 @@ class CompositionTests(unittest.TestCase):
     def test_the_console_services_are_enabled_and_tty1_left_to_the_shell(self):
         preset = (MKOSI / "mkosi.extra" / "usr" / "lib" / "systemd" / "system-preset" / "10-mun.preset").read_text()
         for unit in ("run-mun-launch.mount", "mun-cardd.service", "mun-launchd.service",
-                     "mun-shell.service", "mun-reset.service"):
+                     "mun-shell.service", "mun-standby.service", "mun-reset.service"):
             self.assertIn(f"enable {unit}", preset)
         self.assertIn("disable getty@.service", preset)
 
@@ -154,6 +156,26 @@ class CompositionTests(unittest.TestCase):
         syslog = (extra / "etc" / "systemd" / "journald.conf.d" / "syslog.conf").read_text()
         self.assertRegex(syslog, r"(?m)^ForwardToSyslog=no$")
         self.assertNotIn("rsyslog", mkosi_list(MKOSI / "mkosi.conf", "Packages"))
+
+    def test_no_key_chord_restarts_the_console(self):
+        # Whoever can write key events (a keyboard, or a process that reaches
+        # an input device) must not be able to restart the console with them:
+        # systemd's burst action, the target the kernel's signal starts, and
+        # the kernel's own SysRq keys.
+        extra = MKOSI / "mkosi.extra"
+        manager = (extra / "usr" / "lib" / "systemd" / "system.conf.d" / "60-mun.conf").read_text()
+        self.assertRegex(manager, r"(?m)^\[Manager\]$")
+        self.assertRegex(manager, r"(?m)^CtrlAltDelBurstAction=none$")
+        target = extra / "etc" / "systemd" / "system" / "ctrl-alt-del.target"
+        self.assertTrue(target.is_symlink(), "ctrl-alt-del.target is not masked")
+        self.assertEqual(os.readlink(target), "/dev/null")
+        # reboot.target is the chord's target by an Alias=: enabling it, as
+        # the distribution's preset does for every unit, writes that alias
+        # over the mask when the image is composed.
+        preset = (extra / "usr" / "lib" / "systemd" / "system-preset" / "10-mun.preset").read_text()
+        self.assertRegex(preset, r"(?m)^disable reboot\.target$")
+        sysctl = (extra / "usr" / "lib" / "sysctl.d" / "60-mun.conf").read_text()
+        self.assertRegex(sysctl, r"(?m)^kernel\.sysrq = 0$")
 
     def test_package_translations_go_only_with_the_c_locale(self):
         # Removing them is safe only while no other locale is generated.
@@ -196,6 +218,42 @@ class ShellTests(unittest.TestCase):
         self.assertIn(status, success)
         self.assertIn("1", success, "Qt's VT handler exits 1 after SIGTERM: a stop, not a failure")
 
+    def test_a_clean_stop_removes_the_decoding_markers_and_a_crash_keeps_them(self):
+        # The launcher stops the shell around every game (SIGTERM, a clean
+        # stop): an identity or a motion that was only being decoded then must
+        # not be skipped at the next start. After a crash the markers stay.
+        unit = (self.SHELL / "deploy" / "mun-shell.service").read_text()
+        self.assertRegex(unit, r"(?m)^Environment=XDG_RUNTIME_DIR=/run/mun-shell$")
+        self.assertRegex(unit, r"(?m)^RuntimeDirectory=mun-shell$")
+        line = re.search(r"(?m)^ExecStopPost=(.+)$", unit).group(1)
+        argv = shlex.split(line.replace("$$", "$"))
+        self.assertEqual(argv[:2], ["/bin/sh", "-c"])
+        names = ("shape-decoding", "shape-decoding-motion")
+        sources = (self.SHELL / "src" / "shape.cpp").read_text() + (self.SHELL / "src" / "motionscene.cpp").read_text()
+        for name in names:
+            self.assertRegex(sources, rf'"/?{name}"', f"{name} is the shell's own marker")
+        for result, kept in (("success", False), ("signal", True), ("core-dump", True), ("exit-code", True),
+                             ("oom-kill", True), ("watchdog", True)):
+            with tempfile.TemporaryDirectory() as runtime:
+                for name in names:
+                    (Path(runtime) / name).write_text("0123456789abcdef")
+                (Path(runtime) / "started").write_text("")
+                subprocess.run(["/bin/sh", "-c", argv[2]], check=True,
+                               env={"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "SERVICE_RESULT": result,
+                                    "XDG_RUNTIME_DIR": runtime})
+                self.assertEqual([(Path(runtime) / name).exists() for name in names], [kept, kept], result)
+                self.assertTrue((Path(runtime) / "started").exists(), "nothing else is removed")
+
+    def test_the_shell_reaches_only_local_and_kernel_sockets(self):
+        # Its service sockets and D-Bus are local (AF_UNIX); the network
+        # panel's addresses and udev's device events come over netlink. No
+        # Internet socket: content from a card is read here, and a shell made
+        # to misbehave by one must not reach a network. Measured in a guest
+        # with this restriction: turning off and the console reset (both
+        # through sudo), the network panel and the sounds all work.
+        unit = (self.SHELL / "deploy" / "mun-shell.service").read_text()
+        self.assertRegex(unit, r"(?m)^RestrictAddressFamilies=AF_UNIX AF_NETLINK$")
+
     def test_the_shell_waits_for_its_display_and_failures_restart_it(self):
         # A display driver can come up after the unit: no condition may skip
         # the unit (a skipped unit is never retried), the shell waits itself
@@ -206,7 +264,11 @@ class ShellTests(unittest.TestCase):
         unit_section = unit.split("[Service]", 1)[0]
         self.assertRegex(unit_section, r"(?m)^StartLimitIntervalSec=0$", "never stop restarting")
         self.assertRegex(unit, r"(?m)^Restart=on-failure$")
-        self.assertRegex(unit, r"(?m)^RestartSec=5$")
+        # One second: a new resolution is a restart (status 75), and the
+        # screen stays black for this long before the shell starts again.
+        # Without a display the shell waits for one itself before it exits,
+        # so a missing display does not make it spin.
+        self.assertRegex(unit, r"(?m)^RestartSec=1$")
         self.assertEqual(re.search(r"(?m)^SuccessExitStatus=(.+)$", unit).group(1).split(), ["1", "75"])
         no_display = re.search(r"kNoDisplayStatus = (\d+);", (self.SHELL / "src" / "displaydevice.h").read_text()).group(1)
         no_interface = re.search(r"kInterfaceFailedStatus = (\d+);", (self.SHELL / "src" / "main.cpp").read_text()).group(1)
@@ -443,10 +505,19 @@ class InputTests(unittest.TestCase):
         self.assertNotIn("sources", self.inputs, "no third-party game source is pinned here")
         self.assertEqual(sorted(p.name for p in (ROOT / "examples").iterdir() if p.is_dir()),
                          ["mun-collect", "mun-gl-probe", "shape"])
-        # examples/shape holds Shape packages drawn by its own script, data
-        # for the console's presentation, not a game.
-        suffixes = {p.suffix for p in (ROOT / "examples" / "shape").rglob("*") if p.is_file()}
-        self.assertLessEqual(suffixes, {".py", ".md", ".json", ".png", ".wav"})
+        # examples/shape holds Shape packages drawn by its own scripts, data
+        # for the console's presentation, not a game; the reef's studio is
+        # the 3D scene and the bake that draw one of them (its installed
+        # modules and its renders stay local, ignored).
+        listed = subprocess.run(["git", "ls-files", "-z", "--", "examples/shape"], cwd=ROOT, capture_output=True)
+        files = ([Path(name) for name in listed.stdout.decode().split("\0") if name] if listed.returncode == 0 else
+                 [p.relative_to(ROOT) for p in (ROOT / "examples" / "shape").rglob("*")
+                  if p.is_file() and not {"node_modules", "render"} & set(p.parts)])
+        studio = Path("examples/shape/reef-studio")
+        self.assertLessEqual({p.suffix for p in files if studio not in p.parents},
+                             {".py", ".md", ".json", ".png", ".wav"})
+        self.assertLessEqual({p.suffix for p in files if studio in p.parents},
+                             {".js", ".mjs", ".html", ".json", ".py", ".md", ""})
         build = (OS / "mkosi" / "mkosi.build.chroot").read_text()
         self.assertIn('"$SRCDIR"/recipes/*/', build, "other games come from recipes only")
 
@@ -480,7 +551,7 @@ class BuildInfoTests(unittest.TestCase):
         self.tmp = Path(directory.name)
 
     def build_info(self, image_name="mun-os-0.1.0-dev-qemu-arm64.qcow2", image_format="qcow2", pinned=(),
-                   kernel=DEBIAN_KERNEL, check=True):
+                   kernel=DEBIAN_KERNEL, check=True, config=MKOSI, clean=True):
         """BUILD-INFO of a fake build of the qemu-dev profile's configuration,
         as build_info.py writes it, or the finished process with check=False."""
         tmp = self.tmp
@@ -507,7 +578,7 @@ class BuildInfoTests(unittest.TestCase):
         initrd = tmp / "initrd.cpio.zst"
         initrd.write_bytes(b"cpio")
         source = tmp / "source.json"
-        source.write_text(json.dumps({"commit": "c" * 40, "clean": True}))
+        source.write_text(json.dumps({"commit": "c" * 40, "clean": clean}))
         record = tmp / "pinned.json"
         record.write_text(json.dumps(list(pinned)))
         result = subprocess.run([sys.executable, str(OS / "builder" / "build_info.py"),
@@ -517,12 +588,27 @@ class BuildInfoTests(unittest.TestCase):
                                  "--pinned", str(record), "--manifest", str(manifest),
                                  "--initrd-manifest", str(initrd_manifest), "--initrd", str(initrd),
                                  "--builder-packages", str(builder), "--toolchain", str(toolchain),
-                                 "--config", str(MKOSI), "--out", str(tmp)],
+                                 "--config", str(config), "--out", str(tmp)],
                                 capture_output=True, text=True)
         if not check:
             return result
         self.assertEqual(result.returncode, 0, result.stderr)
         return json.loads(result.stdout)
+
+    def test_a_release_is_never_recorded_for_uncommitted_changes(self):
+        # No profile is a release profile today; the day one is, a build of
+        # a tree with uncommitted changes must not come out saying "release".
+        config = self.tmp / "config"
+        profile = config / "mkosi.profiles" / "qemu-dev"
+        profile.mkdir(parents=True)
+        text = QEMU_DEV.read_text()
+        self.assertIn("MUN_RELEASE=false", text)
+        (profile / "mkosi.conf").write_text(text.replace("MUN_RELEASE=false", "MUN_RELEASE=true"))
+        refused = self.build_info(config=config, clean=False, check=False)
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("uncommitted", refused.stderr)
+        self.assertTrue(self.build_info(config=config, clean=True)["release"])
+        self.assertFalse(self.build_info(clean=False)["release"], "a development build of changes is still made")
 
     def test_build_info_names_identity_inputs_and_absences(self):
         (self.tmp / "games" / "mygame").mkdir(parents=True)
@@ -549,8 +635,9 @@ class BuildInfoTests(unittest.TestCase):
         self.assertEqual(info["initrd"]["packages"], [{"name": "lvm2", "version": "2.03.31-2", "architecture": "arm64"}])
         self.assertEqual(info["initrd"]["sha256"], hashlib.sha256(b"cpio").hexdigest())
         self.assertEqual(info["debian"]["snapshot"], json.loads((OS / "inputs.json").read_text())["debian"]["snapshot"])
-        self.assertEqual(info["shape"], {"format": "mun-shape/1"},
-                         "the MUN Shape format the console reads, from the checker the card service uses")
+        self.assertEqual(info["shape"], {"format": "mun-shape/1", "minor": 1, "motion": {"draft": 1}},
+                         "the MUN Shape format the console reads, from the checker the card service uses, and "
+                         "beside it, for tools that know them, its minor version and the motion draft it plays")
 
     def test_a_qemu_build_records_its_qcow2_and_no_pinned_package(self):
         info = self.build_info()

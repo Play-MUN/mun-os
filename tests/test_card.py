@@ -133,6 +133,111 @@ class ValidatorTests(unittest.TestCase):
         self.assertGreater(len(base64.b64encode((staging / "cover.png").read_bytes())), 1 << 20,
                            "the wire frame for a legal cover exceeds 1 MiB: consumers must accept more")
 
+    def titled(self, title: str) -> Path:
+        staging = self.staged("valid")
+        text = (staging / MANIFEST).read_text(encoding="utf-8")
+        self.assertIn('title = "MUN Test Card"', text)
+        # A literal string: the bytes reach the validator as they are.
+        (staging / MANIFEST).write_text(text.replace('title = "MUN Test Card"', f"title = '{title}'"), encoding="utf-8")
+        return staging
+
+    def test_a_title_is_text_to_show_and_nothing_that_steers_what_shows_it(self):
+        # The console, the tools and the journal print a card's title: an
+        # escape sequence, a bell, a line break or a character that reorders
+        # the text round it would act on whatever prints it.
+        refused = {
+            "an escape sequence": "Red \x1b[31m alert", "a bell": "Ding\x07", "a tab": "Two\tcolumns",
+            "a carriage return": "Over\rwritten", "DEL": "Gone\x7f", "a C1 control": "Next\u0085line",
+            "a line separator": "Two\u2028lines", "a paragraph separator": "Two\u2029paragraphs",
+            "a right-to-left override": "Safe\u202egnp.exe", "a left-to-right override": "A\u202dB",
+            "an embedding": "A\u202bB\u202c", "an isolate": "A\u2067B\u2069", "a first-strong isolate": "A\u2068B",
+            "a right-to-left mark": "A\u200fB", "a left-to-right mark": "A\u200eB", "an Arabic letter mark": "A\u061cB",
+        }
+        # The manifest's reader ends a line at these four: the title is cut
+        # there and the manifest is not TOML.
+        breaks = ("a carriage return", "a C1 control", "a line separator", "a paragraph separator")
+        for what, title in refused.items():
+            with self.subTest(what):
+                with self.assertRaises(CardError) as ctx:
+                    validate_card(DirectorySource(self.titled(title)))
+                if what in breaks:
+                    self.assertEqual(ctx.exception.code, "manifest_syntax")
+                else:
+                    self.assertEqual(ctx.exception.code, "manifest_field")
+                    self.assertRegex(ctx.exception.detail, r"^U\+[0-9A-F]{4}$")
+        # a line break written as TOML's escape is one all the same
+        staging = self.staged("valid")
+        text = (staging / MANIFEST).read_text(encoding="utf-8")
+        (staging / MANIFEST).write_text(text.replace('title = "MUN Test Card"', 'title = "Two\\nlines"'),
+                                        encoding="utf-8")
+        with self.assertRaises(CardError) as ctx:
+            validate_card(DirectorySource(staging))
+        self.assertEqual((ctx.exception.code, ctx.exception.detail), ("manifest_field", "U+000A"))
+
+    def test_a_title_in_any_script_stays_valid(self):
+        # Scripts other than Latin are written by their code points: the
+        # source stays readable whatever shows it.
+        titles = {
+            "Spanish and French": "Señor Ñandú: édition spéciale",
+            "German, punctuation": "Straße der Könige — «Œuvre» ½",
+            "Chinese": "\u585e\u5c14\u8fbe\u4f20\u8bf4",
+            "Japanese": "\u30bc\u30eb\u30c0\u306e\u4f1d\u8aac",
+            "Korean": "\uc824\ub2e4\uc758 \uc804\uc124",
+            "Russian": "\u0401\u0436\u0438\u043a \u0432 \u0442\u0443\u043c\u0430\u043d\u0435",
+            "Arabic": "\u0645\u063a\u0627\u0645\u0631\u0629 \u0641\u064a \u0627\u0644\u0635\u062d\u0631\u0627\u0621",
+            "Hebrew": "\u05d4\u05e8\u05e4\u05ea\u05e7\u05d4 \u05d1\u05de\u05d3\u05d1\u05e8",
+            "Thai": "\u0e44\u0e17\u0e22 \u0e40\u0e01\u0e21",
+            "emoji": "Play \U0001f3ae",
+            "emoji joined by zero-width joiners": "\U0001f469\u200d\U0001f680 and \U0001f3f3\ufe0f\u200d\U0001f308",
+            "a no-break space": "Café\u00a0Noir",
+            "a combining accent": "e\u0301 combining",
+            "quotation marks": "It is \"quoted\"",
+        }
+        for what, title in titles.items():
+            with self.subTest(what):
+                self.assertEqual(validate_card(DirectorySource(self.titled(title))).title, title)
+        # White space round a title is not part of it, as before.
+        self.assertEqual(validate_card(DirectorySource(self.titled("  Spaced out \t"))).title, "Spaced out")
+
+    def test_a_cover_is_bounded_in_what_it_carries_besides_its_pixels(self):
+        # Whatever reads a PNG's header keeps its text and inflates the
+        # compressed one: a cover within its size and its sides could make
+        # its reader hold a gigabyte before a pixel is decoded.
+        import struct
+        from mun_card import validate
+
+        def chunk(kind, body):
+            return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body) & 0xFFFFFFFF)
+
+        def with_chunks(staging, *chunks):
+            cover = (staging / "cover.png").read_bytes()
+            (staging / "cover.png").write_bytes(cover[:33] + b"".join(chunks) + cover[33:])
+            return staging
+
+        text = chunk(b"zTXt", b"Comment\0\0" + zlib.compress(b"A" * 7_999_000, 9))
+        bomb = with_chunks(self.staged("valid"), *[text] * 120)
+        self.assertLess((bomb / "cover.png").stat().st_size, validate.COVER_MAX_BYTES)
+        with self.assertRaises(CardError) as ctx:
+            validate_card(DirectorySource(bomb))
+        self.assertEqual(ctx.exception.code, "cover_invalid")
+        self.assertIn("auxiliares", ctx.exception.detail)
+        # one small chunk that inflates past the bound is enough
+        deep = with_chunks(self.staged("valid"), chunk(b"zTXt", b"k\0\0" + zlib.compress(
+            bytes(validate.PNG_EXPANDED_MAX_BYTES + 1), 9)))
+        with self.assertRaises(CardError) as ctx:
+            validate_card(DirectorySource(deep))
+        self.assertEqual(ctx.exception.code, "cover_invalid")
+        # A cover as common tools write it stays valid: a profile, the
+        # program's name, an XMP packet, the resolution.
+        usual = with_chunks(self.staged("valid"),
+                            chunk(b"pHYs", struct.pack(">IIB", 2835, 2835, 1)),
+                            chunk(b"iCCP", b"sRGB\0\0" + zlib.compress(bytes(range(256)) * 12, 9)),
+                            chunk(b"tEXt", b"Software\0An ordinary image editor 1.0"),
+                            chunk(b"iTXt", b"XML:com.adobe.xmp\0\0\0\0\0" + b"<x:xmpmeta/>" * 300))
+        self.assertEqual(validate_card(DirectorySource(usual)).cover, "cover.png")
+        # and so does the largest cover this tool writes
+        self.assertEqual(validate_card(DirectorySource(self.staged("cover-near-limit"))).cover, "cover.png")
+
     def test_game_gl_variant_names_the_entry_after_the_binary_and_carries_the_provisional_profile(self):
         tmp = Path(tempfile.mkdtemp(prefix="mun-gl-")); self.addCleanup(shutil.rmtree, tmp, True)
         fake = tmp / "mun-gl-probe"; fake.write_bytes(b"\x7fELF fake"); fake.chmod(0o755)
@@ -862,6 +967,12 @@ class ConvertTests(unittest.TestCase):
         vm.ATTACH_REGISTRY = self.root / "attached.json"
         vm.INSTANCE = "a"
         vm.read_pid = lambda: os.getpid() + 1
+        # The reservation's pid is this test's own process, standing in for
+        # the run of mun-card that holds it.
+        from unittest.mock import patch as patch_host
+        stand_in = patch_host.object(vm.host, "process_command", lambda host, pid: "python3 ./mun card convert old new")
+        stand_in.start()
+        self.addCleanup(stand_in.stop)
         refused = []
         original = self.convert._eligibility
         def attach_meanwhile(*args, **kwargs):

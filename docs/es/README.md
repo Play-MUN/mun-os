@@ -40,6 +40,9 @@ Las páginas que todavía no tienen traducción enlazan a su original, en inglé
 - [MUN Shape](../shape.md) (en inglés): el paquete con el que una tarjeta
   viste la consola con la identidad de su juego; su formato, sus límites, sus
   reglas de contraste y su validador.
+- [El movimiento de MUN Shape](../shape-motion.md) (en inglés): un borrador
+  experimental; una escena que se mueve detrás de los menús y les responde,
+  declarada como datos.
 
 ## Construcción y referencia
 
@@ -48,6 +51,8 @@ Las páginas que todavía no tienen traducción enlazan a su original, en inglé
   reproducibilidad.
 - [Laboratorio](../../vm/README.md) (en inglés): builds y consolas virtuales,
   Game Cards, entrada, registros.
+- [MUN Dev](mun-dev.md): el perfil experimental de nuestra placa de
+  desarrollo, qué hace distinto y qué se ha comprobado en ella.
 - [Arquitectura](../architecture.md) (en inglés): componentes, fronteras, lo
   que será de la integración del hardware, lo que no está implementado.
 - [Qué cambiar y dónde](contributor-map.md): un mapa breve para un primer
@@ -75,7 +80,7 @@ Los componentes documentan sus propios protocolos, unidades y privilegios:
 
 La versión inglesa es la referencia técnica. La española cubre, por ahora,
 el README, esta página, los primeros pasos, el glosario, la compatibilidad,
-las guías para crear una Game Card, traer un juego y vestir la consola con
+MUN Dev, las guías para crear una Game Card, traer un juego y vestir la consola con
 MUN Shape, la de ver MUN Shape en acción, cómo contribuir, la seguridad y los
 README de los ejemplos, de MUN Collect y de los paquetes de MUN Shape de
 ejemplo. Sigue solo en inglés:

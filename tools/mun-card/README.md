@@ -36,7 +36,13 @@ with both manifest names is refused.
 so no guest can attach them meanwhile; refuses a source that is attached,
 unclean, invalid, already MUN, holds special files or has a save the console
 would not restore (decided from the image, links in the save path refused
-before anything is read); renames the manifest
+before anything is read; a save unit is judged as the console's launcher
+judges it, its bounds on what a unit inflates to and the encodings it reads
+included); reads the card entry by entry by inode number, extracting nothing
+to the host, and refuses an image whose directory entries are not unique
+file names (a name with a `/`, one name twice in a directory, one directory
+under two names: `entry_name`), since under such names a path stops naming
+one entry; renames the manifest
 and rewrites the `format` of `save.json` and `save.json.prev`, nothing else;
 builds under a temporary name and publishes only after checking that every
 other file is byte-identical and each save's content is unchanged; and never
@@ -53,18 +59,30 @@ file name pattern that is a complete save by itself (`zlib-xml`, `zlib`,
 not at all, and `inspect` prints them.
 
 Requires Python 3.9+ and e2fsprogs (`brew install e2fsprogs`, keg-only; the
-tool finds `mke2fs`/`debugfs` through `brew --prefix`, no PATH changes).
+tool finds `mke2fs`, `debugfs` and `dumpe2fs` through `brew --prefix`, no
+PATH changes).
 Images are 64 MiB ext4 by default, built with `mke2fs -d` from a temporary
-staging tree, fixed timestamps, null UUID and fixed hash seed. The image also
-records each file's permissions, user and group as the staging tree has them:
-the user who runs the tool, permissions from the umask for the files it
-writes (game executables are 0755), and a group that can come from the
-folder holding the staging tree (`TMPDIR`), as on macOS. The same content
-yields the same bytes when those, and the e2fsprogs version and
-configuration, are the same too. Only regular image files are ever written.
+staging tree, fixed timestamps, null UUID and fixed hash seed. An image does
+not depend on who packages it: every entry belongs to user and group 0,
+every directory is 0755 and every file 0644, or 0755 when its owner may
+execute it (links and special files keep the mode they were staged with),
+and every inode's change time is the fixed one, whatever the packager's
+user, umask or `TMPDIR`. The same content yields the
+same bytes when the e2fsprogs version and configuration are the same too.
+Only regular image files are ever written.
+
+`create --force` replaces an existing card only when no running guest holds
+it: for an image in `.local/gamecards` the tool asks the laboratory's attach
+registry and holds the card there while it replaces it, as a conversion
+holds its cards, so no guest can attach it until the new image is whole.
 
 `inspect` reads the image through `debugfs`, never mounts it, and prints
-whether the SHA-256 changed during inspection (it must not).
+whether the SHA-256 changed during inspection (it must not). With `--json`
+its `filesystem` also gives `errors_policy`, what the superblock asks of a
+kernel that finds the file system damaged (`continue`, `remount-ro` or
+`panic`); the console ignores it and mounts every card with its own policy
+([card format](../../docs/game-cards.md#image)), and `inspect` prints a
+warning for `panic`, which another system would obey.
 
 `shape` checks MUN Shape packages ([docs/shape.md](../../docs/shape.md)),
 the folder that goes on a card as `content/mun-shape/`:

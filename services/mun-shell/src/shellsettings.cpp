@@ -55,6 +55,11 @@ QString ShellSettings::filePath()
     return directory + QStringLiteral("/settings.ini");
 }
 
+bool ShellSettings::systemSoundsIn(const QSettings &file)
+{
+    return readChoice(file, kSoundsKey, kOnOff) == kOnOff.first();
+}
+
 ShellSettings::ShellSettings(QObject *parent)
     : QObject(parent), m_file(std::make_unique<QSettings>(filePath(), QSettings::IniFormat))
 {
@@ -62,7 +67,7 @@ ShellSettings::ShellSettings(QObject *parent)
     m_language = readChoice(*m_file, kLanguageKey, kLanguages);
     m_clockFormat = readChoice(*m_file, kClockKey, kClockFormats);
     m_safeArea = readNumber(*m_file, kSafeAreaKey, kSafeAreas, 100);
-    m_systemSounds = readChoice(*m_file, kSoundsKey, kOnOff) == kOnOff.first();
+    m_systemSounds = systemSoundsIn(*m_file);
     m_autoPowerOffHours = readNumber(*m_file, kAutoOffKey, kAutoOffHours, 1);
     m_shapeMode = readChoice(*m_file, kShapeKey, kShapeModes);
     m_reduceMotion = readChoice(*m_file, kMotionKey, kOffOn) == QLatin1String("on");
@@ -261,9 +266,18 @@ void ShellSettings::store(const QString &key, const QVariant &value)
 
 void ShellSettings::sync()
 {
+    // status() keeps the first error for as long as the object lives, and
+    // nothing clears it: after one failed write every later one would look
+    // failed, and a choice that needs a restart would be refused until the
+    // shell started again. An object that has reported an error is replaced
+    // by a new one on the same file, which reports this write's own outcome.
+    // The values not written yet are Qt's per file, not per object, and the
+    // new object is made before the old one goes, so none is lost.
+    if (m_file->status() != QSettings::NoError)
+        m_file = std::make_unique<QSettings>(m_file->fileName(), QSettings::IniFormat);
     m_file->sync();
-    // status() keeps the first error; a format error found when reading is
-    // repaired by this write, so only a failure to write counts now.
+    // A format error found when reading is repaired by this write, so only
+    // a failure to write counts now.
     const QString error = m_file->status() == QSettings::AccessError
                               ? QStringLiteral("could not write %1; the choice lasts until the shell restarts").arg(path())
                               : QString();

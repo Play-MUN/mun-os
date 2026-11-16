@@ -5,10 +5,10 @@
 MUN™ is a game console we are building in the open, for games you own on
 Game Cards. MUN OS is its operating system, open source and developed in
 public. You can already run it on your computer as a virtual console, try
-it, take it apart and take part; the console's official hardware comes
-later.
+it, take it apart and take part. We also run it on a development board,
+MUN Dev; the console's own hardware comes later.
 
-![MUN Shell's Home with the MUN Collect Game Card inserted](docs/images/mun-shell-home.jpg)
+![MUN Shell's Home in the virtual console, with the MUN Collect Game Card inserted](docs/images/home-collect.en.jpg)
 
 ## What you can do today
 
@@ -47,16 +47,29 @@ virtual console, with disk images standing in for cards:
   continues from it.
 - **Eject it safely,** and the card leaves the slot with everything it
   carries.
-- **The console keeps no library.** Its storage holds the system; *My
-  games* says it plainly: your games live on their Game Cards.
+- **The console keeps no library.** Its storage holds the system;
+  *Universe*, on Home, says it plainly: your games travel on their own
+  media.
 
 ## What works today, and what does not yet
 
-MUN OS v0.1.0-dev.4 is a development preview. In the virtual console:
+MUN OS v0.1.0-dev.5 is a development preview. In the virtual console:
 
-- **MUN Shell**, the console's own interface, starts on its own: Home,
-  Settings (English or Spanish, 720p to 1440p, sounds; resetting the
-  settings or the whole console), menus with sound.
+- **MUN Shell**, the console's own interface, starts on its own: its
+  start-up with sound, then Home, an orbit with four entries: MUN Disk (the
+  card in the slot), Universe, Settings and Turn off. *MUN Disk* is the
+  name the console's medium is taking and Home already uses it; the
+  format, the tools and these pages still say Game Card. Settings has
+  English or
+  Spanish, 720p to 1440p, sounds, *Reduce motion*, and resetting the
+  settings or the whole console. Left alone for ten minutes, the screen
+  dims.
+- **Keyboard and controllers.** The keyboard drives every menu. So does a
+  controller: its directional pad or left stick, its bottom button to
+  accept and the one to its right to go back (Nintendo's layout on
+  Nintendo-style pads). That has been tried with one pad, over Bluetooth on
+  MUN Dev, not in the virtual console. Games still get the keyboard and the
+  pointer only.
 - **Game Cards** are validated before anything on them runs. A game starts
   sandboxed and hands the console back however it ends, its saves go to the
   card, and a card is ejected safely. Games built on SDL or OpenGL start in
@@ -66,16 +79,38 @@ MUN OS v0.1.0-dev.4 is a development preview. In the virtual console:
   transitions and sounds) that the console draws with its own code while the
   card is in; nothing on the card runs. MUN keeps the layout, the words,
   Settings and legibility, and the player decides how much of it to show.
-- **Examples:** MUN Collect, a small game; a graphics and audio probe; two
-  MUN Shape packages.
+- **MUN Shape's motion, an experimental draft.** A package may also bring a
+  scene that moves behind the menus and answers them: planes at depths,
+  creatures on paths, particles and light, declared as data and played by
+  the console's own player. **Reef** is its example: a sea with schools of
+  fish, a shark, crabs and kelp behind Home, and a school that gathers when
+  the focus is on Play. The draft's names and limits may change in any
+  version; v1 is the stable contract, and a package with motion keeps a v1
+  look for consoles that only read v1 ([MUN Shape motion](docs/shape-motion.md)).
+- **Examples:** MUN Collect, a small game; a graphics and audio probe;
+  three MUN Shape packages (`sea`, `paper` and Reef, with the studio that
+  makes it).
 
-| MUN Collect, without a package | The same card with the `sea` sample |
+| MUN Collect, without a package | The same card dressed in Reef |
 | --- | --- |
-| ![Home with the MUN Collect Game Card, in MUN's look with the colours read from its cover](docs/images/mun-shape-before.jpg) | ![The same Home with MUN Collect carrying the sea sample: a world under water, glass plates and the card object showing the sea](docs/images/mun-shape-after.jpg) |
+| ![Home with the MUN Collect Game Card, in MUN's own look](docs/images/home-collect.en.jpg) | ![The same Home with MUN Collect carrying Reef: the reef behind the menus, in the game's colours](docs/images/home-reef.en.jpg) |
 
-**Not yet:** controllers, card and system updates, and any physical
-hardware. [Architecture](docs/architecture.md) says what exists and what is
-planned.
+These are screenshots of the virtual console
+([where each image comes from](docs/images/README.md)). A picture holds
+Reef still: `./mun play --card collect-reef` shows it moving
+([getting started](docs/getting-started.md#7-see-mun-shape)).
+
+**On MUN Dev,** our development board (a Radxa Dragon Q6A), the same system
+runs on real hardware: 1080p at 60 Hz over HDMI through the board's GPU,
+sound, Game Cards on microSD cards in its slot, saves written to them. It
+is an experimental profile you build yourself, with no image to download,
+and it is not the console: [MUN Dev](docs/mun-dev.md) says what has been
+checked there and what has not.
+
+**Not yet:** card and system updates, controllers in games and in the
+virtual console, controller pairing in the system, the console's own
+hardware and its card reader. [Architecture](docs/architecture.md) says what exists and what
+is planned.
 
 ## Open, and where it is going
 
@@ -86,15 +121,18 @@ package in its image; third-party components keep their own terms, and the
 MUN and Play MUN names and logos have [their own](NAME-AND-LOGO.txt)
 ([licensing](docs/licensing.md)).
 
-Today there is one experimental image, ARM64 like the console will be, that
-QEMU runs as a virtual console; the image says so itself
-(`environment = "qemu-arm64"`, `release = false`). MUN -1, the first console,
-will have **one officially supported hardware configuration**, not selected
-yet; the assembled console and DIY builds on it will use the same official
-image. Open and adaptable does not mean it runs on any board today: a
-physical port needs its own integration (boot, display, input, storage, the
-card reader), and ports to other hardware are welcome as independently
-maintained forks.
+Today a preview release carries one experimental image, ARM64 like the
+console will be, that QEMU runs as a virtual console; the image says so
+itself (`environment = "qemu-arm64"`, `release = false`). The source also
+has the profile of MUN Dev, our development board
+([MUN Dev](docs/mun-dev.md)). MUN -1, the first console, will have **one
+officially supported hardware configuration**. It is being designed around
+the Radxa Dragon Q8B, a different board from MUN Dev's, on which MUN OS has
+not run yet; the assembled console and DIY builds on it will use the same
+official image. Open and adaptable does not mean it runs on any board
+today: a physical port needs its own integration (boot, display, sound,
+input, storage, the card reader), as MUN Dev's profile shows, and ports to
+other hardware are welcome as independently maintained forks.
 
 ## Where it runs
 
@@ -107,16 +145,21 @@ the same console, slower.
 
 | Your computer | The console's processor | Checked |
 | --- | --- | --- |
-| macOS, Apple Silicon | Virtualized (HVF) | v0.1.0-dev.4 on a Mac (macOS 27), with window, keyboard and sound, and in CI on macOS 15, headless and emulated (no HVF in a VM) |
-| Linux, x86_64 or ARM64 | Emulated; KVM on ARM64 not tried yet | v0.1.0-dev.4 in CI, headless; v0.1.0-dev.2 also in Ubuntu 24.04 virtual machines |
-| Windows, x86_64 or ARM64 | Emulated | v0.1.0-dev.4 in CI (Windows Server 2025; Windows 11 ARM64), headless |
+| macOS, Apple Silicon | Virtualized (HVF) | v0.1.0-dev.5 on a Mac (macOS 27): its bundle installed, start, MUN Collect and the card dressed in Reef, play and power-off, headless, and the start-up's sound recorded; a window, keyboard and sound with an earlier build of this preview. v0.1.0-dev.4 also in CI on macOS 15, headless and emulated (no HVF in a VM) |
+| Linux, x86_64 or ARM64 | Emulated; KVM on ARM64 not tried yet | v0.1.0-dev.5 pending. v0.1.0-dev.4 in CI, headless; v0.1.0-dev.2 also in Ubuntu 24.04 virtual machines |
+| Windows, x86_64 or ARM64 | Emulated | v0.1.0-dev.5 pending. v0.1.0-dev.4 in CI (Windows Server 2025; Windows 11 ARM64), headless |
 
 "In CI" is the Hosts workflow: download a preview, start the console, play
 its card, power off, in GitHub's virtual machines, without a window. It
 checks each preview once it is published, and that preview's release notes
 give the result: v0.1.0-dev.4 passed on all five
-([its run](https://github.com/Play-MUN/mun-os/actions/runs/38839513795)). No Linux or Windows computer has been tried yet, and no
-window, keyboard or sound outside macOS.
+([its run](https://github.com/Play-MUN/mun-os/actions/runs/38839513795));
+v0.1.0-dev.5's result is added when it has run. No Linux or Windows
+computer has been tried yet, and no window, keyboard or sound outside
+macOS.
+
+Outside QEMU, MUN OS runs on MUN Dev, our development board, from a profile
+of its own: [what has been checked there](docs/mun-dev.md#what-has-been-checked).
 
 ## Principles
 
@@ -141,9 +184,10 @@ window, keyboard or sound outside macOS.
   Shape, and [see it in action](docs/guides/see-shape-in-action.md)
 - For card and game authors: [Game Cards](docs/game-cards.md),
   [saves](docs/saves.md), [running a game](docs/runtime.md),
-  [MUN Shape](docs/shape.md)
+  [MUN Shape](docs/shape.md) and [its motion](docs/shape-motion.md) (draft)
 - [Architecture](docs/architecture.md), [image build](os/README.md),
-  [laboratory](vm/README.md) and [every document](docs/README.md)
+  [laboratory](vm/README.md), [MUN Dev](docs/mun-dev.md) and
+  [every document](docs/README.md)
 - [Licensing](docs/licensing.md), [security](SECURITY.md),
   [contributing](CONTRIBUTING.md)
 
@@ -153,7 +197,7 @@ window, keyboard or sound outside macOS.
 | --- | --- |
 | `services/` | MUN Shell, the card service and the launcher |
 | `tools/` | `mun-card` and the shared card package |
-| `os/` | MUN OS image composition: pinned inputs, mkosi configuration, builder scripts |
+| `os/` | MUN OS image composition: pinned inputs, mkosi configuration, builder scripts, the profiles (the virtual console's and MUN Dev's) |
 | `vm/` | The laboratory: builder VMs, image guests, virtual cards, downloads |
 | `mun` | The tools' entry point: `./mun get`, `./mun play`, `./mun card`, `./mun dev` |
 | `examples/` | Example games and MUN Shape packages |

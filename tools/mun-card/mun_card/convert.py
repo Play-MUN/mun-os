@@ -19,7 +19,6 @@ import hashlib
 import json
 import os
 import shutil
-import stat as statmod
 import subprocess
 import tempfile
 import time
@@ -33,7 +32,7 @@ from .source import DebugfsSource
 from .validate import MANIFEST_NAMES, SAVE_FORMATS, validate_card
 
 REGISTRY_NAME = "attached.json"          # vm/munvm.py: ATTACH_REGISTRY, under the same lock file
-RESERVATION = "mun-card convert"         # the holder a lab console sees in the registry
+RESERVATION = "mun-card"                 # with its purpose: the holder a lab console sees in the registry
 LOCK_TIMEOUT = 30.0
 SAVE_FILES = ("save.json", "save.json.prev")
 # Signs, in the entry executable, that a game knows only the earlier contract
@@ -102,10 +101,11 @@ def _save_registry(card_root: Path, registry: Dict[str, dict]) -> None:
 
 
 @contextlib.contextmanager
-def reserved(card_root: Path, names: List[str]) -> Iterator[None]:
+def reserved(card_root: Path, names: List[str], purpose: str = "convert") -> Iterator[None]:
     """Hold `names` in the attach registry, or refuse if a live guest (or
-    another conversion) holds one. Entries of dead processes are stale and
-    dropped, as the lab tool drops them."""
+    another run of this tool) holds one. Entries of dead processes are stale
+    and dropped, as the lab tool drops them. `purpose` is what the hold is
+    for, `convert` or `create`: the lab tool tells whoever asks for the card."""
     me = os.getpid()
     with _registry_lock(card_root):
         registry = _load_registry(card_root)
@@ -115,7 +115,7 @@ def reserved(card_root: Path, names: List[str]) -> Iterator[None]:
                 raise CardError("card_in_use", "La tarjeta está conectada a una consola o reservada",
                                 f"{name}: {holder.get('instance')} (pid {holder.get('pid')})")
         for name in names:
-            registry[name] = {"instance": RESERVATION, "pid": me, "purpose": "convert",
+            registry[name] = {"instance": f"{RESERVATION} {purpose}", "pid": me, "purpose": purpose,
                               "since": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "attachment": None}
         _save_registry(card_root, registry)
     try:
@@ -137,58 +137,42 @@ def _lab_card(card_root: Path, path: Path, what: str) -> str:
     return path.stem
 
 
-def _dump(image_path: Path, into: Path, debugfs: str, entries: List[Tuple[str, str, int]]) -> Path:
-    """Extract the whole image into `into` with debugfs rdump, for comparing
-    bytes only, and prove the extraction is the image's inventory exactly:
-    rdump reports unowned files as warnings and skips special files, so its
-    exit status proves nothing. Nothing about the card is decided from it."""
-    into.mkdir()
-    subprocess.run([debugfs, "-R", f'rdump / "{into}"', str(image_path)], capture_output=True, check=False)
-    found: Dict[str, Tuple[str, int]] = {}
-    for current, dirs, files in os.walk(into):             # never follows a link
-        if Path(current) == into and "lost+found" in dirs:
-            dirs.remove("lost+found")
-        for name in dirs + files:
-            path = Path(current) / name
-            info = os.lstat(path)
-            kind = ("symlink" if statmod.S_ISLNK(info.st_mode) else "dir" if statmod.S_ISDIR(info.st_mode)
-                    else "file" if statmod.S_ISREG(info.st_mode) else "other")
-            found[path.relative_to(into).as_posix()] = (kind, info.st_size if kind == "file" else 0)
-    expected = {path: (kind, size if kind == "file" else 0) for path, kind, size in entries}
-    if found != expected:
-        differing = sorted(set(found.items()) ^ set(expected.items()))[:3]
-        raise CardError("source_unreadable", "No se pudo extraer la tarjeta entera",
-                        ", ".join(path for path, _ in differing))
-    return into
+def _tree(card: DebugfsSource, entries: List[Tuple[str, str, int, int]]) -> Dict[str, Tuple[str, Optional[bytes]]]:
+    """Every entry of `card` by relative path: ("dir", None), ("file",
+    sha256 of its bytes) or ("link", sha256 of its inode and data).
+
+    Read from the image by inode number, for comparing only. Nothing of the
+    card is extracted to the host: an extraction lets the image's directory
+    entries name the host files it writes, and a card's entries can hold any
+    name. A file that does not read back with the size its entry lists is an
+    unreadable card, not a shorter file. A link's target is stored in its
+    inode when short and in a data block when long, so both are read; the
+    copy has the same link only if both read the same."""
+    tree: Dict[str, Tuple[str, Optional[bytes]]] = {}
+    for path, kind, size, inode in entries:
+        if kind == "dir":
+            tree[path] = ("dir", None)
+            continue
+        digest, count = card.hash_inode(inode, size)
+        if kind == "file":
+            if count != size:
+                raise CardError("source_unreadable", "No se pudo leer un archivo entero de la tarjeta", path)
+            tree[path] = ("file", digest)
+        else:
+            tree[path] = ("link", hashlib.sha256(card.inode_report(inode) + digest).digest())
+    return tree
 
 
-def _tree(root: Path) -> Dict[str, Tuple[str, Optional[bytes]]]:
-    """Every entry under `root` by relative path: ("dir", None),
-    ("link", target) or ("file", sha256)."""
-    entries: Dict[str, Tuple[str, Optional[bytes]]] = {}
-    for current, dirs, files in os.walk(root):
-        for name in dirs + files:
-            path = Path(current) / name
-            relative = path.relative_to(root).as_posix()
-            if relative == "lost+found":
-                continue
-            if path.is_symlink():
-                entries[relative] = ("link", os.readlink(path).encode())
-            elif path.is_dir():
-                entries[relative] = ("dir", None)
-            else:
-                entries[relative] = ("file", hashlib.sha256(path.read_bytes()).digest())
-    return entries
-
-
-def _card_saves(card: DebugfsSource, info, save_dir: str) -> Dict[str, dict]:
-    """The card's current and previous saves, read from the image itself.
+def _card_saves(card: DebugfsSource, info, save_dir: str, naming: str = "earlier") -> Dict[str, dict]:
+    """The card's current and previous saves, read from the image itself,
+    each one an envelope of the `naming` generation.
 
     Presence and type come from the image, every component of the path
     checked for a link, before a byte is read; a name that is present must be
-    a regular file holding a save the console would restore, in the earlier
-    format. Anything else refuses the conversion: a damaged save is recovered
-    explicitly on another copy first, never carried or relabelled."""
+    a regular file holding a save the console would restore, in that
+    generation's format. Anything else refuses the conversion: a damaged
+    save is recovered explicitly on another copy first, never carried or
+    relabelled."""
     directory = card.stat(save_dir)
     if directory is None:
         return {}
@@ -210,7 +194,7 @@ def _card_saves(card: DebugfsSource, info, save_dir: str) -> Dict[str, dict]:
         except ValueError as exc:
             raise CardError("save_damaged", "La tarjeta tiene una partida dañada; recupérala en otra copia antes",
                             f"{path}: {exc}")
-        problem = envelope_problem(document, info, SAVE_FORMATS["earlier"])
+        problem = envelope_problem(document, info, SAVE_FORMATS[naming])
         if problem:
             raise CardError("save_damaged", "La tarjeta tiene una partida que la consola no recuperaría", f"{path}: {problem}")
         documents[name] = document
@@ -288,11 +272,11 @@ def convert(source: Path, destination: Path, card_root: Path, game_supports_mun_
 
 def _convert_reserved(source: Path, temporary: Path, destination: Path, work: Path, debugfs: str, e2fsck: str,
                       game_supports_mun_names: bool, report: Callable[[str], None]) -> dict:
-    # Everything about the card is decided from the image; the host
-    # extraction below only serves to compare bytes.
+    # Everything about the card is decided from the image, and read from it
+    # by inode: no name the image holds ever becomes a path on the host.
     card = DebugfsSource(source, debugfs)
-    entries = card.entries()
-    special = [path for path, kind, _ in entries if kind == "other"]
+    entries = card.inventory()
+    special = [path for path, kind, _, _ in entries if kind == "other"]
     if special:
         raise CardError("special_file", "La tarjeta contiene archivos especiales (tuberías, dispositivos) "
                         "que la conversión no puede comprobar", ", ".join(special[:5]))
@@ -305,7 +289,7 @@ def _convert_reserved(source: Path, temporary: Path, destination: Path, work: Pa
     rewritten = {name: dict(document, format=SAVE_FORMATS["mun"])
                  for name, document in _card_saves(card, info, save_dir).items()}
     report(f"origen válido ({info.id} {info.version}); partidas a convertir: {', '.join(rewritten) or 'ninguna'}")
-    original = _dump(source, work / "source", debugfs, entries)
+    before = _tree(card, entries)
 
     shutil.copyfile(source, temporary)
     commands = [f'ln "/{MANIFEST_NAMES["earlier"]}" "/{MANIFEST_NAMES["mun"]}"',
@@ -333,22 +317,19 @@ def _convert_reserved(source: Path, temporary: Path, destination: Path, work: Pa
         raise CardError("convert_failed", "La copia convertida no pasa e2fsck", check.stdout.strip()[-400:])
     ext4.check_mountable(temporary)
     copy = DebugfsSource(temporary, debugfs)
-    converted = _dump(temporary, work / "converted", debugfs, copy.entries())
+    after = _tree(copy, copy.inventory())
     new_info = validate_card(copy)
     if new_info.naming != "mun" or (new_info.id, new_info.version) != (info.id, info.version):
         raise CardError("convert_failed", "La copia no es la misma tarjeta con los nombres MUN")
-    for name in rewritten:
-        document = json.loads((converted / save_dir / name).read_bytes())
-        problem = envelope_problem(document, new_info, SAVE_FORMATS["mun"])
-        if problem:
-            raise CardError("convert_failed", "Una partida convertida no la recuperaría la consola", f"{name}: {problem}")
-    before, after = _tree(original), _tree(converted)
+    try:
+        converted = _card_saves(copy, new_info, save_dir, "mun")
+    except CardError as exc:
+        raise CardError("convert_failed", "Una partida convertida no la recuperaría la consola", exc.detail)
     expected = {(MANIFEST_NAMES["mun"] if path == MANIFEST_NAMES["earlier"] else path): entry
                 for path, entry in before.items()}
     for name in rewritten:
         expected.pop(f"{save_dir}/{name}")
-        after_entry = after.pop(f"{save_dir}/{name}", None)
-        if after_entry is None or json.loads((converted / save_dir / name).read_bytes()) != rewritten[name]:
+        if after.pop(f"{save_dir}/{name}", None) is None or converted.get(name) != rewritten[name]:
             raise CardError("convert_failed", "Una partida convertida no conserva su contenido", name)
     if after != expected:
         differing = sorted(set(after.items()) ^ set(expected.items()))[:5]

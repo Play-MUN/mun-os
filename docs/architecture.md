@@ -7,17 +7,20 @@ are in [game-cards.md](game-cards.md), [saves.md](saves.md) and
 
 ## Product boundary
 
-MUN -1 will have one officially supported physical hardware configuration;
-it is not selected yet. The assembled console and a DIY installation on that
-same configuration will use the same official MUN OS image. Ports to other
+MUN -1 will have one officially supported physical hardware configuration.
+It is being designed around the Radxa Dragon Q8B, on which MUN OS has not
+run. The assembled console and a DIY installation on that same
+configuration will use the same official MUN OS image. Ports to other
 hardware are welcome as independently maintained forks; they do not extend
 the official support.
 
-The only image that exists is a development image for QEMU on an Apple
-Silicon Mac. QEMU is development and test infrastructure, not a product
-platform. `./mun build`, the official image, refuses until the hardware
-configuration is selected, and never produces a QEMU image labelled as a
-release.
+The images that exist are development images: one for QEMU, which preview
+releases carry, and one built from an experimental profile for our
+development board, MUN Dev, a Radxa Dragon Q6A ([MUN Dev](mun-dev.md)).
+QEMU and MUN Dev are development and test infrastructure, not product
+platforms. `./mun build`, the official image, refuses until the hardware
+configuration is settled, and never produces a development image labelled
+as a release.
 
 ## Components
 
@@ -72,9 +75,10 @@ units and privileges.
 - **The game is sandboxed.** Unprivileged user, no capabilities, no network,
   a read-only system and only the devices of its runtime profile. It can
   write to its session's `work/` directory, to the private `/tmp` and
-  `/var/tmp` systemd gives its unit, and to the system's shared-memory file
-  systems ([runtime.md](runtime.md#what-the-game-gets)); nothing it writes
-  reaches the card except through the console's saves.
+  `/var/tmp` systemd gives its unit, and to a shared-memory file system of
+  its session's own ([runtime.md](runtime.md#what-the-game-gets)); nothing
+  it writes outlives the session or reaches the card except through the
+  console's saves.
 - **The shell holds no privileges.** It requests; the launcher and the card
   service decide. The shell and a game never own the display or the keyboard
   at the same time.
@@ -113,6 +117,11 @@ finds out at run time and says which in its journal
 ([services/mun-shell/README.md](../services/mun-shell/README.md), *On a
 graphics API*).
 
+MUN Dev's profile is a first integration of that kind, for a board that is
+not the console's: the vendor's kernel and firmware, the shell on the GPU,
+sound through the board's DSP, cards in its microSD slot
+([MUN Dev](mun-dev.md#what-the-profile-does-differently)).
+
 The hardware integration will own boot, kernel and firmware, GPU and NPU
 libraries, device permissions, display and audio configuration, reader
 discovery and power and thermal policies. Common code requests a MUN
@@ -120,9 +129,12 @@ operation or a runtime profile rather than wrapping hardware generally.
 
 ## Not implemented
 
-- Physical hardware support of any kind.
+- Supported hardware of any kind: MUN Dev's profile is a development
+  environment, and the console's board has not run MUN OS.
 - Versioned content and updates on the card, and the object store they need.
 - OS updates, rollback and recovery.
-- Controllers: input is keyboard and pointer.
+- Controllers in games: the shell's menus take them
+  ([MUN Shell, Controls](../services/mun-shell/README.md#controls)); a game
+  gets the keyboard and the pointer. No pairing in the system.
 - Emulators and imported game collections.
 - A published release image.

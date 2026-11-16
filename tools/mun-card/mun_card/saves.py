@@ -9,19 +9,79 @@ deciding alike, since the launcher does not ship this package."""
 import base64
 import fnmatch
 import hashlib
+import json
 import re
 import zlib
 from typing import Optional
-from xml.etree import ElementTree
+from xml.parsers import expat
 
-SAVE_MAX_BYTES = 64 * 1024            # a game's payload
-SAVE_FILE_MAX_BYTES = 80 * 1024       # the envelope on the card, and what staging copies back
+SAVE_MAX_BYTES = 64 * 1024            # a game's payload, measured as compact JSON
+# The envelope on the card, and what staging copies back to the game. The
+# console writes the envelope with a space after each `,` and `:` that
+# separates values, and compact JSON has at most one of those per two bytes
+# (`[0,0,0]`), so the payload takes at most half as much again on the card;
+# the rest is room for the envelope's own fields. The service that writes
+# measures the bytes it is about to write against this same bound, so a save
+# it confirms is one it reads back whole; an envelope over the bound is a
+# damaged save for the console and for the card tool alike.
+SAVE_FILE_MAX_BYTES = SAVE_MAX_BYTES * 3 // 2 + 16 * 1024
+ENVELOPE_MAX_SEPARATORS = SAVE_FILE_MAX_BYTES // 2   # see parse_envelope
 # Directory saves (docs/saves.md): the card declares the bound on the raw files;
 # the envelope carries them in base64 (4/3) plus names and hashes.
 FILES_PAYLOAD_MAX_FILES = 64
 DIRECTORY_SAVE_SCHEMA = 1
-INFLATE_LIMIT = 64 * 1024 * 1024      # a unit that inflates beyond this is not a save
+# How far a unit may inflate and still be a save, as the console's launcher
+# bounds it: by a multiple of what the card declared for all its saves, and
+# absolutely. XML is also read in full, so it has a bound of its own.
+INFLATE_LIMIT = 64 * 1024 * 1024
+INFLATE_FACTOR = 64
+XML_INFLATE_LIMIT = 16 * 1024 * 1024
 _FILE_NAME = re.compile(r"[A-Za-z0-9._-]{1,128}")
+_XML_SPACE = re.compile(rb"[ \t\n\r\x0b\x0c]*")
+
+
+# Parsing an envelope read from a card (docs/saves.md), as the launcher does.
+# Commas and colons outside strings count its values: a single-object
+# envelope holds at most what its file bound has room for, a directory-save
+# envelope a few per unit, everything big in it being a string. More is
+# refused before it is parsed: the 16 MiB a card declaring the largest
+# directory saves may hold, made of tiny values, would become hundreds of
+# megabytes of objects.
+JSON_MAX_DEPTH = 64
+_NOT_SEPARATOR = bytes(byte for byte in range(256) if byte not in b',:"')
+_NOT_BRACKET = bytes(byte for byte in range(256) if byte not in b'[]{}"')
+_BRACES = bytes.maketrans(b"{}", b"[]")
+
+
+def _outside_strings(raw: bytes, keep: bytes, table: Optional[bytes] = None) -> bytes:
+    """The bytes of `raw` that `keep` does not delete, from outside its JSON strings."""
+    marks = raw.replace(b"\\\\", b"").replace(b'\\"', b"").translate(table, keep)
+    outside, inside = [], False
+    for start in range(0, len(marks), 1 << 20):
+        pieces = marks[start:start + (1 << 20)].split(b'"')
+        outside.append(b"".join(pieces[inside::2]))
+        inside ^= not len(pieces) % 2
+    return b"".join(outside)
+
+
+def parse_envelope(raw: bytes):
+    """json.loads for an envelope read from a card: UTF-8 only, and a
+    ValueError, cheaply, for one nested deeper or holding far more values
+    than any the console writes."""
+    if raw.count(b",") + raw.count(b":") > ENVELOPE_MAX_SEPARATORS \
+            and len(_outside_strings(raw, _NOT_SEPARATOR)) > ENVELOPE_MAX_SEPARATORS:
+        raise ValueError(f"more than {ENVELOPE_MAX_SEPARATORS} values")
+    if raw.count(b"[") + raw.count(b"{") > JSON_MAX_DEPTH:
+        marks = _outside_strings(raw, _NOT_BRACKET, _BRACES)
+        if b"[" * (JSON_MAX_DEPTH + 1) in marks:
+            raise ValueError(f"nested deeper than {JSON_MAX_DEPTH} levels")
+        for _ in range(JSON_MAX_DEPTH):
+            if not marks:
+                break
+            marks = marks.replace(b"[]", b"")
+        if marks:
+            raise ValueError(f"nested deeper than {JSON_MAX_DEPTH} levels")
+    return json.loads(raw.decode("utf-8-sig"))
 
 
 def _field(info, name):
@@ -37,18 +97,43 @@ def save_bounds(info) -> "tuple[int, int]":
     return payload, payload + 8 * 1024
 
 
-def unit_check(check: str, data: bytes) -> Optional[str]:
-    """Why `data` is not one complete unit under `check` (docs/saves.md), or None.
-    The launcher's rule, word for word."""
+def inflate_limit(max_bytes: int) -> int:
+    """How far a unit may inflate on a card that declares `max_bytes` for its saves."""
+    return min(INFLATE_LIMIT, INFLATE_FACTOR * max_bytes)
+
+
+# Units checked together share a budget of a few units' limit, as in the
+# launcher: many small zlib bombs cost a few limits, not one each.
+INFLATE_TOTAL_FACTOR = 4
+
+
+INFLATING_CHECKS = ("zlib", "zlib-xml")
+
+
+def inflate_share(limit: int, units: int) -> int:
+    """How far each of `units` units checked together by inflating them
+    (INFLATING_CHECKS; the others take no share) may inflate."""
+    return min(limit, INFLATE_TOTAL_FACTOR * limit // max(units, 1))
+
+
+def unit_check(check: str, data: bytes, limit: int = INFLATE_LIMIT) -> Optional[str]:
+    """Why `data` is not one complete unit under `check` (docs/saves.md), or
+    None. `limit` is how far it may inflate (inflate_limit()). The launcher's
+    rule, word for word: it never raises for what `data` holds, and its
+    memory is bounded by the limits, the inflated bytes of an XML unit once,
+    of any other unit a step at a time."""
     if check == "any":
         return None
     if check in ("zlib", "zlib-xml"):
+        if check == "zlib-xml":
+            limit = min(limit, XML_INFLATE_LIMIT)
+        # Inflate in bounded steps and keep the output only when XML follows.
         inflater, pending, total, parts = zlib.decompressobj(), data, 0, []
         try:
             while True:
                 chunk = inflater.decompress(pending, 1 << 20)
                 total += len(chunk)
-                if total > INFLATE_LIMIT:
+                if total > limit:
                     return "se descomprime más allá del límite"
                 if check == "zlib-xml":
                     parts.append(chunk)
@@ -64,23 +149,43 @@ def unit_check(check: str, data: bytes) -> Optional[str]:
         if check == "zlib":
             return None
         data = b"".join(parts)
-    if data.endswith(b"\0"):
-        data = data[:-1]
-    text, declaration = data, b""
-    if text.startswith(b"\xef\xbb\xbf"):
-        declaration, text = text[:3], text[3:]
-    if text.lstrip().startswith(b"<?xml"):
-        text = text.lstrip()
-        end = text.find(b"?>")
-        if end < 0:
+        del parts
+    # The document is read where it lies, by position: no second copy of it.
+    # Some engines write their XML with the C string terminator, a NUL at the
+    # very end; their own loaders stop there, so one final NUL is not part of
+    # the document. A NUL anywhere else still fails the parse.
+    end = len(data) - 1 if data.endswith(b"\0") else len(data)
+    # Some games' files have several top-level elements: they are wrapped in
+    # one root, after the XML declaration if there is one (it must stay first).
+    start = 3 if data.startswith(b"\xef\xbb\xbf") else 0
+    declared = _XML_SPACE.match(data, start, end).end()
+    body = start
+    if data.startswith(b"<?xml", declared, end):
+        body = data.find(b"?>", declared, end) + 2
+        if body < 2:
             return "declaración XML incompleta"
-        declaration, text = declaration + text[:end + 2], text[end + 2:]
-    if b"<!DOCTYPE" in text or b"<!ENTITY" in text:
+    if data.find(b"<!DOCTYPE", body, end) >= 0 or data.find(b"<!ENTITY", body, end) >= 0:
         return "XML con declaraciones no admitidas"
+    # Well-formedness only: the parser is given no handlers, so it builds
+    # nothing (a document tree of a unit made of millions of empty elements
+    # took gigabytes), and with the document inside a root element of ours
+    # no document type can be declared, so there are no entities to expand.
+    view, parser = memoryview(data), expat.ParserCreate(None, "}")
     try:
-        ElementTree.fromstring(declaration + b"<mun-unit>" + text + b"</mun-unit>")
-    except ElementTree.ParseError as exc:
+        for piece in (view[:start], view[declared:body] if body > start else b"", b"<mun-unit>", view[body:end]):
+            parser.Parse(piece, False)
+        parser.Parse(b"</mun-unit>", True)
+    except expat.ExpatError as exc:
         return f"XML incompleto o dañado ({exc})"
+    except (LookupError, ValueError) as exc:
+        # The declaration names an encoding the parser cannot read: it knows
+        # UTF-8, US-ASCII and ISO-8859-1 itself and takes any other
+        # single-byte encoding from Python's codecs; a name they do not have
+        # is a LookupError there and a multibyte encoding (Shift-JIS, EUC-JP)
+        # a ValueError. Such a unit cannot be shown to be complete. (UTF-16,
+        # which the parser also knows, never gets this far: the unit is
+        # checked inside a root element written in ASCII, so it is malformed.)
+        return f"codificación XML no admitida ({exc})"
     return None
 
 
@@ -106,12 +211,16 @@ def envelope_problem(document: object, info, wanted_format: str) -> Optional[str
         if problem:
             return problem
         patterns = list(zip(_field(info, "saves_units") or [], _field(info, "saves_checks") or []))
+        share = inflate_share(inflate_limit(max_bytes), sum(
+            1 for entry in document["payload"]["files"]
+            if next((c for pattern, c in patterns if fnmatch.fnmatchcase(entry["path"], pattern)), None)
+            in INFLATING_CHECKS))
         for entry in document["payload"]["files"]:
             name = entry["path"]
             check = next((c for pattern, c in patterns if fnmatch.fnmatchcase(name, pattern)), None)
             if check is None:
                 return f"{name} no es un archivo de partida declarado"
-            problem = unit_check(check, base64.b64decode(entry["data"]))
+            problem = unit_check(check, base64.b64decode(entry["data"]), share)
             if problem:
                 return f"{name}: {problem}"
         return None

@@ -59,6 +59,16 @@ struct Plan {
     QString resume;       // where the previous start asked this one to return: "resolution", "range", "reset" or ""
 };
 
+// The board's cap on bits per channel (MUN_DISPLAY_MAX_BPC), set on card0's
+// connected outputs and nothing else: for the system to run before anything
+// is on screen (`mun-shell --cap-display`, deploy/mun-standby). Setting the
+// cap reconfigures the display's link, and a display goes dark for a moment
+// while it follows; done by prepare() at the shell's start, that moment came
+// with the standby picture already shown. What is set stays in the display's
+// state, so prepare() then finds the cap in place and changes nothing. Never
+// fails the caller: returns 0, and says what it did.
+int capLink();
+
 // Waits up to MUN_DISPLAY_WAIT_SECONDS (30 by default) for a usable display
 // on card0, when Qt will draw through the framebuffer platform on DRM; true
 // at once for any other platform. Logs what it found, or what there is when

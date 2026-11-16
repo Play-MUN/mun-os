@@ -5,8 +5,9 @@
 MUN™ OS's own work is Copyright 2026 Iván Moreno Mendoza, who develops MUN as
 Play MUN, and is licensed under the [Apache License 2.0](../LICENSE): the
 services, the card tools, the image build configuration, the laboratory, the
-example games, the interface sounds (the start-up sound among them), the
-tests and the documentation; not the MUN and Play MUN logos (below). The
+example games, the MUN Shape samples and the reef's studio, the interface
+sounds (the start-up sound among them), the tests and the documentation;
+not the MUN and Play MUN logos (below). The
 licence lets anyone use, modify and redistribute it
 under its conditions; it does not transfer its ownership. Whoever
 redistributes it keeps its attribution notices, those in [NOTICE](../NOTICE)
@@ -33,6 +34,11 @@ Each keeps its own copyright and terms:
   versions. Among them are the Linux kernel, the Qt libraries MUN Shell runs
   on, Mesa, SDL and the fallback typeface Inter (`fonts-inter`, SIL Open
   Font License 1.1).
+- **The reef's studio.** `examples/shape/reef-studio/sea.js` seeds its
+  randomness with mulberry32, by Tommy Ettinger, who dedicated it to the
+  public domain. Baking the reef installs three.js (MIT) with npm into the
+  studio's folder: it is not part of this repository, an image, a download
+  or an export of the reef.
 - **Games.** No third-party game and no game data is part of this
   repository, an image or a download. A game someone compiles from a recipe
   kept outside the repository keeps its own licence, which that build's
@@ -53,7 +59,14 @@ and fetches those sources, checked against their digests, from
 [snapshot.debian.org](https://snapshot.debian.org) into one directory with a
 `SOURCES.json` index. That directory is published beside the release as one
 archive with its SHA-256, never in Git
-([releasing](releasing.md#4-the-corresponding-source)). Debian's own
+([releasing](releasing.md#4-the-corresponding-source)).
+
+The Game Cards of a release carry MUN Collect, and that program is linked
+statically with the GNU C Library (LGPL-2.1-or-later), of the same Debian
+version as the image's own `libc6`, so its source is in that same archive.
+MUN Collect's own source is in this repository (`examples/mun-collect`,
+Apache-2.0), which is what lets anyone build it again against another
+version of the library. Debian's own
 guidance on distributing derived images:
 [Debian for vendors](https://www.debian.org/CD/vendors/legal).
 

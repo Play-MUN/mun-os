@@ -65,8 +65,21 @@ Environment=XDG_RUNTIME_DIR=/run/mun-shell
 Environment=QT_LOGGING_RULES=qt.qpa.*=false
 
 ExecStart=/opt/mun/shell/bin/mun-shell
+# A clean stop (the launcher's, around every game; a shutdown; a new
+# resolution) is not a crash: the decoding markers are removed then, so the
+# next start does not skip an identity or a motion that was only being
+# decoded (src/shape.cpp, src/motionscene.cpp). After a crash or a kill they
+# stay and name the insertion to skip. "$$" passes "$" to the shell.
+ExecStopPost=/bin/sh -c 'if [ "$$SERVICE_RESULT" = success ]; then rm -f -- "$$XDG_RUNTIME_DIR/shape-decoding" "$$XDG_RUNTIME_DIR/shape-decoding-motion"; fi'
 Restart=on-failure
-RestartSec=5
+# A new resolution is a restart (75, below), black until the shell is back:
+# one second, not more. Without a display the shell waits for one itself
+# (MUN_DISPLAY_WAIT_SECONDS) before it exits, and a crash while decoding a
+# card's images is not repeated (the decoding markers); any other failure to
+# start (an interface that does not load, a library missing) is tried again
+# every second without end, five times as often as before: the console has
+# no interface then either way, and the journal is bounded.
+RestartSec=1
 # Qt's framebuffer VT handler exits with status 1 after SIGTERM; that is a clean stop.
 # 75 is the shell asking to start again: Qt opens the display once, so a new
 # resolution takes a new process (src/displaymode.h). Failures are other
@@ -74,8 +87,26 @@ RestartSec=5
 # not load (src/main.cpp).
 SuccessExitStatus=1 75
 RestartForceExitStatus=75
+# A ceiling on the shell's memory. By itself the shell holds 150 to 250 MiB,
+# and what a Game Card may add is bounded (a world's 200 MiB at most, a
+# motion's 64 MiB of decoded images; services/mun-shell/README.md): 2 GiB is
+# about four times all of that together, so only a fault reaches it. Without
+# a ceiling such a fault took all the console's memory before the kernel
+# chose, among every process, one to kill. With it the shell alone is
+# killed, which is a failure as any other: the unit starts again and the
+# decoding markers stay (ExecStopPost), naming what the next start skips.
+# No MemoryHigh: slowed down instead of stopped, the interface would stay on
+# screen, frozen.
+MemoryMax=2G
+OOMPolicy=stop
 
 # Hardening that does not interfere with fb/evdev access.
+# Sockets: local ones (its services, D-Bus) and netlink (the network panel's
+# addresses, udev's device events); no Internet socket, though the shell reads
+# what cards bring. Applied before the service user is taken, so it does not
+# imply no-new-privileges: sudo, which turning off and the reset go through,
+# still works (measured).
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
 NoNewPrivileges=no
 ProtectSystem=strict
 ProtectHome=yes

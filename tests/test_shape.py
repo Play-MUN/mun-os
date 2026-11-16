@@ -1337,7 +1337,8 @@ class ShellBehaviourTests(unittest.TestCase):
         self.assertNotIn("elapsed()", cpp, "the cue depends on no clock")
         self.assertIn('runtimeFile("shape-cue")', cpp)
         # The presence runs from Main: the world, the animation and its ends.
-        self.assertIn("world: Shape.world", main)
+        # (the v1 world, unless the package's motion plays in its place)
+        self.assertIn("world: Object.keys(Shape.motion).length === 0 || motionScene.failed ? Shape.world : ({})", main)
         self.assertIn("onFinished: to === 1 ? Shape.arrived() : Shape.left()", main)
         self.assertIn("Binding { target: FrameWatch; property: \"judging\"; value: world.drawn && window.powered }", main)
         self.assertIn("function onStrained(why) { world.stepDown(why) }", main)

@@ -22,7 +22,7 @@ cambia en *Settings* › *Language and time* › *Language*
 
 ## Antes de empezar
 
-- Las herramientas y una imagen que muestre MUN Shape: la v0.1.0-dev.4, como
+- Las herramientas y una imagen que muestre MUN Shape: la v0.1.0-dev.5, como
   en [primeros pasos](../getting-started.md) (secciones 1 a 3), o una
   construida desde tu copia del repositorio como en
   [construir la imagen tú mismo](../getting-started.md#construir-la-imagen-tú-mismo)
@@ -93,7 +93,7 @@ con nombres nuevos que indiques en `shape.json`.
 
 | Tipo | Formato | Límites |
 | --- | --- | --- |
-| Imágenes | PNG (cualquier profundidad de bits y tipo de color que admita PNG) | 4 MiB cada una; el lado mayor, 2048 para un fondo, una capa o una textura de luz, 1024 para la ventana de la tarjeta, 256 para un sprite |
+| Imágenes | PNG (cualquier profundidad de bits y tipo de color que admita PNG) | 4 MiB cada una; el lado mayor, 2048 para un fondo, una capa o una textura de luz, 1024 para la ventana de la tarjeta, 256 para un sprite; 16 MiB una vez decodificada; poco además de los píxeles: 32 KiB de texto (el XMP y el historial de un programa de diseño suelen pasar de ahí: exporta sin metadatos) y un perfil de color |
 | Sonidos | WAV, PCM, 48 kHz, 16 bits, estéreo, solo con `fmt ` y `data` | 1 MiB cada uno; `move`, `enter` y `back`, 1 s como máximo, e `insert`, 3 s como máximo; picos de −1 dBFS o menos |
 | El paquete | los archivos que nombra `shape.json` | 32 MiB en total |
 
@@ -309,8 +309,8 @@ escribe un paquete defectuoso pequeño por caso, para verlos en la consola.
   luz, que son la mayor parte del coste de un mundo. Un mundo como el de
   `paper`, a 10 fotogramas por segundo y sin texturas de luz, cuesta más o
   menos lo que MUN solo ([medido](../../shape.md#measured), en inglés).
-  Todavía no se ha elegido el hardware de la consola: da a las texturas de luz
-  solo lo que valen.
+  El hardware de la consola todavía no ha ejecutado MUN OS: da a las
+  texturas de luz solo lo que valen.
 
 ## Para ir más allá
 

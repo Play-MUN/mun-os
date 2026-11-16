@@ -11,6 +11,7 @@ import http.server
 import io
 import json
 import lzma
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -26,6 +27,18 @@ import mundev  # noqa: E402
 
 BUILD_ID = "20260929T123647Z-aee686f3d1fd"
 IMAGE = "mun-os-0.1.0-dev-qemu-arm64.qcow2"
+COMMIT = "a" * 40
+
+
+def qcow2(backing=b"", features=0, version=3, magic=b"QFI\xfb"):
+    """The start of a qcow2 image: its header (version 3 has 104 bytes),
+    then the name of its backing file when it has one."""
+    header = magic + version.to_bytes(4, "big") + (104 if backing else 0).to_bytes(8, "big") \
+        + len(backing).to_bytes(4, "big") + bytes(52) + features.to_bytes(8, "big") + bytes(24)
+    return header + backing
+
+
+GAME = b"\x7fELF the build's own MUN Collect"
 
 
 class Fixture(unittest.TestCase):
@@ -38,13 +51,18 @@ class Fixture(unittest.TestCase):
     def report(self, text):
         self.messages.append(text)
 
-    def build(self, image_bytes=b"qcow2-image" * 1000) -> Path:
+    def build(self, image_bytes=qcow2() + b"qcow2-image" * 1000) -> Path:
         build = self.root / "builds" / "b1"
         build.mkdir(parents=True)
         (build / IMAGE).write_bytes(image_bytes)
+        game = build / "games" / "mun-collect" / "mun-collect"
+        game.parent.mkdir(parents=True)
+        game.write_bytes(GAME)
         info = {"format": 1, "name": "MUN OS", "version": "0.1.0-dev", "environment": "qemu-arm64", "release": False,
                 "build_id": BUILD_ID, "built": {"finished": "2026-09-29T12:37:58Z"},
-                "source": {"commit": "a" * 40, "describe": "aee686f", "clean": True},
+                "source": {"commit": COMMIT, "describe": "aee686f", "clean": True},
+                "games": {"mun-collect": {"file": "games/mun-collect/mun-collect", "size": len(GAME),
+                                          "sha256": hashlib.sha256(GAME).hexdigest()}},
                 "artifacts": {IMAGE: {"sha256": hashlib.sha256(image_bytes).hexdigest(), "size": len(image_bytes)}}}
         (build / "BUILD-INFO.json").write_text(json.dumps(info))
         return build
@@ -69,6 +87,23 @@ class Fixture(unittest.TestCase):
 
     def get(self, location, name=None):
         return bundle.get(str(location), self.root / "installed", self.root / "cards", name, report=self.report)
+
+    def rewrite(self, source, change):
+        """Change a bundle's manifest in place: `change(manifest)`."""
+        manifest = json.loads((source / "release.json").read_text())
+        change(manifest)
+        (source / "release.json").write_text(json.dumps(manifest))
+
+    def replace_file(self, source, name, data, new_name=None):
+        """Give the bundle's file `name` other bytes (and another name),
+        with the manifest saying exactly that: only what the file is differs."""
+        (source / name).unlink()
+        (source / (new_name or name)).write_bytes(data)
+
+        def change(manifest):
+            entry = next(e for e in manifest["files"] if e["name"] == name)
+            entry.update(name=new_name or name, size=len(data), sha256=hashlib.sha256(data).hexdigest())
+        self.rewrite(source, change)
 
 
 class MakeTests(Fixture):
@@ -214,6 +249,105 @@ class GetTests(Fixture):
             self.get(source)
         self.assertIn("larger", str(refused.exception))
 
+    def test_the_build_record_is_build_info_json_and_a_json_object(self):
+        record = lambda source: (source / "BUILD-INFO.json").read_bytes()  # noqa: E731
+        cases = {
+            "under another name": lambda source: self.replace_file(source, "BUILD-INFO.json", record(source), "x.json"),
+            "not JSON": lambda source: self.replace_file(source, "BUILD-INFO.json", b"not json {"),
+            "not an object": lambda source: self.replace_file(source, "BUILD-INFO.json", b"[1, 2]"),
+            "nested too deep": lambda source: self.replace_file(source, "BUILD-INFO.json", b"[" * 200000),
+            "artifacts not an object": lambda source: self.replace_file(
+                source, "BUILD-INFO.json", json.dumps({"build_id": BUILD_ID, "artifacts": [IMAGE]}).encode()),
+        }
+        for what, damage in cases.items():
+            with self.subTest(what):
+                shutil.rmtree(self.root)
+                self.root.mkdir()
+                source = self.bundle()
+                damage(source)
+                with self.assertRaises(bundle.BundleError):
+                    self.get(source)
+                self.assertFalse((self.root / "installed" / "d0929-123647").exists())
+                self.assertFalse((self.root / "cards").exists())
+
+    def test_sizes_no_bundle_has_are_refused_when_the_manifest_is_read(self):
+        image = lambda manifest: next(e for e in manifest["files"] if e["kind"] == "image")  # noqa: E731
+        card = lambda manifest: next(e for e in manifest["files"] if e["kind"] == "card")  # noqa: E731
+        cases = {
+            "a file of 2^62 bytes": lambda manifest: image(manifest).update(size=1 << 62),
+            "a card that unpacks to 2^62 bytes": lambda manifest: card(manifest).update(image_size=1 << 62),
+            "a card of negative size": lambda manifest: card(manifest).update(image_size=-1),
+        }
+        for what, change in cases.items():
+            with self.subTest(what):
+                shutil.rmtree(self.root)
+                self.root.mkdir()
+                source = self.bundle()
+                self.rewrite(source, change)
+                with self.assertRaises(bundle.BundleError) as refused:
+                    self.get(source)
+                self.assertIn("manifest", str(refused.exception))
+                self.assertFalse((self.root / "installed").exists(), "nothing is fetched")
+
+    def test_a_bundle_larger_than_the_free_space_is_refused_before_it_is_fetched(self):
+        source = self.bundle()
+        manifest = json.loads((source / "release.json").read_text())
+        files = sum(entry["size"] for entry in manifest["files"])
+        cards = sum(entry["image_size"] for entry in manifest["files"] if entry["kind"] == "card")
+        usage = lambda free: patch.object(bundle.shutil, "disk_usage",  # noqa: E731
+                                          return_value=argparse.Namespace(total=1 << 40, used=0, free=free))
+        with usage(files + cards - 1), self.assertRaises(bundle.BundleError) as refused:
+            self.get(source)
+        self.assertIn("free space", str(refused.exception))
+        self.assertFalse((self.root / "installed").exists(), "nothing is fetched")
+        self.assertFalse((self.root / "cards").exists())
+        # What is already here is not needed again: a card that exists is
+        # not unpacked, a file already fetched is not fetched.
+        (self.root / "cards").mkdir()
+        (self.root / "cards" / "collect.img").write_bytes(b"my saves")
+        collect = next(entry for entry in manifest["files"] if entry.get("card") == "collect")
+        with usage(files + cards - collect["image_size"]):
+            build, installed = self.get(source)
+        self.assertEqual([card.name for card in installed], ["demo.img"])
+        self.assertTrue((build / IMAGE).is_file())
+
+    def with_image(self, data):
+        """A bundle whose image is `data`, its record and manifest agreeing:
+        only what the image is differs from an ordinary bundle."""
+        shutil.rmtree(self.root)
+        self.root.mkdir()
+        source = self.bundle()
+        self.replace_file(source, IMAGE, data)
+        info = json.loads((source / "BUILD-INFO.json").read_text())
+        info["artifacts"][IMAGE]["sha256"] = hashlib.sha256(data).hexdigest()
+        self.replace_file(source, "BUILD-INFO.json", json.dumps(info).encode())
+        return source
+
+    def test_an_image_that_reads_another_file_of_the_host_is_refused(self):
+        # A qcow2 header can name a backing file, or a file its data is kept
+        # in: QEMU would open that path on the host for the guest to read.
+        clusters = b"clusters" * 1000
+        cases = {
+            "a backing file": (qcow2(backing=b"/etc/passwd") + clusters, "backing file"),
+            "a backing file, version 2": (qcow2(backing=b"/etc/passwd", version=2) + clusters, "backing file"),
+            "an external data file": (qcow2(features=1 << 2) + clusters, "another file"),
+            "not a qcow2 image": (qcow2(magic=b"RAW!") + clusters, "not a qcow2"),
+            "a version that is not one": (qcow2(version=9) + clusters, "not a qcow2"),
+            "shorter than a header": (b"QFI\xfb\0\0\0\3" + bytes(40), "not a qcow2"),
+        }
+        for what, (data, said) in cases.items():
+            with self.subTest(what):
+                source = self.with_image(data)
+                with self.assertRaises(bundle.BundleError) as refused:
+                    self.get(source)
+                self.assertIn(said, str(refused.exception))
+                self.assertFalse((self.root / "installed" / "d0929-123647").exists())
+                self.assertFalse((self.root / "cards").exists(), "no card is unpacked for a refused image")
+        for version in (2, 3):
+            build, cards = self.get(self.with_image(qcow2(version=version) + clusters))
+            self.assertTrue((build / IMAGE).is_file(), "an image that is all in its own file is installed")
+            self.assertEqual(len(cards), 2)
+
     def test_a_name_in_use_by_another_image_is_refused(self):
         source = self.bundle()
         other = self.root / "installed" / "mine"
@@ -221,6 +355,23 @@ class GetTests(Fixture):
         (other / "BUILD-INFO.json").write_text(json.dumps({"build_id": "20260101T000000Z-000000000000"}))
         with self.assertRaises(bundle.BundleError):
             self.get(source, name="mine")
+
+
+    def test_a_build_name_that_is_not_a_name_is_refused_and_nothing_is_written(self):
+        source = self.bundle()
+        builds = self.root / "deep" / "er" / "installed"
+        for name in ("../../../escaped", str(self.root / "absolute"), "a/b", "..", ".hidden", "UPPER", "-dash",
+                     "x" * 17, "a"):
+            with self.subTest(name=name):
+                with self.assertRaises(bundle.BundleError) as refused:
+                    bundle.get(str(source), builds, self.root / "cards", name, report=self.report)
+                self.assertIn("build name", str(refused.exception))
+        self.assertFalse((self.root / "escaped").exists() or (self.root / "absolute").exists(),
+                         "nothing is installed outside the builds")
+        self.assertFalse((self.root / "deep").exists(), "nothing is fetched for a refused name")
+        self.assertFalse((self.root / "cards").exists())
+        build, _ = bundle.get(str(source), builds, self.root / "cards", "mine-2", report=self.report)
+        self.assertEqual(build, builds / "mine-2")
 
 
 class ManifestTests(Fixture):
@@ -254,6 +405,40 @@ class ManifestTests(Fixture):
             with self.assertRaises(bundle.BundleError, msg=str(data)[:120]):
                 bundle.check_manifest(data)
 
+    def test_a_manifest_nested_deeper_than_the_parser_goes_is_refused_like_any_other(self):
+        deep = self.root / "deep"
+        deep.mkdir()
+        (deep / "release.json").write_text("[" * 200000)
+        with self.assertRaises(bundle.BundleError) as refused:
+            self.get(deep)
+        self.assertIn("manifest is not JSON", str(refused.exception))
+        self.assertFalse((self.root / "installed").exists())
+
+    def test_names_a_host_would_not_keep_as_distinct_files_are_refused(self):
+        good = self.manifest()
+        licence = lambda d: next(e for e in d["files"] if e["kind"] == "licence")  # noqa: E731
+        image = lambda d: next(e for e in d["files"] if e["kind"] == "image")  # noqa: E731
+        changes = {
+            # Windows gives these names to devices, whatever follows the dot.
+            "con.txt": lambda d: licence(d).update(name="con.txt"),
+            "NUL.txt": lambda d: licence(d).update(name="NUL.txt"),
+            "COM1.txt": lambda d: licence(d).update(name="COM1.txt"),
+            "lpt9.notes.txt": lambda d: licence(d).update(name="lpt9.notes.txt"),
+            "aux.qcow2": lambda d: image(d).update(name="aux.qcow2"),
+            # One file on a file system that ignores case (macOS, Windows).
+            "a.txt and A.txt": lambda d: d["files"].extend([dict(licence(d), name="a.txt"), dict(licence(d), name="A.txt")]),
+        }
+        for what, change in changes.items():
+            with self.subTest(what):
+                data = json.loads(json.dumps(good))
+                change(data)
+                with self.assertRaises(bundle.BundleError):
+                    bundle.check_manifest(data)
+        for name in ("console.txt", "com.txt", "nullable.txt", "OFL-1.1.txt"):
+            data = json.loads(json.dumps(good))
+            licence(data).update(name=name)
+            bundle.check_manifest(data)
+
     def test_locations_are_directories_manifests_or_web_addresses(self):
         self.assertFalse(bundle.Source("/some/dir").remote)
         self.assertEqual(bundle.Source("/some/dir").url("card-a.img.xz"), "/some/dir/card-a.img.xz")
@@ -280,14 +465,33 @@ class RangeHandler(http.server.SimpleHTTPRequestHandler):
             return super().send_head()
         start = int(requested.split("=")[1].rstrip("-"))
         RangeHandler.served_ranges.append(start)
-        handle = path.open("rb")
         size = path.stat().st_size
+        if start >= size:                      # nothing left to send: not satisfiable
+            self.send_error(416)
+            return None
+        handle = path.open("rb")
         handle.seek(start)
         self.send_response(206)
         self.send_header("Content-Range", f"bytes {start}-{size - 1}/{size}")
         self.send_header("Content-Length", str(size - start))
         self.end_headers()
         return handle
+
+
+class RedirectHandler(http.server.SimpleHTTPRequestHandler):
+    """Sends every request under /moved/ elsewhere: to the same file at the
+    server's root, or to `elsewhere` when it is set."""
+    elsewhere = None
+
+    def log_message(self, *args):
+        pass
+
+    def do_GET(self):
+        if not self.path.startswith("/moved/"):
+            return super().do_GET()
+        self.send_response(302)
+        self.send_header("Location", RedirectHandler.elsewhere or self.path[len("/moved"):])
+        self.end_headers()
 
 
 class HttpTests(Fixture):
@@ -318,6 +522,54 @@ class HttpTests(Fixture):
         build, _ = self.get(url)
         self.assertEqual((build / IMAGE).read_bytes(), whole)
         self.assertIn(5000, RangeHandler.served_ranges)
+
+    def test_a_download_that_stopped_after_its_last_byte_is_verified_and_installed(self):
+        # The process ended between the last write and the rename: the whole
+        # file is there under its partial name and nothing is left to ask for.
+        source = self.bundle()
+        url = self.serve(source)
+        staging = self.root / "installed" / "d0929-123647.download"
+        staging.mkdir(parents=True)
+        whole = (source / IMAGE).read_bytes()
+        (staging / (IMAGE + ".part")).write_bytes(whole)
+        RangeHandler.served_ranges = []
+        build, _ = self.get(url)
+        self.assertEqual((build / IMAGE).read_bytes(), whole)
+        self.assertEqual(RangeHandler.served_ranges, [], "nothing of it is asked for again")
+
+    def test_a_complete_partial_file_that_is_not_the_file_is_fetched_again(self):
+        source = self.bundle()
+        url = self.serve(source)
+        staging = self.root / "installed" / "d0929-123647.download"
+        staging.mkdir(parents=True)
+        whole = (source / IMAGE).read_bytes()
+        (staging / (IMAGE + ".part")).write_bytes(b"!" * len(whole))
+        build, _ = self.get(url)
+        self.assertEqual((build / IMAGE).read_bytes(), whole)
+
+    def test_a_redirect_is_followed_only_to_an_address_as_protected(self):
+        import urllib.request
+        follow = bundle.Redirects().redirect_request
+        secure = urllib.request.Request("https://downloads.example.invalid/v0/release.json")
+        for target in ("http://downloads.example.invalid/v0/release.json", "HTTP://other.example.invalid/release.json",
+                       "ftp://downloads.example.invalid/release.json"):
+            with self.subTest(target=target), self.assertRaises(bundle.BundleError) as refused:
+                follow(secure, None, 302, "Found", {}, target)
+            self.assertIn("redirect", str(refused.exception))
+        moved = follow(secure, None, 302, "Found", {}, "https://objects.example.invalid/release.json")
+        self.assertEqual(moved.full_url, "https://objects.example.invalid/release.json", "https to https is followed")
+        # The same rule is the one a download goes through: over plain http
+        # (a local test) a redirect to http is followed, one to ftp is not.
+        url = self.serve(self.bundle(), handler=RedirectHandler)
+        RedirectHandler.elsewhere = None
+        build, cards = self.get(url + "/moved/release.json")
+        self.assertTrue((build / IMAGE).is_file())
+        self.assertEqual(len(cards), 2)
+        RedirectHandler.elsewhere = "ftp://127.0.0.1:1/release.json"
+        self.addCleanup(setattr, RedirectHandler, "elsewhere", None)
+        with self.assertRaises(bundle.BundleError) as refused:
+            self.get(url + "/moved/release.json", name="other")
+        self.assertIn("redirect", str(refused.exception))
 
     def test_a_server_without_ranges_sends_the_whole_file_and_it_still_verifies(self):
         source = self.bundle()
@@ -352,39 +604,100 @@ class CommandTests(Fixture):
             holder.wait()
             self.assertTrue(mundev.install(str(source)).is_dir(), "once the first has finished, the second proceeds")
 
-    def test_bundle_makes_the_cards_from_the_builds_own_game_and_refuses_downloads(self):
-        build = self.build()
-        made = []
-
-        def card_tool(command, **kwargs):
+    def card_tool(self, made):
+        def run(command, **kwargs):
             made.append(command)
             Path(command[3]).write_bytes(b"card")
             return argparse.Namespace(returncode=0, stdout="", stderr="")
-        with patch.object(mundev, "BUILDS_ROOT", self.root / "builds"), \
-                patch.object(mundev.subprocess, "run", side_effect=card_tool), \
-                contextlib.redirect_stdout(io.StringIO()):
+        return run
+
+    def bundling(self, made, commit=COMMIT, clean=True):
+        """`./mun dev bundle` in a checkout at `commit`, its working tree
+        `clean` or not, with the card tool replaced by a recorder."""
+        stack = contextlib.ExitStack()
+        stack.enter_context(patch.object(mundev, "BUILDS_ROOT", self.root / "builds"))
+        stack.enter_context(patch.object(mundev, "source_state", return_value={"commit": commit, "clean": clean}))
+        stack.enter_context(patch.object(mundev.subprocess, "run", side_effect=self.card_tool(made)))
+        stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
+        return stack
+
+    def rewrite_info(self, build, change):
+        info = json.loads((build / "BUILD-INFO.json").read_text())
+        change(info)
+        (build / "BUILD-INFO.json").write_text(json.dumps(info))
+
+    def test_bundle_makes_the_cards_from_the_builds_own_game_and_refuses_downloads(self):
+        build = self.build()
+        made = []
+        with self.bundling(made):
             mundev.cmd_bundle(argparse.Namespace(build="b1", out=str(self.root / "out")))
             (build / "ORIGIN.json").write_text("{}")
             with self.assertRaises(mundev.vm.LabError):
                 mundev.cmd_bundle(argparse.Namespace(build="b1", out=str(self.root / "out2")))
-        info = json.loads((build / "BUILD-INFO.json").read_text())
-        info["games"] = {"mun-collect": {}, "mygame": {}}
-        (build / "BUILD-INFO.json").write_text(json.dumps(info))
+        self.rewrite_info(build, lambda info: info["games"].update(mygame={}))
         (build / "ORIGIN.json").unlink()
-        with patch.object(mundev, "BUILDS_ROOT", self.root / "builds"), \
-                patch.object(mundev.subprocess, "run", side_effect=card_tool), \
-                contextlib.redirect_stdout(io.StringIO()), self.assertRaises(mundev.vm.LabError) as refused:
+        with self.bundling(made), self.assertRaises(mundev.vm.LabError) as refused:
             mundev.cmd_bundle(argparse.Namespace(build="b1", out=str(self.root / "out3")))
         self.assertIn("mygame", str(refused.exception), "a build with a third-party game is never bundled")
         game = [command for command in made if "--variant" in command][0]
         self.assertIn(str(build / "games" / "mun-collect" / "mun-collect"), game)
         dressed = [command for command in made if "--shape" in command]
-        self.assertEqual(len(dressed), 1, "one card carries a MUN Shape package")
-        self.assertEqual(dressed[0][dressed[0].index("--shape") + 1], str(mundev.REPO_ROOT / "examples" / "shape" / "sea"))
-        self.assertIn(str(build / "games" / "mun-collect" / "mun-collect"), dressed[0])
+        self.assertEqual(sorted(command[command.index("--shape") + 1] for command in dressed),
+                         sorted(str(mundev.REPO_ROOT / "examples" / "shape" / name) for name in ("reef", "sea")),
+                         "two cards carry a MUN Shape package: the sea sample (v1) and Reef (motion)")
+        for command in dressed:
+            self.assertIn(str(build / "games" / "mun-collect" / "mun-collect"), command)
         manifest = json.loads((self.root / "out" / "release.json").read_text())
         self.assertEqual(sorted(e["card"] for e in manifest["files"] if e["kind"] == "card"),
-                         ["collect", "collect-sea", "demo"])
+                         ["collect", "collect-reef", "collect-sea", "demo"])
+        self.assertEqual(manifest["source"], {"commit": COMMIT, "describe": "aee686f", "clean": True, "one_commit": True},
+                         "made in the build's own commit: everything in it is of that commit")
+
+    def test_a_clean_build_is_bundled_only_from_its_own_commit_with_a_clean_tree(self):
+        # The cards' MUN Shape packages, the card tool and the licence texts
+        # come from the checkout, while release.json names the build's commit.
+        self.build()
+        for what, checkout in (("another commit", {"commit": "b" * 40}),
+                               ("uncommitted changes", {"clean": False})):
+            with self.subTest(what):
+                made = []
+                with self.bundling(made, **checkout), self.assertRaises(mundev.vm.LabError) as refused:
+                    mundev.cmd_bundle(argparse.Namespace(build="b1", out=str(self.root / "out")))
+                self.assertIn(COMMIT[:12], str(refused.exception))
+                self.assertEqual(made, [], "refused before a card is made")
+                self.assertFalse((self.root / "out").exists())
+
+    def test_a_game_that_is_not_the_one_the_build_recorded_is_not_put_on_a_card(self):
+        build = self.build()
+        (build / "games" / "mun-collect" / "mun-collect").write_bytes(b"\x7fELF compiled by hand afterwards")
+        made = []
+        with self.bundling(made), self.assertRaises(mundev.vm.LabError) as refused:
+            mundev.cmd_bundle(argparse.Namespace(build="b1", out=str(self.root / "out")))
+        self.assertIn("mun-collect", str(refused.exception))
+        self.assertEqual(made, [])
+        self.assertFalse((self.root / "out").exists())
+
+    def test_a_build_of_uncommitted_changes_is_bundled_for_a_local_test_and_says_so(self):
+        build = self.build()
+        self.rewrite_info(build, lambda info: info["source"].update(clean=False))
+        made, said = [], io.StringIO()
+        with self.bundling(made, commit="b" * 40, clean=False), contextlib.redirect_stdout(said):
+            mundev.cmd_bundle(argparse.Namespace(build="b1", out=str(self.root / "out")))
+        self.assertIn("not for publication", said.getvalue())
+        manifest = json.loads((self.root / "out" / "release.json").read_text())
+        self.assertEqual((manifest["source"]["clean"], manifest["source"]["one_commit"], manifest["release"]),
+                         (False, False, False))
+        self.get(self.root / "out")
+        self.assertTrue(any("not of one commit" in message for message in self.messages),
+                        "whoever installs it is told too")
+        # A release image is never bundled from anything but its commit.
+        self.rewrite_info(build, lambda info: info.update(release=True))
+        with self.bundling(made, commit="b" * 40, clean=False), self.assertRaises(mundev.vm.LabError):
+            mundev.cmd_bundle(argparse.Namespace(build="b1", out=str(self.root / "out2")))
+        self.assertFalse((self.root / "out2").exists())
+        with self.assertRaises(bundle.BundleError):
+            bundle.make(build, self.root / "out3", {})
+        self.assertFalse((self.root / "out3").exists())
 
 
 if __name__ == "__main__":

@@ -433,6 +433,36 @@ class SaveGateTests(unittest.TestCase):
         h.m.save_request(sid, {"type": "save", "schema": 1, "data": {"a": 3}}, replies.append)
         self.assertEqual(len(h.saves), 2, "after the reply the next save is accepted")
 
+    def test_the_size_of_a_save_is_that_of_its_compact_utf8_text_as_the_card_stores_it(self):
+        h, sid = self.running()
+        replies = []
+        cjk = {"text": "漢" * (11 * 1024)}                   # 33 KiB as UTF-8, 66 KiB with every character escaped
+        h.m.save_request(sid, {"type": "save", "schema": 1, "data": cjk}, replies.append)
+        self.assertEqual((replies, [request["payload"] for request, _ in h.saves]), ([], [cjk]), "accepted and forwarded")
+        h.saves.pop()[1]({"ok": True, "bytes": 34000}); h.pump()
+        self.assertTrue(replies.pop()["ok"])
+        frame = len('{"t":""}')
+        for size, code in ((launchd.SAVE_MAX_BYTES, None), (launchd.SAVE_MAX_BYTES + 1, "save_too_large"),
+                           (65 * 1024, "save_too_large")):
+            with self.subTest(size):
+                h.m.save_request(sid, {"type": "save", "schema": 1, "data": {"t": "a" * (size - frame)}}, replies.append)
+                if code is None:
+                    self.assertEqual(replies, [])
+                    h.saves.pop()[1]({"ok": True, "bytes": size}); h.pump()
+                    self.assertTrue(replies.pop()["ok"])
+                else:
+                    self.assertEqual((replies.pop()["error"]["code"], h.saves), (code, []))
+
+    def test_a_save_whose_text_cannot_be_utf8_is_refused_here_and_not_forwarded(self):
+        h, sid = self.running()
+        (request,) = launchd.LineReader(limit=launchd.SAVE_LINE_MAX).feed(
+            b'{"type":"save","schema":1,"data":{"n":"\\ud800"}}\n')     # JSON can spell half a surrogate pair
+        replies = []
+        h.m.save_request(sid, request, replies.append)
+        self.assertEqual((replies[0]["ok"], replies[0]["error"]["code"], h.saves), (False, "save_invalid", []))
+        h.m.save_request(sid, {"type": "save", "schema": 1, "data": {"n": "\U0001f600 a whole pair"}}, replies.append)
+        self.assertEqual(len(h.saves), 1, "a character outside the basic plane is ordinary text")
+
     def test_late_reply_after_the_session_ended_is_not_delivered(self):
         h, sid = self.running(); replies = []
         h.m.save_request(sid, {"type": "save", "schema": 1, "data": {"a": 1}}, replies.append)
@@ -465,7 +495,7 @@ class RuntimeProfileTests(unittest.TestCase):
 
     def test_framebuffer_profile_keeps_the_v0_unit(self):
         props = launchd.unit_properties("linux-arm64-v0", "s1", Path("/run/mun/launch/s1"))
-        self.assertIn("DeviceAllow=/dev/fb0 rw", props); self.assertIn("DeviceAllow=char-input rw", props)
+        self.assertIn("DeviceAllow=/dev/fb0 rw", props); self.assertIn("DeviceAllow=char-input r", props)
         self.assertNotIn("DeviceAllow=char-drm rw", props); self.assertNotIn("SupplementaryGroups=audio", props)
         self.assertIn("MemoryMax=512M", props); self.assertIn("DevicePolicy=closed", props)
         env = launchd.unit_environment("linux-arm64-v0", "s1", {"card_id": "mun.collect", "version": "0.1.0"}, Path("/x/s1"))
@@ -526,7 +556,7 @@ class RuntimeProfileTests(unittest.TestCase):
     def test_gl_profile_opens_drm_alsa_and_input_only_and_points_sdl_at_them(self):
         props = launchd.unit_properties("linux-arm64-gl-v0", "s2", Path("/run/mun/launch/s2"))
         allowed = [p for p in props if p.startswith("DeviceAllow=")]
-        self.assertEqual(sorted(allowed), sorted(["DeviceAllow=char-drm rw", "DeviceAllow=char-alsa rw", "DeviceAllow=char-input rw"]))
+        self.assertEqual(sorted(allowed), sorted(["DeviceAllow=char-drm rw", "DeviceAllow=char-alsa rw", "DeviceAllow=char-input r"]))
         for common in ("CapabilityBoundingSet=", "PrivateNetwork=yes", "ProtectSystem=strict", "NoNewPrivileges=yes",
                        "DevicePolicy=closed", "ReadWritePaths=/run/mun/launch/s2/work"):
             self.assertIn(common, props)
@@ -534,6 +564,48 @@ class RuntimeProfileTests(unittest.TestCase):
         env = launchd.unit_environment("linux-arm64-gl-v0", "s2", {}, Path("/x/s2"))
         self.assertEqual((env["SDL_VIDEODRIVER"], env["SDL_AUDIODRIVER"], env["ALSOFT_DRIVERS"]), ("kmsdrm", "alsa", "alsa"))
         self.assertEqual(env["HOME"], "/x/s2/work")
+
+    def test_input_devices_can_be_read_and_never_written_in_any_profile(self):
+        # A descriptor open for writing on an event device injects events for
+        # the whole console: a game wrote Ctrl+Alt+Del and the console rebooted.
+        for profile in launchd.PROFILES:
+            with self.subTest(profile):
+                props = launchd.unit_properties(profile, "s1", Path("/run/mun/launch/s1"))
+                self.assertIn("DevicePolicy=closed", props)
+                inputs = [p for p in props if p.startswith("DeviceAllow=") and "input" in p]
+                self.assertEqual(inputs, ["DeviceAllow=char-input r"])
+
+    def test_a_profiles_groups_are_the_only_groups_a_game_gets(self):
+        # systemd adds every group the unit's user is a member of to the ones
+        # the unit names, so the game user must be a member of none.
+        lines = [line.split() for line in (ROOT / "services" / "mun-launchd" / "deploy" / "sysusers.conf")
+                 .read_text().splitlines() if line.strip() and not line.startswith("#")]
+        self.assertEqual([line for line in lines if line[0] == "m"], [], "no membership for mun-game")
+        created = {line[1] for line in lines if line[0] == "g"}
+        for profile, spec in launchd.PROFILES.items():
+            with self.subTest(profile):
+                props = launchd.unit_properties(profile, "s1", Path("/run/mun/launch/s1"))
+                groups = [p[len("SupplementaryGroups="):] for p in props if p.startswith("SupplementaryGroups=")]
+                self.assertEqual(sorted(groups), sorted(spec["groups"]))
+                self.assertLessEqual(set(groups), created, "a group a profile names must exist on the console")
+        self.assertEqual(launchd.PROFILES["linux-arm64-v0"]["groups"], ("video", "input"))
+
+    def test_shared_memory_and_ipc_are_the_sessions_own_and_bounded_in_both_profiles(self):
+        def size(text):
+            return int(text[:-1]) * {"M": 1 << 20, "G": 1 << 30}[text[-1]]
+        for profile in launchd.PROFILES:
+            with self.subTest(profile):
+                props = launchd.unit_properties(profile, "s1", Path("/run/mun/launch/s1"))
+                self.assertIn("PrivateIPC=yes", props, "System V IPC and POSIX message queues end with the session")
+                (shm,) = [p for p in props if p.startswith("TemporaryFileSystem=")]
+                path, _, options = shm[len("TemporaryFileSystem="):].partition(":")
+                options = dict(option.partition("=")[::2] for option in options.split(","))
+                self.assertEqual(path, "/dev/shm")
+                self.assertEqual(options["mode"], "1777", "the game user must be able to shm_open")
+                self.assertIn("nosuid", options); self.assertIn("nodev", options)
+                self.assertNotIn("noexec", options, "as the system's own /dev/shm: engines map code from it")
+                (memory,) = [p[len("MemoryMax="):] for p in props if p.startswith("MemoryMax=")]
+                self.assertLess(size(options["size"]), size(memory), "fills up before the session's memory does")
 
     def test_unknown_profile_is_refused_before_a_unit_exists(self):
         with self.assertRaises(RuntimeError):
@@ -562,19 +634,32 @@ class ContentAccessTests(unittest.TestCase):
         self.assertEqual(h.m.state, "starting")
         self.assertEqual(h.m.session["content"], self.GRANT)
         props = launchd.unit_properties("linux-arm64-gl-v0", sid, Path("/run/mun/launch") / sid, h.m.session["content"])
-        self.assertIn("MountImages=-/dev/vdc:/run/mun/card:root:ro,nosuid,nodev,noexec", props)
+        self.assertIn("MountImages=-/dev/vdc:/run/mun/card:root:ro,nosuid,nodev,noexec,errors=remount-ro", props)
         self.assertIn("DeviceAllow=/dev/vdc r", props)
         self.assertIn("DevicePolicy=closed", props)
         env = launchd.unit_environment("linux-arm64-gl-v0", sid, h.m.session, Path("/x"))
         self.assertEqual(env["MUN_CONTENT_DIR"], "/run/mun/card/content")
         self.assertEqual(env["NEPTUNE_CONTENT_DIR"], env["MUN_CONTENT_DIR"])
 
+    def test_the_games_mount_of_the_card_never_takes_its_error_policy_from_the_card(self):
+        # ext4 acts on a file system error as the card's own superblock says
+        # unless the mount says otherwise, and a card can say "panic".
+        for profile in launchd.PROFILES:
+            with self.subTest(profile):
+                props = launchd.unit_properties(profile, "s1", Path("/run/mun/launch/s1"), self.GRANT)
+                (mount,) = [p for p in props if p.startswith("MountImages=")]
+                options = mount.rsplit(":", 1)[1].split(",")
+                self.assertEqual([o for o in options if o.startswith("errors=")], ["errors=remount-ro"])
+                for kept in ("ro", "nosuid", "nodev", "noexec"):
+                    self.assertIn(kept, options)
+
     def test_copy_access_has_no_mount_and_no_content_variable(self):
         h = Harness(game_card())
         reply = h.m.launch({"slot": "c1", "serial": "NPT-game", "version": "0.1.0"}); h.pump()
         self.assertIsNone(h.m.session["content"])
         props = launchd.unit_properties("linux-arm64-v0", reply["session"], Path("/x"), None)
-        self.assertFalse(any(p.startswith("MountImages=") or p.endswith(" r") for p in props))
+        self.assertFalse(any(p.startswith("MountImages=") or (p.startswith("DeviceAllow=/dev/") and p.endswith(" r"))
+                             for p in props), "no mount of the card and no access to its device")
         env = launchd.unit_environment("linux-arm64-v0", reply["session"], h.m.session, Path("/x"))
         self.assertNotIn("MUN_CONTENT_DIR", env); self.assertNotIn("NEPTUNE_CONTENT_DIR", env)
 
@@ -837,7 +922,7 @@ class CleanupUnitTests(unittest.TestCase):
         self.assertFalse([p for p in props if p.startswith("ExecStopPost")], "nothing runs in the game's mount namespace at stop")
         self.assertIn("OnSuccess=mun-launch-cleanup@s9.service", props)
         self.assertIn("OnFailure=mun-launch-cleanup@s9.service", props)
-        for kept in ("MountImages=-/dev/vdc:/run/mun/card:root:ro,nosuid,nodev,noexec", "NoNewPrivileges=yes",
+        for kept in ("MountImages=-/dev/vdc:/run/mun/card:root:ro,nosuid,nodev,noexec,errors=remount-ro", "NoNewPrivileges=yes",
                      "CapabilityBoundingSet=", "ProtectSystem=strict", "PrivateNetwork=yes", "DevicePolicy=closed",
                      "DeviceAllow=/dev/vdc r", "ReadWritePaths=/run/mun/launch/s9/work", "RestrictNamespaces=yes"):
             self.assertIn(kept, props)
@@ -853,6 +938,52 @@ class CleanupUnitTests(unittest.TestCase):
             self.assertNotIn(absent + "=", unit)
         # Installed by the staging script the image build runs.
         self.assertIn("mun-launch-cleanup@.service", (self.DEPLOY / "stage.sh").read_text())
+
+
+def unit_file(name: str) -> dict:
+    """A unit file of deploy/ as {section: [(key, value), ...]}."""
+    sections, current = {}, None
+    for line in (ROOT / "services" / "mun-launchd" / "deploy" / name).read_text().splitlines():
+        line = line.strip()
+        if line.startswith("[") and line.endswith("]"):
+            current = sections.setdefault(line[1:-1], [])
+        elif line and not line.startswith("#") and current is not None:
+            key, _, value = line.partition("=")
+            current.append((key, value))
+    return sections
+
+
+class LauncherUnitTests(unittest.TestCase):
+    """While a game runs, the launcher is what ends the session when the card
+    goes and what brings the shell back: its unit may never stay stopped."""
+
+    def test_the_launcher_is_restarted_however_often_and_however_it_ended(self):
+        unit = unit_file("mun-launchd.service")
+        service = dict(unit["Service"])
+        self.assertEqual(service["Restart"], "always")
+        self.assertIn(("StartLimitIntervalSec", "0"), unit["Unit"],
+                      "no start limit: five quick failures must not leave the console without a launcher")
+        self.assertNotIn("StartLimitIntervalSec", service, "systemd reads it in [Unit] only")
+        self.assertGreaterEqual(float(service["RestartSec"]), 1, "a launcher that keeps failing must not spin")
+        self.assertLessEqual(float(service["RestartSec"]), launchd.READER_GRACE,
+                             "and a running game is not left unsupervised for long")
+
+    def test_the_launcher_has_a_memory_ceiling_far_above_its_own_needs(self):
+        # The largest save envelope a card may hold is read, parsed and its
+        # units checked in under 200 MiB (tests/test_launchd_input.py); the
+        # ceiling is a backstop for what no test foresaw, never a limit a
+        # legitimate card reaches.
+        service = dict(unit_file("mun-launchd.service")["Service"])
+        self.assertEqual(service.get("MemoryMax"), "512M")
+        self.assertNotIn("MemoryHigh", service, "throttled, it would stall the game it supervises")
+
+    def test_a_failure_still_brings_the_shell_back(self):
+        unit = unit_file("mun-launchd.service")
+        self.assertIn(("OnFailure", "mun-shell-restore.service"), unit["Unit"])
+        # Going straight back to "activating" would skip the failed state that triggers it.
+        self.assertNotEqual(dict(unit["Service"]).get("RestartMode", "normal"), "direct")
+        restore = dict(unit_file("mun-shell-restore.service")["Service"])
+        self.assertEqual(restore["ExecStart"], "/usr/local/libexec/mun-launch-cleanup --restore-only")
 
 
 class CardRecordsCliTests(unittest.TestCase):

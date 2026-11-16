@@ -33,12 +33,30 @@ What each host changes (`host.py`):
 | Window | `cocoa` | `gtk`, else `sdl` | `gtk`, else `sdl` |
 | Audible sound | `coreaudio` | `pipewire`, `pa`, `alsa`, `sdl` | `dsound`, `sdl` |
 | Background start | `-daemonize` | `-daemonize` | detached process; its output in `qemu.log` |
-| QMP and qemu-ga | UNIX sockets | UNIX sockets | loopback TCP ports chosen at start, in `control.json` |
+| QMP and qemu-ga | UNIX sockets | UNIX sockets | UNIX sockets in `%LOCALAPPDATA%\mun\sockets\` (Windows 10 version 1803 or later) |
 
 `MUN_VM_ACCEL=tcg` forces emulation on any host; `MUN_VM_FIRMWARE` names the
 firmware file; on Windows `MUN_QEMU_DIR` names QEMU's directory when it is
-neither on `PATH` nor in `Program Files\qemu`. On Windows the loopback ports have no file permissions: while
-a guest runs, any program of the computer could connect to them.
+neither on `PATH` nor in `Program Files\qemu`.
+
+Whoever connects to QMP drives the guest (keys, cards, commands as root in
+it) and, since QMP makes QEMU open and write files, acts on the host with the
+rights of the user who started the guest. So both control channels, QMP and
+qemu-ga, are UNIX sockets on every host, and a socket's file decides who may
+connect. On macOS and Linux they are in the guest's directory, or in a
+directory of the user alone when that path is too long. On Windows they are
+always in the user's own `%LOCALAPPDATA%\mun\sockets\`, closed to other users
+by default, whatever folder the checkout is in: Windows has AF_UNIX since
+Windows 10 version 1803, QEMU listens on it there, and the tools connect to it
+through Winsock, since Python's own socket module has none there. QEMU reads
+its command line in the system's code page and the tools address the socket
+in UTF-8, so the path must be plain ASCII: a profile folder outside ASCII
+(`C:\Users\Iván`) is reached by its short 8.3 name, and where the volume
+keeps none the tools say so and stop.
+
+A path of a guest's or a builder's files that contains a comma is refused
+before QEMU is started: QEMU's options are comma-separated fields and would
+cut the path there. Keep the checkout in a directory without one.
 
 ## Build and run
 
@@ -70,8 +88,12 @@ qcow2 build.
 - **No network interface** (`-nic none`): the guest has only `lo`. There is
   no SSH server and nothing is downloaded at boot.
 - **qemu-ga, QEMU's guest-side control daemon**, listens on a virtio-serial
-  port, `.local/mun/guests/<name>/qga.sock` on the host (or a short private
-  directory when that path is too long for a UNIX socket). `run`, the logs,
+  port, `.local/mun/guests/<name>/qga.sock` on the host. When that path is
+  too long for a UNIX socket, the control sockets go to a short directory
+  under the temporary one, `mun-<uid>/<hash>`, which must be this user's
+  own and closed to everybody else (new ones are made 0700; a link, another
+  owner or an open mode is refused with what was found: whoever connects to
+  QMP runs commands as the user who started the guest). `run`, the logs,
   `probe`, `card-detach` (the safe release) and the card watcher use it; it
   answers one client at a time, under `qga.lock`. It is development access,
   present only in the development image ([image build](../os/README.md)).
@@ -79,6 +101,17 @@ qcow2 build.
   serial prefix the card service accepts.
 - `start --print-command` shows the exact QEMU command. `destroy --yes`
   removes the guest's disk and identity; its build and the cards stay.
+- A guest is running when the process `qemu.pid` names is alive and is this
+  guest's QEMU: its command line names this guest's pid file (read from
+  `/proc` on Linux and with `ps` on macOS; where it cannot be read, a live
+  process counts). A `qemu.pid` left behind by a host that went down, whose
+  number now belongs to another process, is therefore not a running guest:
+  `start` goes ahead, and `stop` removes the file and says so.
+- A console left alone on its menus turns itself off: after one hour
+  without input by default (Settings › System › Auto power off: Never, or
+  after 1, 3 or 6 hours), QEMU exiting with it. The time does not count
+  while a game runs. An experiment that leaves a guest idle for longer sets
+  it to Never first.
 
 ## Console session
 
@@ -86,7 +119,7 @@ qcow2 build.
 ./mun dev run --window           # boots the console with a window on this computer; foreground
 ./mun vm send-key right ret esc  # inject keys through the virtual USB keyboard (QEMU qcode names)
 ./mun vm send-mouse 0.5 0.5 --click   # pointer as fractions of the display
-./mun vm screenshot --name home.png   # the framebuffer, into the guest's screens/
+./mun vm screenshot --name home.png   # the framebuffer, into the guest's screens/ (a file name: letters, digits, . _ -)
 ./mun vm shell-log               # journal of the shell service; also launchd-log, cardd-log
 ```
 
@@ -161,6 +194,12 @@ Rules the tool enforces:
   it; otherwise the card service stops accepting writes, finishes the one in
   flight, unmounts and reports, and only then the device is unplugged.
   `card-detach --abrupt` skips all of that to simulate pulling the card.
+  The guest does not lose the card at the moment of the command: the
+  virtual PCIe slot counts about five seconds first, as after its attention
+  button (measured: asked at 15:52:40, the device gone in the guest at
+  15:52:45). A fault experiment that must pull the card at a given moment,
+  during a save for instance, asks that much earlier, or widens the window
+  with the card service's `MUN_CARDD_SAVE_DELAY`.
 
 ## MUN Shape preview
 
@@ -184,6 +223,12 @@ laboratory, through the real card service and shell
   v0.1.0-dev.2 shows no MUN Shape); a guest of one is refused and left as it
   is, with the way to one that shows it: `--guest NAME` for a new guest from
   the latest build, or `./mun dev vm NAME destroy --yes`.
+  Builds of this source also record, beside `format`, the minor version and
+  the revision of the Shape motion draft their shell plays (`"minor": 1,
+  "motion": {"draft": 1}`; `./mun dev list` says `with motion (draft 1)`).
+  A package with motion on a guest whose build plays none, or another
+  revision, is a warning, not a refusal: that console shows the package's
+  v1 look, and the preview says so before it starts and with each card.
 - The card is MUN Collect from that build with the package
   (`mun-card create --variant game --shape`), or, with `--base`, a copy of a
   card from `.local/gamecards/`, cloned and given the package with debugfs;
@@ -245,7 +290,7 @@ short tap: `send-key esc --hold 150` holds the key longer.
 | Display / input | `virtio-gpu-pci`; the development image gives it the EDID of a display that prefers 1920×1080 and takes 2560×1440 and 1280×720 (`drm.edid_firmware`, `os/builder/lab_edid.py`), so the shell's Resolution setting and the games see those modes as a television's; the window and screenshots follow the mode; `qemu-xhci` with `usb-kbd` and `usb-tablet`; `-display none` in the background, captured with QMP `screendump` |
 | Sound | `virtio-sound-pci`, playback only; backend `none`, `wav`, `off` or one of the host's audible ones |
 | Network | none |
-| Control | QMP and qemu-ga UNIX sockets in `.local/mun/guests/<name>/` (loopback ports on Windows); serial console to `console.log` there |
+| Control | QMP and qemu-ga UNIX sockets in `.local/mun/guests/<name>/`, or in a directory of the user alone when that path is too long (on Windows, always in the user's own `%LOCALAPPDATA%\mun\sockets\`); serial console to `console.log` there |
 
 Generated files live under `.local/mun/` and `.local/gamecards/`, both ignored
 by Git. Never point the tool at a host physical disk; card images are plain
@@ -270,8 +315,11 @@ files.
   it checks the actual QEMU device/node state and completes delayed cleanup.
   A busy PCIe transition can reject an immediate removal after insertion; the
   error retains state, so retry once the guest finishes the transition.
-- `card-create --force` rejects cards recorded as attached. Card paths must be
-  regular image files, not symlinks or host devices.
+- `card-create --force` rejects a card the attach registry records as
+  attached to any running guest, not only to its own, under the registry's
+  lock; `mun-card create --force` asks the same registry. A stale record of
+  a QEMU that is gone blocks neither. Card paths must be regular image
+  files, not symlinks or host devices.
 
 ## Regression checks
 

@@ -87,6 +87,7 @@ QtObject {
             "card_in_use": "A game session is using the card.",
             "busy": "A game is already running.",
             "reader_unavailable": "The card reader is not available.",
+            "launcher_unavailable": "The console lost contact with its launcher. Try again in a moment.",
             "card_mismatch": "The card changed. Try again.",
             "not_runnable": "The card has no game this console can run.",
             "prepare_failed": "The game could not be prepared."
@@ -131,8 +132,13 @@ QtObject {
             return ""
         if (spanish)
             return saves.message || ""
-        if (!saves.ok)
-            return "The latest progress was not saved on the Game Card."
+        if (!saves.ok) {
+            // The card left during play: the launcher's words give the time
+            // of the last save the card holds, and nothing else carries it.
+            const held = /posteriores a las (\d{1,2}:\d{2})/.exec(saves.message || "")
+            return held ? "Progress after " + held[1] + " was not saved on the Game Card."
+                        : "The latest progress was not saved on the Game Card."
+        }
         return saves.synced_at ? "Progress saved on the Game Card." : ""
     }
 

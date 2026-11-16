@@ -1,0 +1,231 @@
+#!/usr/bin/python3 -I
+"""Development image for a board (profile q6a-dev): one line per boot about
+how the console started, kept on the board for whoever supports it over the
+network (ssh root@BOARD /usr/lib/mun/board-report):
+
+    board-report record    appends this boot's line to
+                           /var/lib/mun-board-diag/boots.jsonl (the newest
+                           500 kept) and writes it to the journal; run 90 s
+                           after boot by mun-board-diag-boot.service
+    board-report [N]       prints the newest N boots (10), oldest first
+    board-report --json [N]  the same lines as they are kept
+
+A line (JSON) has: when it was recorded, by the board's clock (which has no
+battery: without a time server it starts from an old time at every boot);
+the boot's number (board-diag's count) and id; systemd's times for the
+firmware, the loader, the kernel, the initrd and userspace; when the audio
+DSP came up, when its services reached Linux, when its link was reset (if
+it was), when its sound card was there, when the HDMI route was set (or
+found set) or that it was not; when the shell started, when it opened the
+sound device and when the device first played at its rate, how long its
+start-up waited for the sound device, when the start-up began and which
+clock its picture followed; the units that
+failed; the wired address. Times are seconds since the kernel started.
+
+Every value comes from a query (systemd-analyze, journalctl, systemctl, ip)
+and a query either answered or did not. One that did not (a command that
+fails, is missing or does not answer within BOARD_REPORT_TIMEOUT seconds;
+its partial output is not used) leaves its values out and is named, with
+why, under "incomplete"; "evidence" is then "incomplete" instead of
+"complete", and `record` exits 2 after keeping the line. So a value that is
+missing from a complete line did not happen (or was not logged); "failed":
+[] means systemctl answered that no unit failed, and "failed": null that it
+could not be asked.
+
+BOARD_REPORT_STATE (the directory of boots.jsonl and of board-diag's count)
+and BOARD_REPORT_BOOT_ID (the file of the boot's id) replace their places,
+for tests.
+"""
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+
+STATE = os.environ.get("BOARD_REPORT_STATE", "/var/lib/mun-board-diag")
+BOOT_ID = os.environ.get("BOARD_REPORT_BOOT_ID", "/proc/sys/kernel/random/boot_id")
+LOG = os.path.join(STATE, "boots.jsonl")
+KEEP = 500
+TIMEOUT = float(os.environ.get("BOARD_REPORT_TIMEOUT", "30"))
+
+# (key, unit or None for the kernel, pattern): the first match of each.
+EVENTS = [
+    ("dsp_up", None, r"remote processor adsp is now up"),
+    ("dsp_services", None, r"Adding APR/GPR dev: gprsvc:service:2:1"),
+    ("dsp_link_reset", "mun-board-audio.service", r"resetting Linux's end of its QRTR link"),
+    ("audio_card", "mun-board-audio.service", r"the card \S+ is there"),
+    ("audio_route", "mun-board-audio.service", r"HDMI audio route (already )?set"),
+    ("audio_failed", "mun-board-audio.service", r"did not appear"),
+    ("shell_started", "mun-shell.service", r"^Started mun-shell\.service"),
+    ("sound_device", "mun-shell.service", r"the sound device came"),
+    ("sound_opened", "mun-shell.service", r"sound: the device opened at"),
+    ("sound_playing", "mun-shell.service", r"sound: the device plays at its rate"),
+    ("startup_began", "mun-shell.service", r"start-up: the picture (follows the sound|runs on its own)"),
+]
+
+
+def query(*command):
+    """(output, None) when the command answered: exit 0 within TIMEOUT; or
+    (None, why not), in one short line."""
+    name = command[0]
+    try:
+        done = subprocess.run(command, capture_output=True, text=True, timeout=TIMEOUT)
+    except FileNotFoundError:
+        return None, f"{name}: not found"
+    except subprocess.TimeoutExpired:
+        return None, f"{name}: no answer within {TIMEOUT:g} s"
+    except OSError as error:
+        return None, f"{name}: {error.strerror or error}"
+    if done.returncode != 0:
+        said = (done.stderr.strip() or done.stdout.strip()).splitlines()
+        return None, f"{name}: exit {done.returncode}" + (f": {said[-1][:160]}" if said else "")
+    return done.stdout, None
+
+
+def journal(*selection):
+    """This boot's entries, [(seconds since the kernel started, message)],
+    or (None, why not). The kernel's own time where the entry has it
+    (messages printed before the journal started are received later)."""
+    output, why = query("journalctl", "-b", "-o", "json", "--no-pager", *selection)
+    if output is None:
+        return None, why
+    entries = []
+    for line in output.splitlines():
+        try:
+            entry = json.loads(line)
+            message = entry.get("MESSAGE")
+            if isinstance(message, list):  # not text: journald keeps bytes
+                message = bytes(message).decode("utf-8", "replace")
+            at = entry.get("_SOURCE_MONOTONIC_TIMESTAMP") or entry["__MONOTONIC_TIMESTAMP"]
+            entries.append((int(at) / 1e6, message or ""))
+        except (ValueError, KeyError, TypeError):
+            continue
+    return entries, None
+
+
+def record():
+    line = {"recorded": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
+    incomplete = {}
+    try:
+        line["boot"] = open(BOOT_ID).read().strip().replace("-", "")[:8]
+    except OSError as error:
+        line["boot"] = None
+        incomplete["boot"] = f"{BOOT_ID}: {error.strerror or error}"
+    try:
+        current = open(os.path.join(STATE, "current")).read().split()
+        if line["boot"] and current and current[0] == line["boot"]:
+            line["number"] = int(current[1])
+    except (OSError, IndexError, ValueError):
+        pass  # board-diag did not count this boot: no number, not an error of this report
+
+    analyze, why = query("systemd-analyze", "time")
+    if analyze is None:
+        incomplete["boot_times"] = why
+    else:
+        for part in ("firmware", "loader", "kernel", "initrd", "userspace"):
+            found = re.search(r"([0-9.]+)(ms|s|min) \(" + part + r"\)", analyze)
+            if found:
+                value = float(found.group(1)) * {"ms": 0.001, "s": 1, "min": 60}[found.group(2)]
+                line[part] = round(value, 2)
+
+    sources = {None: journal("-k")}
+    for unit in sorted({u for _, u, _ in EVENTS if u}):
+        sources[unit] = journal("-u", unit)
+    for source, (entries, why) in sources.items():
+        if entries is None:
+            incomplete[f"journal {source or 'kernel'}"] = why
+    for key, unit, pattern in EVENTS:
+        for at, message in sources[unit][0] or []:
+            if re.search(pattern, message):
+                line[key] = round(at, 2)
+                if key == "startup_began":
+                    line["startup_clock"] = "sound" if "follows the sound" in message else "own"
+                break
+    for at, message in sources["mun-shell.service"][0] or []:
+        waited = re.search(r"start-up: waited ([0-9.]+) s for the sound device: (.*)", message)
+        if waited:
+            line["startup_waited"] = float(waited.group(1))
+            line["startup_wait"] = waited.group(2)
+            break
+
+    failed, why = query("systemctl", "--failed", "--plain", "--no-legend", "--no-pager")
+    if failed is None:
+        line["failed"] = None
+        incomplete["failed units"] = why
+    else:
+        line["failed"] = [f.split()[0] for f in failed.splitlines() if f.strip()]
+    addresses, why = query("ip", "-4", "-o", "addr", "show", "scope", "global")
+    if addresses is None:
+        line["address"] = None
+        incomplete["address"] = why
+    else:
+        address = re.search(r"inet ([0-9.]+)/", addresses)
+        line["address"] = address.group(1) if address else None
+
+    line["evidence"] = "incomplete" if incomplete else "complete"
+    if incomplete:
+        line["incomplete"] = incomplete
+    os.makedirs(STATE, exist_ok=True)
+    try:
+        kept = open(LOG).read().splitlines()[-(KEEP - 1):]
+    except OSError:
+        kept = []
+    text = json.dumps(line, separators=(",", ":"))
+    with open(LOG + ".new", "w") as f:
+        f.write("\n".join(kept + [text]) + "\n")
+    os.replace(LOG + ".new", LOG)
+    print("board-report: " + text)
+    if incomplete:
+        print("board-report: the evidence is incomplete: "
+              + "; ".join(f"{part}: {why}" for part, why in incomplete.items()), file=sys.stderr)
+        return 2
+    return 0
+
+
+def show(count, raw):
+    try:
+        lines = open(LOG).read().splitlines()[-count:]
+    except OSError:
+        print("board-report: no boot recorded yet")
+        return
+    if raw:
+        print("\n".join(lines))
+        return
+    columns = [("number", "boot"), ("firmware", "fw"), ("kernel", "kern"), ("initrd", "initrd"),
+               ("userspace", "user"), ("dsp_up", "dsp"), ("dsp_link_reset", "reset"), ("audio_card", "card"),
+               ("audio_route", "audio"), ("shell_started", "shell"), ("sound_opened", "opened"),
+               ("sound_playing", "playing"), ("startup_waited", "waited"), ("startup_began", "intro"),
+               ("startup_clock", "clock")]
+    print(" ".join(f"{title:>7}" for _, title in columns) + "  failed / evidence")
+    for text in lines:
+        try:
+            line = json.loads(text)
+        except ValueError:
+            continue
+        cells = []
+        for key, _ in columns:
+            value = line.get(key)
+            if key == "audio_route" and value is None and "audio_failed" in line:
+                value = "FAILED"
+            cells.append(f"{'-' if value is None else value:>7}")
+        failed = line.get("failed")
+        tail = "?" if failed is None else (",".join(failed) or "-")
+        # Lines kept before the report said how complete they were.
+        if line.get("evidence", "complete") != "complete":
+            tail += "  INCOMPLETE: " + ", ".join(line.get("incomplete") or {})
+        print(" ".join(cells) + "  " + tail)
+
+
+def main(argv):
+    if argv[1:2] == ["record"]:
+        return record()
+    raw = "--json" in argv
+    rest = [a for a in argv[1:] if a != "--json"]
+    count = int(rest[0]) if rest and rest[0].isdigit() else 10
+    show(count, raw)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

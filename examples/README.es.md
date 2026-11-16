@@ -17,7 +17,9 @@ bibliotecas de la propia imagen y los deja en
 
 - [`shape`](shape/README.es.md): dos paquetes de MUN Shape, `sea` y
   `paper`, dibujados y sintetizados por un script de aquí; el mismo contrato,
-  dos identidades distintas ([docs/shape.md](../docs/shape.md), en inglés).
+  dos identidades distintas ([docs/shape.md](../docs/shape.md), en inglés). Y
+  `reef`, una plantilla del movimiento de Shape (un borrador), con la escena
+  3D y el horneado que la hacen.
 
 Un juego que este repositorio no lleva, como la adaptación de uno que posees,
 se compila a partir de una receta que guardas fuera

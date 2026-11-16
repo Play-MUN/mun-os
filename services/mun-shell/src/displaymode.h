@@ -15,10 +15,25 @@
 // or loses power, the next one uses the previous choice. The shell asks the
 // player to keep it and restarts with the previous one if nobody answers.
 //
-// One display: the first connected connector of /dev/dri/card0, the device
-// the unit requires. Games set their own modes once the shell has released
-// the display.
+// One display: the first connected connector of /dev/dri/card0, the one
+// device Qt's framebuffer platform opens (displaydevice.h). The shell waits
+// for it before Qt starts (awaitDisplay). Games set their own modes once the
+// shell has released the display.
+//
+// The signal is set here too, before Qt opens the display: the board's cap
+// on bits per channel (MUN_DISPLAY_MAX_BPC) and the player's colour range
+// (Settings › Display › Colour range: automatic, full or limited), as
+// displaydevice.h describes. A change of range restarts the shell, as a
+// change of resolution does, without a trial: every range shows a picture.
+//
+// A board's image may cap the first mode under Automatic: MUN_DISPLAY_MAX
+// ("1920x1080@60") in the unit's environment. The shell then starts in the
+// mode displaydevice.h's chooseMode() picks, asked of Qt as that mode's own
+// modeline, and logs the mode the display controller actually set
+// (reportApplied).
 #pragma once
+
+#include "displaydevice.h"
 
 #include <QSettings>
 #include <QString>
@@ -34,15 +49,35 @@ extern const QStringList kModes;
 
 struct Plan {
     QString connector;    // Qt's name of the output, "HDMI1", "Virtual1"; empty without a display
+    QString output;       // the kernel's name of the same connector, "HDMI-A-1"
+    QString requested;    // the mode this start asked for, as the log words it
     QString preferred;    // the display's own mode, "1920x1080"; empty when unknown
     QStringList offered;  // the modes of kModes this display takes
     QString active = QStringLiteral("auto");  // what this start asked for: "auto" or a mode
     bool trial = false;   // `active` is on trial: kept only if the player confirms it
-    QString resume;       // where the previous start asked this one to return: "resolution", "reset" or ""
+    QString range = QStringLiteral("auto");   // the colour range this start set: "auto", "full" or "limited"
+    QString resume;       // where the previous start asked this one to return: "resolution", "range", "reset" or ""
 };
 
+// The board's cap on bits per channel (MUN_DISPLAY_MAX_BPC), set on card0's
+// connected outputs and nothing else: for the system to run before anything
+// is on screen (`mun-shell --cap-display`, deploy/mun-standby). Setting the
+// cap reconfigures the display's link, and a display goes dark for a moment
+// while it follows; done by prepare() at the shell's start, that moment came
+// with the standby picture already shown. What is set stays in the display's
+// state, so prepare() then finds the cap in place and changes nothing. Never
+// fails the caller: returns 0, and says what it did.
+int capLink();
+
+// Waits up to MUN_DISPLAY_WAIT_SECONDS (30 by default) for a usable display
+// on card0, when Qt will draw through the framebuffer platform on DRM; true
+// at once for any other platform. Logs what it found, or what there is when
+// nothing is usable: the caller then exits with kNoDisplayStatus. Call
+// before prepare().
+bool awaitDisplay();
+
 // Reads the choice from `settings` (and consumes a trial), reads the display
-// from sysfs, and prepares Qt's platform for the mode: QT_QPA_KMS_CONFIG,
+// (sysfs, and its modes through libdrm), and prepares Qt's platform for the mode: QT_QPA_KMS_CONFIG,
 // written to the runtime directory, and QT_SCALE_FACTOR, unless the
 // environment already sets it. Only for linuxfb or eglfs; any other platform
 // (a desktop during development) gets its defaults. Call once, before
@@ -52,11 +87,17 @@ void prepare(QSettings &settings);
 // What prepare() decided; the defaults when it has not run.
 const Plan &plan();
 
+// Logs the mode the display controller is in once Qt has opened the display,
+// against the one requested; a difference is logged as an error. Call right
+// after QGuiApplication exists.
+void reportApplied();
+
 // Asks the next start to return to `where` (see Plan::resume).
 void setResume(const QString &where);
 
 // The settings keys, shared with ShellSettings.
 extern const QString kResolutionKey;
 extern const QString kTrialKey;
+extern const QString kRangeKey;
 
 } // namespace display

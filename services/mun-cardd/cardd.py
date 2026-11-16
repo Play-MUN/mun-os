@@ -2,7 +2,9 @@
 """mun-cardd: detects lab Game Cards, validates them and tells the shell.
 
 Responsibilities (docs/game-cards.md): watch block devices, admit only virtio disks whose
-serial starts with `NPT-`, check the ext4 superblock, mount read-only under a
+serial starts with `NPT-` and, where the image names a board's card reader
+(`MUN_CARDD_SLOTS`), the whole card in that reader, check the ext4
+superblock, mount read-only under a
 service-chosen slot directory, validate with the shared `mun_card` package
 and publish state over a local UNIX socket. It never executes card content and
 writes to a card only for a save. For a valid card it also copies the card's
@@ -31,6 +33,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
@@ -44,10 +47,18 @@ from mun_card.source import DirectorySource  # noqa: E402
 from mun_card.validate import COVER_MAX_BYTES, SAVE_FORMATS, save_format, validate_card  # noqa: E402
 # The integrity rule of a directory save's payload, shared with the card tool's converter.
 from mun_card.saves import (FILES_PAYLOAD_MAX_FILES, SAVE_FILE_MAX_BYTES, SAVE_MAX_BYTES,  # noqa: E402,F401
-                           files_payload_problem, save_bounds)
+                           envelope_problem, files_payload_problem, parse_envelope, save_bounds)
 
 PROTOCOL = 1
 SERIAL_PREFIX = "NPT-"
+# A board's card readers, for a laboratory image that has one (a profile sets
+# it; none by default): sysfs paths of the reader's controller, without /sys,
+# separated by ':' (q6a-dev: /devices/platform/soc@0/8804000.mmc, the Dragon
+# Q6A's microSD slot). Only a whole disk under one of them is a card, named by
+# the card's own identity (its CID), so the console's other disks, the system's
+# among them, never are, whatever the device policy lets this service open.
+SLOTS = tuple(path.strip("/") for path in os.environ.get("MUN_CARDD_SLOTS", "").split(":") if path.strip("/"))
+SYS_ROOT = Path("/sys")
 MOUNT_ROOT = Path(os.environ.get("MUN_CARDD_MOUNT_ROOT", "/run/mun/cards"))
 SOCKET_PATH = Path(os.environ.get("MUN_CARDD_SOCKET", "/run/mun/cardd.sock"))
 SOCKET_GROUP = os.environ.get("MUN_CARDD_SOCKET_GROUP", "mun-shell")
@@ -59,7 +70,18 @@ STAGE_MAX_BYTES = 64 * 1024 * 1024
 # a card that needs recovery is rejected before mounting, so nothing is ever
 # replayed implicitly. For one save the card is remounted rw and back; a mount
 # with `noload` cannot do that with journaling, which is why it is gone.
-MOUNT_OPTIONS = "ro,nosuid,nodev,noexec"
+#
+# The error policy is the console's, never the card's: without `errors=` ext4
+# takes it from the card's superblock, where `panic` stops the kernel at the
+# first damaged inode it reads, read-only mounts included. `remount-ro` and
+# not `continue`: read-only, the two act alike (the read fails and the card is
+# reported invalid); in a save's read-write window `remount-ro` stops every
+# write at the first inconsistency, so the save fails and says so, where
+# `continue` would go on writing to, and could confirm a save on, a filesystem
+# the kernel has just found damaged. Every mount and remount names it, so what
+# holds never depends on which options a remount keeps.
+MOUNT_FLAGS = "nosuid,nodev,noexec,errors=remount-ro"
+MOUNT_OPTIONS = "ro," + MOUNT_FLAGS
 LAUNCH_ROOT_PREFIX = "/run/mun/launch/"   # the only place a staged copy or save may go
 PAYLOAD_OWNER_UID = 0                          # a directory-save payload file is the launcher's (root)
 # Directory saves (docs/saves.md): the card declares the bound on the raw files;
@@ -80,10 +102,35 @@ SHAPE_NOTES_MAX = 32              # notes carried in the card record; all are in
 # Lab hook: seconds of pause before each chunk, so removal and release during
 # a copy can be exercised. The pause ends at once if the copy is cancelled.
 SHAPE_DELAY = float(os.environ.get("MUN_CARDD_SHAPE_DELAY", "0") or 0)
+# Seconds between attempts to return to read-only a card that a save had to
+# leave writable (CardManager._close_card). One `mount` call each, for as
+# long as the card is in and writable.
+READ_ONLY_RETRY = 5.0
 
 
 def log(message: str) -> None:
-    print(message, flush=True)
+    # A line may quote a card or a request, and JSON can spell a code point
+    # that UTF-8 cannot carry (a lone surrogate): it is written as "?", so
+    # that saying what happened never raises.
+    print(message.encode("utf-8", "replace").decode("utf-8"), flush=True)
+
+
+def guarded(what: str, work: Callable[[], object]) -> bool:
+    """Run one piece of the event loop's work: a scheduled callback, one
+    connection's event, a rescan.
+
+    Cards, requests and the platform are not under the service's control,
+    and the service holds what a running game needs: its card's insertion
+    and its saves. Whatever one piece of work raises is therefore that
+    piece's failure, logged once with its traceback, and never the loop's:
+    a restarted service would give the card a new insertion and the session
+    in course could no longer save. Returns False if the work raised."""
+    try:
+        work()
+        return True
+    except Exception:  # noqa: BLE001 - the point: nothing unforeseen ends the service
+        log(f"internal error in {what}; the service goes on\n{traceback.format_exc().rstrip()}")
+        return False
 
 
 # ------------------------------------------------------------------ state model
@@ -109,6 +156,11 @@ class Card:
     release_reply: Optional[Callable[[dict], None]] = None
     release_timer: int = 0       # bumps per release; a deadline for an earlier one does nothing
     release_armed: bool = False  # this release's deadline for the Shape copy is set
+    # Mounted read-write: set by a save for its write and cleared by the
+    # remount to read-only that ends it. Still set once the save is over, that
+    # remount was refused and is owed (CardManager._close_card).
+    writable: bool = False
+    closing: bool = False        # a retry of that remount is scheduled
     # MUN Shape: the record published with the card, and this insertion's copy.
     shape: Optional[dict] = None
     export: Optional["ShapeExport"] = None
@@ -134,6 +186,14 @@ class CardManager:
         self.publish = publish
         self.schedule = schedule      # runs a callable on the manager thread later
         self.cards: Dict[str, Card] = {}   # keyed by device name
+        # Cards refused or gone whose unmount could not even start, by slot
+        # (_unmount_or_owe); a gone card is kept here alone. They are tried
+        # again by the service's loop (retry_unmounts), which needs no
+        # thread: what stopped the unmount stops new threads too.
+        self.unmounts_owed: Dict[str, Card] = {}
+        self._next_unmount_try = 0.0
+        # Timers that could not start a thread (_timer), for the loop.
+        self._due: List["tuple[float, Callable[[], None]]"] = []
         self._slot_counter = 0
         # MUN Shape export, off unless a root is given (main() gives SHAPE_ROOT).
         # `later(seconds, fn)` runs fn on the manager thread after a delay;
@@ -148,7 +208,23 @@ class CardManager:
     def _timer(self, seconds: float, fn: Callable[[], None]) -> None:
         timer = threading.Timer(seconds, lambda: self.schedule(fn))
         timer.daemon = True
-        timer.start()
+        try:
+            timer.start()
+        except RuntimeError as exc:
+            # No thread to be had (the service's task limit): the service's
+            # loop, which wakes at least twice a second, runs it when due.
+            log(f"a timer could not start its thread ({exc}); the service's loop runs it when due")
+            self._due.append((time.monotonic() + seconds, fn))
+
+    def run_due(self, now: Optional[float] = None) -> None:
+        """Run the timers that could not have a thread of their own and are due
+        (_timer); called by the service's loop on every wake."""
+        now = time.monotonic() if now is None else now
+        due = [entry for entry in self._due if entry[0] <= now]
+        self._due = [entry for entry in self._due if entry[0] > now]
+        for _, fn in due:
+            # Each on its own: one that fails must not cost the others theirs.
+            guarded("a timer run by the loop", fn)
 
     # --- events from the platform ---------------------------------------------
     def device_added(self, device: str, serial: str, path: str) -> None:
@@ -173,7 +249,6 @@ class CardManager:
         if card is None:
             return
         card.generation += 1
-        self._drop_shape(card)
         if card.release_reply is not None:
             # A safe release that was waiting (for a save or the Shape copy):
             # the card went before it could finish, so this was not a safe
@@ -182,8 +257,10 @@ class CardManager:
             card.release_timer += 1
             reply({"type": "released", "ok": False, "slot": card.slot, "serial": card.serial,
                    "error": {"code": "card_removed", "message": "Se retiró la tarjeta antes de terminar la expulsión segura"}})
-        self.mounter.unmount(card)
+        # Said before the cleanup, which may lack a process or a thread.
         self.publish({"type": "removed", "slot": card.slot, "insertion": card.insertion, "device": device, "serial": card.serial})
+        self._drop_shape(card)
+        self._unmount_or_owe(card)
         if card.active:
             self._promote_waiting()
 
@@ -238,8 +315,19 @@ class CardManager:
                 outcome = {"ok": False, "error": exc.to_dict()}
             except OSError as exc:
                 outcome = {"ok": False, "error": {"code": "stage_failed", "message": "No se pudo copiar el ejecutable", "detail": str(exc)}}
+            except Exception as exc:  # noqa: BLE001 - a thread that dies answers nobody: the launcher would wait out its timeout
+                log(f"internal error staging from {slot}; the request fails and the service goes on\n"
+                    f"{traceback.format_exc().rstrip()}")
+                outcome = {"ok": False, "error": {"code": "stage_failed", "message": "No se pudo copiar el ejecutable",
+                                                  "detail": f"fallo interno ({type(exc).__name__})"}}
             self.schedule(lambda: reply({"type": "staged", "session": request.get("session"), **outcome}))
-        threading.Thread(target=work, name=f"stage-{slot}", daemon=True).start()
+        try:
+            threading.Thread(target=work, name=f"stage-{slot}", daemon=True).start()
+        except RuntimeError as exc:
+            # Answered now: otherwise the launcher would wait out its timeout.
+            log(f"staging from {slot} could not start its worker: {exc}")
+            reply({"type": "staged", "session": request.get("session"), "ok": False,
+                   "error": {"code": "stage_failed", "message": "No se pudo copiar el ejecutable", "detail": str(exc)}})
 
     def save(self, request: dict, reply: Callable[[dict], None]) -> None:
         """Write a game's save to the active card, on the launcher's authority (docs/saves.md).
@@ -263,7 +351,7 @@ class CardManager:
         if request.get("insertion") != card.insertion or request.get("serial") != card.serial \
                 or request.get("version") != info.get("version") or request.get("game") != info.get("id"):
             return fail("card_mismatch", "La tarjeta activa no es la de la sesión")
-        payload_max, _ = save_bounds(info)
+        payload_max, file_max = save_bounds(info)
         kind = request.get("payload_kind")
         if kind == "files":
             # Directory saves (docs/saves.md): the payload arrives as a root-owned file
@@ -285,8 +373,11 @@ class CardManager:
             if not isinstance(request.get("payload"), dict):
                 return fail("save_invalid", "La partida no es un objeto JSON")
             payload_obj = request["payload"]
-            payload = json.dumps(payload_obj, ensure_ascii=False, separators=(",", ":"))
-            if len(payload.encode("utf-8")) > payload_max:
+            try:
+                size = len(_save_bytes(payload_obj, separators=(",", ":")))
+            except CardError as exc:
+                return fail(exc.code, exc.message, exc.detail)
+            if size > payload_max:
                 return fail("save_too_large", "La partida supera el tamaño permitido", f"máximo {payload_max} bytes")
         else:
             return fail("save_invalid", "Tipo de partida desconocido", str(kind)[:40])
@@ -301,7 +392,17 @@ class CardManager:
                     "session": request.get("session"), "insertion": card.insertion, "payload": payload_obj}
         if kind == "files":
             envelope["payload_kind"] = "files"
-        data = (json.dumps(envelope, ensure_ascii=False) + "\n").encode("utf-8")
+        try:
+            data = _save_bytes(envelope) + b"\n"
+        except CardError as exc:       # a directory save's payload, or the session's name
+            return fail(exc.code, exc.message, exc.detail)
+        if len(data) > file_max:
+            # The bound the next launch reads with (_copy_save_out), on the
+            # bytes as they would be written: what is confirmed is read back
+            # whole. Sized so that no payload within its own limit meets it
+            # (mun_card.saves); refused here, before anything is written.
+            return fail("save_too_large", "La partida supera el tamaño permitido",
+                        f"ocuparía {len(data)} bytes en la tarjeta; máximo {file_max}")
         generation = card.generation
         card.saving = True
 
@@ -313,8 +414,22 @@ class CardManager:
                 outcome = {"ok": False, "error": exc.to_dict()}
             except OSError as exc:
                 outcome = {"ok": False, "error": {"code": "write_failed", "message": "No se pudo escribir la partida", "detail": str(exc)}}
+            except Exception as exc:  # noqa: BLE001 - a thread that dies would leave the card "saving" for good:
+                # no further save, and a safe release that waits for ever.
+                log(f"internal error saving to {card.slot}; the save fails and the service goes on\n"
+                    f"{traceback.format_exc().rstrip()}")
+                outcome = {"ok": False, "error": {"code": "write_failed", "message": "No se pudo escribir la partida",
+                                                  "detail": f"fallo interno ({type(exc).__name__})"}}
             self.schedule(lambda: self._saved(card, request, outcome, reply))
-        threading.Thread(target=work, name=f"save-{card.slot}", daemon=True).start()
+        try:
+            threading.Thread(target=work, name=f"save-{card.slot}", daemon=True).start()
+        except RuntimeError as exc:
+            # The system refused a new thread: the save fails here, as one
+            # that fails in its worker would, and the card is not left saving.
+            log(f"the save on {card.slot} could not start its worker: {exc}")
+            self._saved(card, request, {"ok": False, "error": {"code": "write_failed",
+                                                               "message": "No se pudo escribir la partida",
+                                                               "detail": str(exc)}}, reply)
 
     def _saved(self, card: Card, request: dict, outcome: dict, reply: Callable[[dict], None]) -> None:
         card.saving = False
@@ -322,7 +437,55 @@ class CardManager:
             + ("ok, " + str(outcome.get("bytes")) + " bytes" if outcome.get("ok")
                else "failed: " + outcome["error"]["code"] + (" (" + outcome["error"].get("detail", "") + ")" if outcome["error"].get("detail") else "")))
         reply({"type": "saved", "session": request.get("session"), **outcome})
+        if card.writable and self.cards.get(card.device) is card:
+            log(f"{card.slot} ({card.serial}) may still be writable after the save: returning it to read-only "
+                f"is tried again every {READ_ONLY_RETRY:g} s and before any release")
+            self._close_later(card)
         self._advance_release(card)
+
+    def _close_card(self, card: Card) -> bool:
+        """Return to read-only a card that a save had to leave writable.
+        True when the card is read-only.
+
+        The kernel refuses that remount (EBUSY) while a file removed from the
+        card is still open, and a save removes one: the previous copy it
+        replaces. A game with mount access reads the card through its own
+        mount of the same device and can hold that file open. Until it closes
+        it the filesystem stays writable and is not marked clean: pulled
+        then, the card would need a recovery the console never performs. So
+        the remount is owed, and tried again here: by a timer, and before a
+        release. Never under a save in flight, which needs the card writable
+        and ends with this same remount.
+
+        A remount that did not end in time may still take effect: a late
+        remount to read-write leaves the card writable although its save
+        failed, a late remount to read-only leaves it closed although its
+        save reported otherwise. So nothing is decided while one still runs
+        on the card, and then the kernel's table says which it is."""
+        if not card.writable or not card.mount:
+            return True
+        if card.saving or not self.mounter.settled(card.mount):
+            return False
+        if self.mounter.read_only(card.mount) is not True:
+            try:
+                self.mounter.remount(card, rw=False)
+            except CardError:
+                return False
+        card.writable = False
+        log(f"{card.slot} ({card.serial}) is read-only again")
+        return True
+
+    def _close_later(self, card: Card) -> None:
+        if not card.closing:
+            card.closing = True
+            self.later(READ_ONLY_RETRY, lambda: self._close_due(card))
+
+    def _close_due(self, card: Card) -> None:
+        card.closing = False
+        if self.cards.get(card.device) is not card or card.saving:
+            return      # gone; or a save is writing, which closes the card itself or asks again
+        if not self._close_card(card):
+            self._close_later(card)
 
     def release(self, request: dict, reply: Callable[[dict], None]) -> None:
         """Safe removal: no new writes, finish the one in flight, stop the
@@ -337,6 +500,11 @@ class CardManager:
         card is unmounted strictly and published as released."""
         card = next((c for c in self.cards.values() if c.serial == request.get("serial")), None)
         if card is None:
+            gone = next((c for c in self.unmounts_owed.values() if c.serial == request.get("serial")), None)
+            if gone is not None:
+                return reply({"type": "released", "ok": False, "slot": gone.slot, "serial": gone.serial,
+                              "error": {"code": "unmount_failed", "message": "No se pudo desmontar la tarjeta de forma segura",
+                                        "detail": "la tarjeta ya no está y su desmontaje sigue pendiente"}})
             return reply({"type": "released", "ok": True, "detail": "no such card"})
         card.releasing = True
         card.release_reply = reply
@@ -381,6 +549,12 @@ class CardManager:
     def _release_now(self, card: Card) -> None:
         reply, card.release_reply = card.release_reply, None
         try:
+            if not self._close_card(card):
+                # Unmounting here would detach this service's mount and leave
+                # the filesystem writable under whoever holds it: not a card
+                # that is safe to pull.
+                raise CardError("card_busy", "La tarjeta sigue en uso; no la retires",
+                                "sigue montada para escritura: un programa mantiene abierta una partida anterior")
             self.mounter.unmount(card, strict=True)
         except CardError as exc:
             # Not released: the card keeps its state and mount, writes are
@@ -438,7 +612,14 @@ class CardManager:
                 error = {"code": "internal_error", "message": "Fallo interno al leer la tarjeta", "detail": repr(exc)}
             # Bind results now; `exc` does not survive past its except block.
             self.schedule(lambda: self._finish(card, generation, info, error))
-        threading.Thread(target=work, name=f"validate-{card.slot}", daemon=True).start()
+        try:
+            threading.Thread(target=work, name=f"validate-{card.slot}", daemon=True).start()
+        except RuntimeError as exc:
+            # The system refused a new thread: the card is refused now, as a
+            # validation that fails would refuse it, and not left reading.
+            log(f"the validation of {card.slot} could not start its worker: {exc}")
+            self._finish(card, generation, None, {"code": "internal_error",
+                                                  "message": "Fallo interno al leer la tarjeta", "detail": str(exc)})
 
     def _finish(self, card: Card, generation: int, info: Optional[dict], error: Optional[dict]) -> None:
         if card.generation != generation or self.cards.get(card.device) is not card:
@@ -446,14 +627,49 @@ class CardManager:
             return
         if error is not None:
             card.state, card.error, card.info = "invalid", error, None
-            self.mounter.unmount(card)
-        else:
-            card.state, card.info, card.error = "valid", info, None
+            # Once per insertion: the shell shows the card as invalid, and
+            # whoever reads the journal must find which device and why.
+            log(f"{card.slot} ({card.device}, {card.serial}) refused: {error.get('code')}: {error.get('message')}"
+                + (f" ({error['detail']})" if error.get("detail") else ""))
+            # Said before the unmount, which may not even start: the shell
+            # hears the refusal whatever becomes of it.
+            self._emit(card)
+            self._unmount_or_owe(card)
+            return
+        card.state, card.info, card.error = "valid", info, None
         self._emit(card)
-        if error is None:
-            # Only now, with the card's state published: nothing about Shape
-            # delays `valid`, Play or Eject safely.
-            self._start_shape(card)
+        # Only now, with the card's state published: nothing about Shape
+        # delays `valid`, Play or Eject safely.
+        self._start_shape(card)
+
+    def _unmount_or_owe(self, card: Card) -> None:
+        """Unmount a card nobody may use: refused, or gone. If not even a
+        command can be started, the mount is still there and card.mount
+        still names it: the unmount is owed and the service's loop tries it
+        again every READ_ONLY_RETRY seconds (retry_unmounts), whether the
+        card is still in or not. A safe release meanwhile is refused, not
+        reported as done."""
+        if self.mounter.unmount(card) is not False:
+            self.unmounts_owed.pop(card.slot, None)
+            return
+        if card.slot not in self.unmounts_owed:
+            if not self.unmounts_owed:
+                self._next_unmount_try = time.monotonic() + READ_ONLY_RETRY
+            self.unmounts_owed[card.slot] = card
+            log(f"{card.slot} ({card.serial}) is still mounted; its unmount is tried again every {READ_ONLY_RETRY:g} s")
+
+    def retry_unmounts(self, now: Optional[float] = None) -> None:
+        """The owed unmounts, again, once every READ_ONLY_RETRY seconds;
+        called by the service's loop on every wake."""
+        now = time.monotonic() if now is None else now
+        if not self.unmounts_owed or now < self._next_unmount_try:
+            return
+        self._next_unmount_try = now + READ_ONLY_RETRY
+        for slot, card in list(self.unmounts_owed.items()):
+            if card.mount and self.mounter.unmount(card) is False:
+                continue
+            self.unmounts_owed.pop(slot, None)
+            log(f"{card.slot} ({card.serial}) unmounted at last")
 
     def _promote_waiting(self) -> None:
         for card in self.cards.values():
@@ -604,6 +820,20 @@ def _copy_bounded(source: Path, dest_dir: Path, generation: int, current_generat
         os.close(fd)
 
 
+def _save_bytes(value: object, **options) -> bytes:
+    """`value` as the UTF-8 JSON a save is measured and stored in.
+
+    JSON can spell, as an escape in plain ASCII, a code point that UTF-8
+    cannot carry (a lone surrogate). A save holding one is refused
+    (CardError "save_invalid") rather than altered: the card would not keep
+    what the game sent."""
+    try:
+        return json.dumps(value, ensure_ascii=False, **options).encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise CardError("save_invalid", "La partida contiene texto que no se puede guardar como UTF-8",
+                        f"U+{ord(exc.object[exc.start]):04X}")
+
+
 def save_path(mount: Path, info: dict) -> Path:
     """Where this card keeps this game's save: <saves.location>/<card id>/save.json (for messages)."""
     return mount / info.get("saves", "saves") / info["id"] / "save.json"
@@ -627,9 +857,13 @@ def open_save_dir(mount: Path, info: dict, create: bool) -> int:
     """A file descriptor for <mount>/<saves.location>/<card id>, walked component by
     component with O_NOFOLLOW: a symbolic link anywhere on the way is refused,
     so a crafted card cannot point the writer at its own content. With
-    `create`, the per-game directory is made (never through a link). Returns
-    the descriptor; the caller closes it. Raises CardError("save_path_unsafe")
-    or FileNotFoundError (without `create`) when the game directory is absent.
+    `create`, each directory missing on the way is made, the saves location
+    itself included: a card is valid without one (docs/game-cards.md), and
+    it must still be possible to save to it. A directory is made by name in
+    its parent's descriptor and then opened like any other, so never through
+    a link. Returns the descriptor; the caller closes it. Raises
+    CardError("save_path_unsafe"), or FileNotFoundError (without `create`)
+    when a directory on the way is absent.
     """
     if not SAVE_ID.fullmatch(str(info.get("id", ""))):
         raise CardError("save_path_unsafe", "El identificador del juego no sirve como ruta")
@@ -638,20 +872,17 @@ def open_save_dir(mount: Path, info: dict, create: bool) -> int:
         raise CardError("save_path_unsafe", "La ruta de partidas sale de la tarjeta")
     fd = os.open(mount, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
     try:
-        for part in parts:
-            nxt = _open_dir_component(fd, part)
+        for part in parts + [str(info["id"])]:
+            try:
+                nxt = _open_dir_component(fd, part)
+            except FileNotFoundError:
+                if not create:
+                    raise
+                os.mkdir(part, mode=0o755, dir_fd=fd)
+                nxt = _open_dir_component(fd, part)
             os.close(fd)
             fd = nxt
-        game = str(info["id"])
-        try:
-            nxt = _open_dir_component(fd, game)
-        except FileNotFoundError:
-            if not create:
-                raise
-            os.mkdir(game, mode=0o755, dir_fd=fd)
-            nxt = _open_dir_component(fd, game)
-        os.close(fd)
-        return nxt
+        return fd
     except BaseException:
         os.close(fd)
         raise
@@ -693,14 +924,15 @@ def _is_envelope(data: Optional[bytes], limit: int = SAVE_FILE_MAX_BYTES, info: 
     if data is None or len(data) > limit:
         return False
     try:
-        document = json.loads(data)
-    except ValueError:
+        document = parse_envelope(data)
+    except (ValueError, RecursionError):
         return False
     if not isinstance(document, dict) or document.get("format") != save_format(info or {}):
         return False
-    if document.get("payload_kind") == "files":
-        max_bytes = int((info or {}).get("saves_max_bytes") or 0)
-        return max_bytes > 0 and files_payload_problem(document.get("payload"), max_bytes) is None
+    if document.get("payload_kind") == "files" or (info or {}).get("saves_directory"):
+        # What the launcher restores and nothing less (docs/saves.md): this
+        # card's game, schema and declared units, each passing its check.
+        return envelope_problem(document, info or {}, save_format(info or {})) is None
     return True
 
 
@@ -711,13 +943,29 @@ def _other_generation(data: Optional[bytes], info: dict) -> Optional[str]:
     if data is None:
         return None
     try:
-        document = json.loads(data)
-    except ValueError:
+        document = parse_envelope(data)
+    except (ValueError, RecursionError):
         return None
     found = document.get("format") if isinstance(document, dict) else None
     if found in SAVE_FORMATS.values() and found != save_format(info):
         return found
     return None
+
+
+def _marked_recovered(previous: Optional[bytes], limit: int, info: dict) -> Optional[bytes]:
+    """The previous envelope carrying the mark that tells the game it is the
+    previous save, or None when `previous` is not an envelope the console
+    wrote. That includes one holding text UTF-8 cannot carry (spelled as a
+    JSON escape): the console refuses to store such text, so it did not
+    write this file, and it could not write it back marked."""
+    if not _is_envelope(previous, limit, info):
+        return None
+    document = parse_envelope(previous)
+    document["recovered_from"] = "save.json.prev"
+    try:
+        return _save_bytes(document) + b"\n"
+    except CardError:
+        return None
 
 
 def _copy_save_out(mount: Path, info: dict, target: Path) -> dict:
@@ -748,8 +996,9 @@ def _copy_save_out(mount: Path, info: dict, target: Path) -> dict:
         other = _other_generation(data, info)
         unusable = data is None or other or (directory_saves and not _is_envelope(data, limit, info))
         if unusable:
-            previous = _read_regular(dir_fd, "save.json.prev", limit + 1)
-            if previous is None or not _is_envelope(previous, limit, info):
+            # Marked so the game can tell the player it is the previous save.
+            previous = _marked_recovered(_read_regular(dir_fd, "save.json.prev", limit + 1), limit, info)
+            if previous is None:
                 if other:
                     return {"present": True, "copied": False,
                             "error": {"code": "save_other_generation",
@@ -765,20 +1014,25 @@ def _copy_save_out(mount: Path, info: dict, target: Path) -> dict:
             log(f"save.json {why} under {mount}; handing out save.json.prev as the recovered save")
     finally:
         os.close(dir_fd)
-    if recovered:
-        # Mark the copy so the game can tell the player it is the previous save.
-        document = json.loads(data)
-        document["recovered_from"] = "save.json.prev"
-        data = (json.dumps(document, ensure_ascii=False) + "\n").encode("utf-8")
-    owner = os.stat(target.parent)
-    out = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_CLOEXEC, 0o600)
+    # The session's work directory belongs to the game's user, so nothing in
+    # it is taken on trust: the directory is opened without following a link,
+    # a name already there is removed rather than opened, and the copy is
+    # created exclusively. This service, which is root, never writes through
+    # something left for it to find.
+    work = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
     try:
-        view = memoryview(data)
-        while view:          # a directory save's envelope can be megabytes
-            view = view[os.write(out, view):]
-        os.fchown(out, owner.st_uid, owner.st_gid)
+        owner = os.fstat(work)
+        _unlink_quiet(work, target.name)
+        out = os.open(target.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=work)
+        try:
+            view = memoryview(data)
+            while view:          # a directory save's envelope can be megabytes
+                view = view[os.write(out, view):]
+            os.fchown(out, owner.st_uid, owner.st_gid)
+        finally:
+            os.close(out)
     finally:
-        os.close(out)
+        os.close(work)
     return {"present": True, "copied": True, "bytes": len(data), "recovered": recovered}
 
 
@@ -839,13 +1093,24 @@ def _write_save(mounter: "Mounter", card: "Card", info: dict, data: bytes, gener
         raise CardError("card_removed", "La tarjeta se retiró antes de guardar")
     mount = Path(card.mount)
     target = save_path(mount, info)
+    # Writable from before the remount to read-write until a remount to
+    # read-only succeeds. Set first: a remount to read-write that does not
+    # end in time fails the save but may still take effect afterwards, and
+    # the card must then count as writable. If the remount that ends this
+    # save is refused, the flag stays and the manager tries again
+    # (CardManager._close_card): the card is never left writable.
+    card.writable = True
     mounter.remount(card, rw=True)
     dir_fd = -1
+
+    def read_only_again() -> None:
+        mounter.remount(card, rw=False)
+        card.writable = False
 
     def back_to_read_only() -> None:
         # Best effort on the failure path: the card may already be gone.
         try:
-            mounter.remount(card, rw=False)
+            read_only_again()
         except CardError as exc:
             log(f"could not remount {card.slot} read-only after a failed save: {exc.detail or exc.message}")
 
@@ -892,15 +1157,14 @@ def _write_save(mounter: "Mounter", card: "Card", info: dict, data: bytes, gener
                 os.replace("save.json", keep_as, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
         os.replace("save.json.tmp", "save.json", src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
         os.fsync(dir_fd)
-    except CardError:
+    except Exception as exc:
+        # Whatever failed, foreseen or not: no temporary is left behind and
+        # the card does not stay writable.
         if dir_fd >= 0:
             _unlink_quiet(dir_fd, "save.json.tmp")
         back_to_read_only()
-        raise
-    except OSError as exc:
-        if dir_fd >= 0:
-            _unlink_quiet(dir_fd, "save.json.tmp")
-        back_to_read_only()
+        if not isinstance(exc, OSError):
+            raise
         if exc.errno == errno.ENOSPC:
             raise CardError("no_space", "No hay espacio en la Game Card para guardar la partida", str(exc))
         if exc.errno == errno.EIO:
@@ -911,8 +1175,15 @@ def _write_save(mounter: "Mounter", card: "Card", info: dict, data: bytes, gener
             os.close(dir_fd)
     # Read-only again: this flushes the journal and marks the filesystem clean,
     # which is what the next console will find. It is part of "saved"; if it
-    # fails the player is told, even though the bytes may be on the card.
-    mounter.remount(card, rw=False)
+    # fails the player is told, even though the bytes are on the card: a card
+    # pulled while writable is one the console would refuse to mount.
+    try:
+        read_only_again()
+    except CardError as exc:
+        if exc.code != "sync_failed":
+            raise
+        raise CardError("sync_failed", "La partida se escribió, pero la tarjeta no pudo cerrarse; no la retires todavía",
+                        exc.detail or exc.message)
     return {"ok": True, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest(), "path": str(target)}
 
 
@@ -1090,7 +1361,9 @@ class ShapeExport:
         self.check()
         self.root.mkdir(mode=0o755, parents=True, exist_ok=True)
         source = _StagingSource(self.mount, f"{self.content_root.strip('/')}/{shape.PACKAGE_DIR}", self.staging, self.check)
-        result = shape.check_card(source, self.content_root)
+        # Measured with this card's version: the document written below is
+        # the one the checker measured (shape.export_bytes).
+        result = shape.check_card(source, self.content_root, version=self.version)
         self.check()
         notes = [{"code": n.code, "level": n.level, "block": n.block, "where": n.where, "detail": n.detail[:200]}
                  for n in result.notes]
@@ -1103,11 +1376,19 @@ class ShapeExport:
         # The export holds what the shell may use and nothing else: the
         # accepted files and the normalised document, bound to this insertion.
         _prune(self.staging, set(result.files))
-        document = dict(result.shape, insertion=self.insertion, version=self.version)
+        data = shape.export_bytes(result.shape, self.insertion, self.version)
+        if len(data) > shape.EXPORT_MAX_BYTES:
+            # The checker measured it with a 16-character insertion; an
+            # insertion of another length could still take it over. Then
+            # nothing is published: the shell would read none of it.
+            notes.append({"code": "shape_export_size", "level": "unused", "block": None, "where": "",
+                          "detail": f"{len(data)} bytes; el shell lee hasta {shape.EXPORT_MAX_BYTES}"})
+            return {"state": "unused", "insertion": self.insertion, "version": self.version,
+                    "notes": notes[:SHAPE_NOTES_MAX]}, notes
         out = os.open(self.staging / shape.MANIFEST, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
                       0o600)
         with os.fdopen(out, "wb") as handle:
-            handle.write((json.dumps(document, ensure_ascii=False, allow_nan=False) + "\n").encode("utf-8"))
+            handle.write(data)
         _seal(self.staging, _shape_group())
         self.check()
         # Publication is the last step: nothing that can fail comes after it.
@@ -1166,7 +1447,16 @@ def _remove_tree(path: Path) -> None:
 
 
 def _remove_in_background(path: Path) -> None:
-    threading.Thread(target=_remove_tree, args=(path,), name="shape-remove", daemon=True).start()
+    try:
+        threading.Thread(target=_remove_tree, args=(path,), name="shape-remove", daemon=True).start()
+    except RuntimeError:
+        # No thread to be had: the export is in RAM and is removed here. If
+        # even that fails it stays until the service's next start, which
+        # clears every export (clear_shape_root); the caller goes on.
+        try:
+            _remove_tree(path)
+        except OSError as exc:
+            log(f"could not remove the export {path.name} ({exc}); the service's next start clears it")
 
 
 def clear_shape_root(root: Path) -> None:
@@ -1179,57 +1469,203 @@ def clear_shape_root(root: Path) -> None:
 
 # ------------------------------------------------------------------ platform bits
 
+# How long one mount, remount or umount may take. A healthy card answers in
+# well under a second; one that stops answering leaves the command waiting in
+# the kernel, where no signal reaches it. Past this bound the operation is
+# reported as failed and the process is kept (Mounter.stalled, reaped from the
+# loop), never abandoned; nothing more is started on that mount point until it
+# has ended, and a card whose unmount has not ended is never safe to remove.
+MOUNT_TIMEOUT = 10.0
+
+
 class Mounter:
     """Real mounts under MOUNT_ROOT. Slot names come from the manager, never from the card."""
 
     def __init__(self, root: Path = MOUNT_ROOT):
         self.root = root
+        # Mount point -> (what was asked: mount, remount or umount; its process).
+        # Saves remount from their worker thread while the loop reaps: one lock.
+        self.stalled: Dict[str, "tuple[str, subprocess.Popen]"] = {}
+        self.stalled_lock = threading.Lock()
 
     def device_path(self, device: str) -> str:
         return f"/dev/{device}"
+
+    @staticmethod
+    def mounted(target: str) -> bool:
+        """Whether `target` is a mount point in this service's namespace,
+        from the kernel's table: a stat of it could wait on the card itself."""
+        try:
+            with open("/proc/self/mountinfo", "rb") as table:
+                return any(line.split(b" ")[4].decode("unicode_escape", "replace") == target
+                           for line in table if line.count(b" ") >= 5)
+        except OSError:
+            return True
+
+    @staticmethod
+    def read_only(target: str) -> Optional[bool]:
+        """Whether the filesystem mounted at `target` is read-only: its
+        superblock's options in the kernel's table (after the " - "), which
+        every mount of the device shares. None when the table cannot be read
+        or does not hold `target`."""
+        state = None
+        try:
+            with open("/proc/self/mountinfo", "rb") as table:
+                for line in table:
+                    fields = line.rstrip(b"\n").split(b" ")
+                    if len(fields) < 10 or fields[4].decode("unicode_escape", "replace") != target:
+                        continue
+                    try:
+                        separator = fields.index(b"-", 6)
+                    except ValueError:
+                        continue
+                    if len(fields) > separator + 3:
+                        # The last line wins: a later mount on the same point covers the earlier.
+                        state = fields[separator + 3].split(b",")[0] == b"ro"
+        except OSError:
+            return None
+        return state
+
+    def settled(self, target: str) -> bool:
+        """No command started on `target` is still running."""
+        self.reap()
+        with self.stalled_lock:
+            return target not in self.stalled
+
+    def reap(self) -> None:
+        """Forget stalled commands that have ended. A mount that succeeded
+        after it was reported failed has no card using it: detached."""
+        detaching = []
+        with self.stalled_lock:
+            ended = [(target, command, proc) for target, (command, proc) in self.stalled.items()
+                     if proc.poll() is not None]
+            for target, command, proc in ended:
+                del self.stalled[target]
+                # Only a first mount has no card behind it; a late remount or
+                # umount concerns the card that is still tracked. The detach
+                # starts under the lock and stays this mount point's command
+                # until it ends: a card mounted here in between would be the
+                # one it detaches.
+                if command == "mount" and proc.returncode == 0:
+                    detach = self._start_detach(target)
+                    if detach is not None:
+                        self.stalled[target] = ("detach", detach)
+                        detaching.append((target, detach))
+        for target, command, proc in ended:
+            log(f"{command} on {target} ended at last (exit {proc.returncode})")
+        for target, detach in detaching:
+            self._finish_detach(target, detach)
+
+    @staticmethod
+    def _start_detach(target: str) -> "Optional[subprocess.Popen]":
+        try:
+            return subprocess.Popen(["umount", "-l", target], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError as exc:
+            log(f"umount -l on {target} could not start: {exc}")
+            return None
+
+    def _finish_detach(self, target: str, detach: "subprocess.Popen") -> None:
+        """Wait for a lazy detach within MOUNT_TIMEOUT. It does not wait on
+        the device and is expected to end at once; one that does not is
+        kept as the mount point's command, like any other, and never waited
+        on again from here."""
+        try:
+            detach.wait(timeout=MOUNT_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            with self.stalled_lock:
+                self.stalled.setdefault(target, ("detach", detach))
+            log(f"umount -l on {target} still running after {MOUNT_TIMEOUT:.0f} s; kept until it ends")
+            return
+        with self.stalled_lock:
+            if self.stalled.get(target, (None, None))[1] is detach:
+                del self.stalled[target]
+
+    def _run(self, kind: str, argv: List[str], target: str, code: str, message: str) -> "tuple[int, str]":
+        """Run a mount-family command (`kind`: mount, remount or umount) on
+        `target` within MOUNT_TIMEOUT."""
+        self.reap()
+        with self.stalled_lock:
+            if target in self.stalled:
+                raise CardError(code, message, f"{self.stalled[target][0]} sigue en curso en {target}")
+        try:
+            proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        except OSError as exc:
+            # No process to be had (the service's task limit, memory): the
+            # operation fails as itself, and nothing changed on the card.
+            raise CardError(code, message, f"{kind} no pudo empezar: {exc}") from exc
+        try:
+            out, err = proc.communicate(timeout=MOUNT_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            with self.stalled_lock:
+                self.stalled[target] = (kind, proc)
+            log(f"{kind} on {target} still running after {MOUNT_TIMEOUT:.0f} s; kept until it ends")
+            raise CardError(code, message, f"{kind} no terminó en {MOUNT_TIMEOUT:.0f} s")
+        return proc.returncode, (err or out or "").strip()
 
     def mount(self, card: Card, path: str) -> str:
         ext4.check_mountable(Path(path))
         target = self.root / card.slot
         target.mkdir(parents=True, exist_ok=True)
-        result = subprocess.run(["mount", "-t", "ext4", "-o", MOUNT_OPTIONS, path, str(target)],
-                                capture_output=True, text=True, check=False)
-        if result.returncode != 0:
-            raise CardError("mount_failed", "No se pudo montar la tarjeta en solo lectura", result.stderr.strip())
+        code, detail = self._run("mount", ["mount", "-t", "ext4", "-o", MOUNT_OPTIONS, path, str(target)], str(target),
+                                 "mount_failed", "No se pudo montar la tarjeta en solo lectura")
+        if code != 0:
+            raise CardError("mount_failed", "No se pudo montar la tarjeta en solo lectura", detail)
         return str(target)
 
     def remount(self, card: Card, rw: bool) -> None:
         if not card.mount:
             raise CardError("card_removed", "La tarjeta ya no está montada")
-        result = subprocess.run(["mount", "-o", "remount," + ("rw" if rw else "ro"), card.mount],
-                                capture_output=True, text=True, check=False)
-        if result.returncode != 0:
+        code, detail = self._run("remount", ["mount", "-o", f"remount,{'rw' if rw else 'ro'},{MOUNT_FLAGS}", card.mount],
+                                 card.mount, "sync_failed" if not rw else "write_failed",
+                                 "No se pudo cambiar el modo de la tarjeta")
+        if code != 0:
             raise CardError("sync_failed" if not rw else "write_failed",
-                            "No se pudo cambiar el modo de la tarjeta", result.stderr.strip())
+                            "No se pudo cambiar el modo de la tarjeta", detail)
 
-    def unmount(self, card: Card, strict: bool = False) -> None:
+    def unmount(self, card: Card, strict: bool = False) -> bool:
         """Unmount the card.
 
         `strict` is the safe-removal path: a plain umount must succeed, or a
         CardError("unmount_failed") is raised and the mount stays tracked so the
-        caller can report and retry. Without `strict` (the device is already
-        gone) a failed umount falls back to a lazy detach and the mount is
-        forgotten regardless: there is nothing left to be careful with.
+        caller can report and retry. Without `strict` (a card refused, or
+        already gone) a failed umount falls back to a lazy detach, and the
+        mount is forgotten once one of them ran. True then. False when
+        neither could even start (no process to be had): the mount is still
+        there, card.mount still names it, and the caller tries again later.
         """
         if not card.mount:
-            return
+            return True
         target = card.mount
-        result = subprocess.run(["umount", target], capture_output=True, text=True, check=False)
-        if result.returncode != 0:
+        self.reap()
+        # An earlier umount that ran past its bound may have finished since.
+        with self.stalled_lock:
+            pending = target in self.stalled
+        if not pending and not self.mounted(target):
+            card.mount = None
+            return True
+        try:
+            code, detail = self._run("umount", ["umount", target], target, "unmount_failed",
+                                     "No se pudo desmontar la tarjeta de forma segura")
+        except CardError as exc:
+            if strict:
+                raise
+            code, detail = 1, exc.detail
+        if code != 0:
             if strict:
                 raise CardError("unmount_failed", "No se pudo desmontar la tarjeta de forma segura",
-                                (result.stderr or result.stdout).strip() or f"umount exit {result.returncode}")
-            subprocess.run(["umount", "-l", target], capture_output=True, check=False)
+                                detail or f"umount exit {code}")
+            # A lazy detach does not wait on the device.
+            detach = self._start_detach(target)
+            if detach is None:
+                log(f"{target} stays mounted: neither umount nor a lazy detach could start ({detail})")
+                return False
+            self._finish_detach(target, detach)
         card.mount = None
         try:
             Path(target).rmdir()
         except OSError:
             pass
+        return True
 
 
 def validate_mount(mount: Path) -> dict:
@@ -1244,18 +1680,41 @@ def validate_mount(mount: Path) -> dict:
 
 def block_serial(device: str) -> str:
     try:
-        return Path(f"/sys/block/{device}/serial").read_text().strip()
+        return (SYS_ROOT / "block" / device / "serial").read_text().strip()
     except OSError:
         return ""
 
 
+def slot_serial(device: str) -> str:
+    """The identity of the card a board's reader holds as `device`: `NPT-sd-`
+    and the card's CID (32 hex digits, the card's own, as a virtio card's
+    serial is), or "" for any disk not in one of SLOTS or without a CID."""
+    if not SLOTS:
+        return ""
+    try:
+        where = (SYS_ROOT / "block" / device).resolve().relative_to(SYS_ROOT.resolve()).parts
+        cid = (SYS_ROOT / "block" / device / "device" / "cid").read_text().strip().lower()
+    except (OSError, ValueError):
+        return ""
+    if not any(where[:len(slot.split("/"))] == tuple(slot.split("/")) for slot in SLOTS):
+        return ""
+    return f"{SERIAL_PREFIX}sd-{cid}" if re.fullmatch(r"[0-9a-f]{32}", cid) else ""
+
+
+def card_serial(device: str) -> str:
+    """A block device's card identity: a virtio disk's serial, or a board's
+    reader's card (slot_serial); device_added admits only what begins with
+    SERIAL_PREFIX."""
+    return block_serial(device) if device.startswith("vd") else slot_serial(device)
+
+
 def enumerate_devices() -> List[tuple]:
     found = []
-    for entry in sorted(Path("/sys/block").iterdir()):
+    for entry in sorted((SYS_ROOT / "block").iterdir()):
         name = entry.name
-        if not name.startswith("vd"):
+        if not name.startswith("vd") and not SLOTS:
             continue
-        serial = block_serial(name)
+        serial = card_serial(name)
         if serial.startswith(SERIAL_PREFIX):
             found.append((name, serial, f"/dev/{name}"))
     return found
@@ -1292,11 +1751,17 @@ def encode_frame(message: dict) -> bytes:
     Covers are size-checked before they are attached, so a frame over budget
     should not happen; if it does, the card state still travels, without the
     picture, instead of a line no consumer will accept.
+
+    A frame is always valid UTF-8. Its strings may quote a card (a note
+    about a card's file) or a request, and JSON can spell a code point that
+    UTF-8 cannot carry (a lone surrogate): each is sent as "?", so that
+    nothing a card or a request holds can make a frame fail to encode, and
+    no consumer is handed text it cannot decode.
     """
-    data = (json.dumps(message, ensure_ascii=False) + "\n").encode("utf-8")
+    data = (json.dumps(message, ensure_ascii=False) + "\n").encode("utf-8", "replace")
     if len(data) > MAX_FRAME_BYTES:
         log(f"warning: frame of {len(data)} bytes exceeds {MAX_FRAME_BYTES}; cover omitted")
-        data = (json.dumps(_without_cover(message), ensure_ascii=False) + "\n").encode("utf-8")
+        data = (json.dumps(_without_cover(message), ensure_ascii=False) + "\n").encode("utf-8", "replace")
     return data
 
 
@@ -1451,6 +1916,8 @@ class Server:
 class ControlServer:
     """Root-only request socket (mode 0600). One JSON request per line, one reply."""
 
+    REPLIES = {"stage": "staged", "save": "saved", "release": "released"}
+
     def __init__(self, path: Path, manager: CardManager):
         self.path = path
         self.manager = manager
@@ -1515,26 +1982,40 @@ class ControlServer:
             self.drop(conn)
             return False
         self.buffers[conn] += data
-        if len(self.buffers[conn]) > SAVE_MAX_BYTES + 8192 and b"\n" not in self.buffers[conn]:
+        # A save's line carries the payload with a space after each separator,
+        # as the envelope does: the same bound admits every save within its limit.
+        if len(self.buffers[conn]) > SAVE_FILE_MAX_BYTES and b"\n" not in self.buffers[conn]:
             self._reply(conn, {"type": "error", "error": {"code": "bad_request", "message": "Petición demasiado grande"}})
             self.drop(conn)
             return False
-        while b"\n" in self.buffers[conn]:
+        # A reply that cannot be sent drops the connection, its buffer with it.
+        while b"\n" in self.buffers.get(conn, b""):
             line, _, self.buffers[conn] = self.buffers[conn].partition(b"\n")
             try:
                 request = json.loads(line)
-            except ValueError:
+            except (ValueError, RecursionError):     # RecursionError: nested deeper than the parser goes
                 self._reply(conn, {"type": "error", "error": {"code": "bad_request", "message": "JSON inválido"}})
                 continue
-            if request.get("type") == "stage":
-                self.manager.stage(request, lambda message, c=conn: self._reply(c, message))
-            elif request.get("type") == "save":
-                self.manager.save(request, lambda message, c=conn: self._reply(c, message))
-            elif request.get("type") == "release":
-                self.manager.release(request, lambda message, c=conn: self._reply(c, message))
-            else:
-                self._reply(conn, {"type": "error", "error": {"code": "bad_request", "message": "Petición desconocida"}})
-        return True
+            if not isinstance(request, dict):
+                self._reply(conn, {"type": "error", "error": {"code": "bad_request", "message": "La petición no es un objeto JSON"}})
+                continue
+            kind = request.get("type")
+            try:
+                if kind == "stage":
+                    self.manager.stage(request, lambda message, c=conn: self._reply(c, message))
+                elif kind == "save":
+                    self.manager.save(request, lambda message, c=conn: self._reply(c, message))
+                elif kind == "release":
+                    self.manager.release(request, lambda message, c=conn: self._reply(c, message))
+                else:
+                    self._reply(conn, {"type": "error", "error": {"code": "bad_request", "message": "Petición desconocida"}})
+            except Exception as exc:  # noqa: BLE001 - this request's failure, said to who asked; not the service's
+                log(f"internal error handling a {kind} request; it fails and the service goes on\n"
+                    f"{traceback.format_exc().rstrip()}")
+                self._reply(conn, {"type": self.REPLIES.get(str(kind), "error"), "session": request.get("session"), "ok": False,
+                                   "error": {"code": "internal_error", "message": "Fallo interno del servicio de tarjetas",
+                                             "detail": type(exc).__name__}})
+        return conn in self.buffers
 
     def _reply(self, conn: socket.socket, message: dict) -> None:
         if conn not in self.buffers:
@@ -1560,7 +2041,7 @@ def start_udev_monitor(callback: Callable[[str, str, str, str], None]) -> Option
         for device in iter(monitor.poll, None):
             name = device.sys_name
             if device.action == "add":
-                callback("add", name, block_serial(name), device.device_node or f"/dev/{name}")
+                callback("add", name, card_serial(name), device.device_node or f"/dev/{name}")
             elif device.action == "remove":
                 callback("remove", name, "", "")
     thread = threading.Thread(target=loop, name="udev", daemon=True)
@@ -1598,7 +2079,8 @@ def main(argv=None) -> int:
     control = ControlServer(CONTROL_SOCKET_PATH, manager)
     control_listener = control.start()
     log(f"mun-cardd ready: socket {args.socket}, mounts under {args.mount_root}, "
-        f"serial prefix {SERIAL_PREFIX}, validation delay {VALIDATION_DELAY}s")
+        f"serial prefix {SERIAL_PREFIX}, validation delay {VALIDATION_DELAY}s, "
+        f"readers: {', '.join('/' + slot for slot in SLOTS) or 'none (virtio cards only)'}")
 
     def on_udev(action: str, device: str, serial: str, path: str) -> None:
         if action == "add":
@@ -1614,7 +2096,7 @@ def main(argv=None) -> int:
         for name in list(manager.cards):
             if name not in present:
                 manager.device_removed(name)
-    rescan()  # cards already inserted when the service starts
+    guarded("the first device scan", rescan)  # cards already inserted when the service starts
 
     stop = {"flag": False}
     signal.signal(signal.SIGTERM, lambda *_: stop.__setitem__("flag", True))
@@ -1636,23 +2118,38 @@ def main(argv=None) -> int:
             elif key.data == "control-accept":
                 selector.register(control.accept(), selectors.EVENT_READ, "control")
             elif key.data == "control":
-                control.on_event(key.fileobj, mask)   # drop() unregisters on close
+                # drop() unregisters on close. A connection whose event could
+                # not be handled is closed: left registered, the selector
+                # would hand the same event back at once, without end.
+                if not guarded("a control connection", lambda: control.on_event(key.fileobj, mask)):
+                    control.drop(key.fileobj)
             elif key.data == "wake":
                 wake_r.recv(4096)
                 with queue_lock:
                     pending, queue[:] = queue[:], []
                 for fn in pending:
-                    fn()
-            else:
-                server.on_event(key.fileobj, mask)
+                    # Results of worker threads, timers and device events:
+                    # one that raises does not take the others with it.
+                    guarded("a scheduled callback", fn)
+            elif not guarded("a client connection", lambda: server.on_event(key.fileobj, mask)):
+                server.drop(key.fileobj)
         if args.rescan and time.monotonic() - last_rescan >= args.rescan:
-            rescan()
+            guarded("a device rescan", rescan)
             last_rescan = time.monotonic()
+        if manager.mounter.__dict__.get("stalled"):
+            guarded("ending stalled mount commands", manager.mounter.reap)
+        if manager._due:
+            guarded("timers due", manager.run_due)
+        if manager.unmounts_owed:
+            guarded("owed unmounts", manager.retry_unmounts)
 
     manager.stop_shape()
-    for card in list(manager.cards.values()):
+    for card in [*manager.cards.values(), *manager.unmounts_owed.values()]:
         manager.mounter.unmount(card)
     clear_shape_root(SHAPE_ROOT)
+    selector.close()
+    for sock in (listener, control_listener, wake_r, wake_w, *server.clients, *control.buffers):
+        sock.close()
     for path in (Path(args.socket), CONTROL_SOCKET_PATH):
         try:
             path.unlink()

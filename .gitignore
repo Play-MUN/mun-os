@@ -81,6 +81,15 @@ node_modules/
 dist/
 examples/mun-collect/mun-collect
 examples/mun-collect/tests/test_save
+services/mun-shell/tests/displaydevice_test
+services/mun-shell/tests/gamepadmap_test
+services/mun-shell/tests/motionclock_test
+services/mun-shell/tests/startupclock_test
+services/mun-shell/tests/playbackhealth_test
+services/mun-shell/tests/pngchunks_test
+services/mun-shell/tests/decodingmarker_test
+services/mun-shell/tests/systemsounds_test
+services/mun-shell/tests/moc_systemsounds.cpp
 examples/mun-gl-probe/mun-gl-probe
 
 # Commercial game installers stay out of the repository

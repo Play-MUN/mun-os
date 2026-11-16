@@ -102,7 +102,7 @@ SHA-256.
 ./mun play --card mycollect
 ```
 
-The console starts in a window and the card goes in: the Game Card entry says
+The console starts in a window and the card goes in: the MUN Disk entry says
 "My Collect", in your accent colour. **Enter, Enter** plays. Move the square
 with the arrows and collect a disc or two, then press **S**: "GUARDADO EN LA
 GAME CARD". The console has written your progress to the card's `saves/`,
@@ -113,7 +113,8 @@ OK on "Session ended".
 
 On the card's panel choose **Eject safely**: the console finishes with the
 card, unmounts it and the card leaves the slot ("You can remove the Game
-Card"). Then **Turn off** (Up from Game Card, Enter, Enter): the console
+Card"). Then **Turn off** (Up from MUN Disk, Home's entry for the card,
+Enter, Enter): the console
 shuts down and the window closes.
 
 Start it again, with the card:

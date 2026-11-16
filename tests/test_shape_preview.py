@@ -27,7 +27,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "vm"))
 sys.path.insert(0, str(ROOT / "tools" / "mun-card"))
 import shapepreview  # noqa: E402
-from mun_card import cli as card_cli, image  # noqa: E402
+from mun_card import cli as card_cli, image, motion  # noqa: E402
+from mun_card import shape as shape_rules  # noqa: E402
+from mun_card.source import DirectorySource  # noqa: E402
 
 vm = shapepreview.vm
 SAMPLES = ROOT / "examples" / "shape"
@@ -128,12 +130,14 @@ class BuildTests(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp(prefix="shape-builds-"))
         self.addCleanup(shutil.rmtree, self.tmp, True)
 
-    def build(self, name, shape=None):
+    def build(self, name, shape=None, motion=None):
         build = self.tmp / name
         build.mkdir()
         info = {"source": {"describe": "abc1234"}, "built": {"finished": "2026-10-01T00:00:00Z"}}
         if shape:
             info["shape"] = {"format": shape}
+        if motion is not None:
+            info["shape"].update(minor=1, motion={"draft": motion})
         (build / "BUILD-INFO.json").write_text(json.dumps(info))
         return build
 
@@ -158,6 +162,43 @@ class BuildTests(unittest.TestCase):
             shapepreview.check_build("shape", old, old, recorded=False)
         self.assertIn("./mun dev build", str(refused.exception))
         self.assertNotIn("destroy", str(refused.exception), "no guest exists yet to remove")
+
+    def test_a_package_with_motion_on_a_console_that_plays_none_is_a_warning(self):
+        reef = ROOT / "examples" / "shape" / "reef"
+        dev4 = self.build("dev4", "mun-shape/1")                 # as v0.1.0-dev.4 records it
+        shapepreview.check_build("shape", dev4, dev4, recorded=True)  # taken: it shows the v1 look
+        notice = shapepreview.folder_notice("shape", dev4, reef)
+        self.assertIn("plays no Shape motion", notice)
+        self.assertIn("v1 look", notice)
+        self.assertIn("./mun dev build", notice)
+        new = self.build("new", "mun-shape/1", motion=motion.DRAFT)
+        self.assertEqual(shapepreview.build_motion(new), motion.DRAFT)
+        self.assertIsNone(shapepreview.folder_notice("shape", new, reef), "a console that plays it: nothing to say")
+        other = self.build("other", "mun-shape/1", motion=motion.DRAFT + 1)
+        self.assertIn(f"draft {motion.DRAFT + 1}", shapepreview.folder_notice("shape", other, reef))
+        sea = ROOT / "examples" / "shape" / "sea"
+        self.assertIsNone(shapepreview.folder_notice("shape", dev4, sea), "no motion: nothing to say")
+
+    def test_the_preview_says_what_it_checked_what_the_build_declares_and_what_it_did_not_see(self):
+        # Checked here (this checkout's tools), declared (the build's
+        # BUILD-INFO), and observed (nothing: the guest is not asked).
+        reef = card_cli.shape_summary(shape_rules.check_package(DirectorySource(ROOT / "examples" / "shape" / "reef")))
+        for build, motion_draft in (("dev4", None), ("new", motion.DRAFT)):
+            said = []
+            preview = shapepreview.Preview.__new__(shapepreview.Preview)
+            preview.guest, preview.build_dir, preview.say = "shape", self.build(build, "mun-shape/1", motion=motion_draft), \
+                said.append
+            preview.report("shape-a", reef)
+            text = "\n".join(said)
+            self.assertIn("checked here, with this checkout's tools, on the card as made; not by the console", said[0])
+            self.assertNotRegex(text, r"(?i)the console (shows|showed|drew|draws) the motion|the guest (shows|showed)")
+            if motion_draft is None:
+                self.assertEqual(said[1], "  in this console, by its BUILD-INFO: the v1 look only")
+                self.assertTrue(said[2].startswith("  warning: guest shape runs build dev4, whose BUILD-INFO says it "
+                                                   "plays no Shape motion"), said[2])
+            else:
+                self.assertIn(f"BUILD-INFO says its shell plays draft {motion.DRAFT}", said[1])
+                self.assertIn("whether the console draws it is not observed here", said[1])
 
     def test_another_major_version_is_refused(self):
         other = self.build("future", "mun-shape/2")
@@ -318,6 +359,59 @@ class PreviewTests(unittest.TestCase):
             worker.join(10)
         self.assertEqual(console.visible(),
                          [("attach", "pv0-shape"), ("detach", "pv0-shape", False), ("attach", "pv1-shape")])
+
+    def watch_with_a_change_saved_while_the_first_card_is_made(self, console, preview, wanted):
+        """Runs the watch, saving a change to the folder just after the first
+        card is made from it and before it is in the console: the moment a
+        player may save while the preview prepares a card. Returns, for each
+        card made, whether the change was in the folder then."""
+        made, make_card = [], preview.make_card
+
+        def made_then_saved(name):
+            made.append('"seconds": 2.0' in (self.folder / "shape.json").read_text())
+            summary = make_card(name)
+            if len(made) == 1:
+                document = (self.folder / "shape.json").read_text().replace('"seconds": 3.2', '"seconds": 2.0')
+                (self.folder / "shape.json").write_text(document)
+            return summary
+        stop = threading.Event()
+        with contextlib.ExitStack() as stack:
+            for item in console.patches():
+                stack.enter_context(item)
+            stack.enter_context(patch.object(preview, "make_card", made_then_saved))
+            stack.enter_context(patch.object(shapepreview, "POLL_SECONDS", 0.05))
+            stack.enter_context(patch.object(shapepreview, "SETTLE_SECONDS", 0.1))
+            stack.enter_context(patch.object(shapepreview, "SHELL_GRACE_SECONDS", 0))
+            worker = threading.Thread(target=preview.run, args=(stop, True, True))
+            worker.start()
+            deadline = time.monotonic() + 30
+            while console.visible() != wanted and time.monotonic() < deadline:
+                time.sleep(0.05)
+            stop.set()
+            worker.join(10)
+        return made
+
+    def test_a_change_saved_while_the_first_card_is_made_is_taken(self):
+        # The folder's state is taken before the card is made: a change saved
+        # meanwhile is a change, inserted once the folder is still.
+        console = Console()
+        wanted = [("attach", "pv0-shape"), ("detach", "pv0-shape", False), ("attach", "pv1-shape")]
+        made = self.watch_with_a_change_saved_while_the_first_card_is_made(console, self.preview(), wanted)
+        self.assertEqual(console.visible(), wanted)
+        self.assertEqual(made, [False, True], "the second card is made with the change")
+
+    def test_a_change_saved_while_its_card_already_in_is_replaced_is_taken(self):
+        # Started with a card of its own already in, the preview replaces it
+        # with the folder as it is; a change saved while that card is made is
+        # taken after it.
+        console = Console()
+        preview = self.preview()
+        self.made_and_inserted(preview, console, "pv0-shape")
+        wanted = [("detach", "pv0-shape", False), ("attach", "pv1-shape"), ("detach", "pv1-shape", False),
+                  ("attach", "pv0-shape")]
+        made = self.watch_with_a_change_saved_while_the_first_card_is_made(console, preview, wanted)
+        self.assertEqual(console.visible(), wanted)
+        self.assertEqual(made, [False, True], "the next card is made with the change")
 
     def test_a_console_that_stops_answering_ends_the_watch_without_a_trace(self):
         # Turned off from its menu, the console stops answering through

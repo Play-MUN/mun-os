@@ -1,0 +1,8 @@
+# Development image for a board (profile q6a-dev): this file, empty of rules,
+# replaces alsa-utils' rule of the same name, which runs `alsactl restore`
+# when a sound card appears. On this board that restore turns the route to
+# HDMI off (measured: the route on before it and off after, though the saved
+# state has it on), and it runs at the moment mun-board-audio.service sets
+# that route: when it came second, every write to the device failed (EIO)
+# and the console started silent. Nothing here needs a saved mixer state:
+# the route is the one setting, and board-audio-route sets it.

@@ -17,9 +17,22 @@
 //
 // With MUN_SHELL_TIMING set to a file path (laboratory only), every key's
 // latency, and each window's frame statistics, are appended to that file.
+// A key's latency as judged ends at the next frame on screen, which may be
+// one already being drawn when the key came and not show it yet; the log
+// also gives "shown", the time to the first frame whose scene was taken
+// after the key (its synchronisation began later), the one that shows it.
+// The log also counts the long frames while the interface moves (intervals of
+// kIdleMs or more between two frames after the key that started the motion):
+// they are stutters, shown for measurement, though not judged, so that the
+// step down behaves as it always has.
 //
-// GUI thread only: the window's frameSwapped arrives there with the basic
-// render loop the shell uses.
+// Threads: the object and all its state belong to the GUI thread. The
+// window's frameSwapped comes from the render thread under the threaded render
+// loop (a GPU's) and from the GUI thread under the basic one (the software
+// renderer's); in either case the swap's time is read at once, where it is
+// emitted, and only that time is handed to the GUI thread (queued when the
+// emitter is another thread), so a frame is timed when it was presented, not
+// when the GUI thread got round to it.
 #pragma once
 
 #include <QElapsedTimer>
@@ -30,6 +43,7 @@
 #include <QTimer>
 #include <QtQml/qqmlregistration.h>
 
+#include <atomic>
 #include <vector>
 
 class FrameWatch : public QObject {
@@ -53,9 +67,18 @@ public:
     static constexpr int kStrainedWindows = 2;
 
     explicit FrameWatch(QObject *parent = nullptr);
+    ~FrameWatch() override;
 
     // A key was pressed now: its latency ends at the next frame on screen.
+    // Navigation comes first: for kActiveMs after it, SceneClock ticks on
+    // every frame the window renders, so the motion a key starts is drawn at
+    // the display's rate from its first frame even when the layers at rest
+    // ask only for a few frames a second (src/sceneclock.h).
     Q_INVOKABLE void keyPressed();
+    // A gamepad's input at its kernel time (CLOCK_MONOTONIC, ms, src/gamepads.h):
+    // the time from it to the next frame on screen goes to the laboratory's
+    // log ("pad"), the whole way from the kernel; not judged.
+    void inputAt(qint64 monotonicMs);
     // Writes a line to the laboratory's log (if any): a mark in the timings.
     Q_INVOKABLE void mark(const QString &what);
 
@@ -73,7 +96,8 @@ signals:
     void strained(const QString &why);
 
 private:
-    void onFrame();
+    void onSwapped();          // the emitting thread: reads the time, hands it over
+    void onFrame(qint64 at, qint64 syncNs);   // GUI thread
     void judge();
     void log(const QString &line);
 
@@ -81,14 +105,28 @@ private:
     bool m_judging = false;
     bool m_animating = false;
     qint64 m_activeUntil = -1;
+    qint64 m_activeSince = -1;   // the key that started the current motion
+    // Started once in the constructor and only read afterwards, from either
+    // thread (QElapsedTimer::elapsed() changes nothing).
     QElapsedTimer m_clock;
     qint64 m_lastFrame = -1;
     qint64 m_keyAt = -1;
+    qint64 m_padAt = -1;          // a gamepad's input, on m_clock, until its frame
+    // When the latest frame's synchronisation began (ns on m_clock): written
+    // where the window emits it (the render thread under the threaded loop,
+    // with the GUI thread blocked), read where the frame's swap is.
+    std::atomic<qint64> m_syncNs{-1};
+    qint64 m_shownKeyNs = -1;     // a key, until the first frame taken after it
+    qint64 m_lastPad = -1;        // the latest gamepad input, on m_clock
+    qint64 m_shownPad = -1;       // the gamepad input behind that key, if any
+    int m_long = 0;             // long frames in this window (logged, not judged)
+    qreal m_longest = 0;
     qint64 m_calmUntil = 0;
     int m_strained = 0;   // windows in a row with strain
     std::vector<qreal> m_intervals;     // while navigating: judged
     std::vector<qreal> m_transition;    // during a transition: logged
     std::vector<qreal> m_keys;
     QTimer m_windowTimer;
+    QTimer m_hold;   // keeps SceneClock at every frame after a key
     QFile m_log;
 };

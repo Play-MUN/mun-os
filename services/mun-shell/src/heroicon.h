@@ -8,20 +8,33 @@
 // moon) fills while a Game Card is in the slot. The objects are drawn, not
 // images, so they stay sharp at any display size.
 //
-// Each object is painted once into still layers (its shadow, its wireframe
-// with the glow, its face, and all of it together) at device resolution, as
-// the item shows them and cropped to what they show; a frame then only
-// clips, fades and copies them, without transforming a pixel: once loaded,
-// one copy. The gear, which turns, keeps its layers in its own frame and
-// turns them (one transformed copy a frame), its shadow drawn as vectors. The crescent's layers are painted again as
-// it fills, in steps of 2 %.
+// Each object is painted into still layers (its shadow, its wireframe with
+// the glow, its face, and all of it together) at device resolution, as the
+// item shows them and cropped to what they show; a frame then only clips,
+// fades and places them, without painting the object again. The gear, which
+// turns, keeps its layers in its own frame and turns them. The crescent's
+// layers are painted again as it fills, in steps of 2 %. Two drawing paths
+// (src/renderinfo.h):
+// - Qt Quick's software renderer: the layers are painted when a frame first
+//   needs them, on the thread that renders, and a frame copies them through
+//   QPainter (the turning gear: one transformed copy, its shadow drawn as
+//   vectors).
+// - A graphics API: the layers are painted on a thread of their own, never
+//   where frames are made, and each becomes a texture, the image let go once
+//   uploaded; until an object's layers are ready the previous object stays
+//   and its load waits. A frame sets opacities, the load's sweep (a clip),
+//   the gear's turn (a transform) and the copper line (a little geometry),
+//   which the GPU applies. Only the layers of the object in focus and of the
+//   one fading out are kept, as on the software path.
 //
-// Motion is paced by SceneClock: 60 frames/s while an object loads, 20 while
-// the gear turns or the crescent fills, and the float (6 px over about 10 s)
-// is only an offset, `bob`, that QML adds to the item's position: moving the
-// painted image costs far less than painting it again. With `running` false
-// the gear and the float slow to a stop (Pace); a load in progress still
-// finishes.
+// Motion is paced by SceneClock: 60 frames/s while an object loads; on its
+// timer 20 while the gear turns or the crescent fills, and the float (6 px
+// over about 10 s) moves in whole pixels at 5; on a synced clock (an
+// accelerated renderer) the gear and the float move on every frame, the
+// float by fractions of a pixel. The float is only an offset, `bob`, that QML
+// adds to the item's position: moving the drawn object costs far less than
+// drawing it again. With `running` false the gear and the float slow to a
+// stop (Pace); a load in progress still finishes.
 //
 // A Game Card's MUN Shape (docs/shape.md) dresses the card object: its
 // screen shows the card's window image (or its cover) instead of the
@@ -30,7 +43,9 @@
 // are painted again only when these change.
 //
 // The item is square and centred on the orb (640 x 640 logical pixels fits
-// every object). GUI thread only.
+// every object). Properties and motion on the GUI thread; the painting
+// thread works on copies (Look) and hands its layers back queued; the
+// destructor waits for it.
 #pragma once
 
 #include "sceneclock.h"
@@ -42,6 +57,7 @@
 #include <QVariant>
 #include <QQuickPaintedItem>
 #include <QString>
+#include <QThreadPool>
 #include <QtQml/qqmlregistration.h>
 
 class HeroIcon : public QQuickPaintedItem {
@@ -53,8 +69,9 @@ class HeroIcon : public QQuickPaintedItem {
     // How full the card's crescent should be, 0 to 1; it eases there.
     Q_PROPERTY(qreal lit READ lit WRITE setLit NOTIFY litChanged)
     Q_PROPERTY(bool running READ running WRITE setRunning NOTIFY runningChanged)
-    // Vertical offset of the float, whole logical pixels.
-    Q_PROPERTY(int bob READ bob NOTIFY bobChanged)
+    // Vertical offset of the float in logical pixels: whole on SceneClock's
+    // timer, fractional on a synced clock.
+    Q_PROPERTY(qreal bob READ bob NOTIFY bobChanged)
     // The card object's MUN Shape: the image its screen shows (a QImage;
     // anything else, MUN's crescent), its outline ("card" or "organic"), how
     // far the organic outline is shaped (0 to 1), its light (invalid: MUN's).
@@ -79,7 +96,7 @@ public:
     void setLit(qreal lit);
     bool running() const { return m_running; }
     void setRunning(bool running);
-    int bob() const { return m_bob; }
+    qreal bob() const { return m_bob; }
     QVariant cardWindow() const { return m_window.isNull() ? QVariant() : QVariant::fromValue(m_window); }
     void setCardWindow(const QVariant &window);
     QString cardShape() const { return m_cardShape; }
@@ -91,27 +108,18 @@ public:
     qreal cardReveal() const { return m_reveal; }
     void setCardReveal(qreal reveal);
 
-signals:
-    void iconChanged();
-    void litChanged();
-    void runningChanged();
-    void bobChanged();
-    void cardChanged();
-
-private:
-    void onTick(quint64 frame);
-    void updateDemand();
-    int rate() const;
-    bool loading() const { return m_progress < 1; }
-    bool filling() const;
     enum Pass { Shadow = 1, Wire = 2, Face = 4 };
     // A layer cropped to what it shows. `origin` is its top-left corner in
     // device pixels: from the item's corner for a still object's layers
     // (painted as the item shows them, device pixel ratio set), from the
     // object's centre for the turning gear's (painted in its own frame).
+    // `id` names the picture; it outlives the image, which the graphics
+    // path lets go once its texture has it.
     struct Layer {
         QImage image;
         QPointF origin;
+        QSize size;
+        qint64 id = 0;
     };
     struct Layers {
         Layer shadow, wire, face;
@@ -119,15 +127,60 @@ private:
         bool turning = false;  // the gear: painted in its own frame, turned and leaned when drawn
         qreal scale = 0;       // device pixels per logical pixel they were painted at
         qreal lit = -1;        // the crescent they show (the card only)
+        quint64 look = 0;      // the graphics path's: the card's styleKey() they were painted with
     };
-    // The still layers of `key`, painted now if missing or out of date.
+    // What the card's layers depend on besides the key and the scale: a copy
+    // the painting thread can work on.
+    struct Look {
+        QImage window;
+        QString cardShape;
+        qreal morph = 0;
+        QColor cardGlow;
+        qreal reveal = 1;
+        qreal lit = 0.16;
+    };
+
+signals:
+    void iconChanged();
+    void litChanged();
+    void runningChanged();
+    void bobChanged();
+    void cardChanged();
+
+protected:
+    QSGNode *updatePaintNode(QSGNode *old, UpdatePaintNodeData *data) override;
+    void releaseResources() override;
+
+private:
+    void onTick(quint64 frame);
+    void updateDemand();
+    int rate() const;
+    bool loading() const { return m_progress < 1; }
+    bool filling() const;
+    Look look() const;
+    // The graphics path (on the GUI thread): whether it draws, whether
+    // `key`'s layers are there to show and whether they are out of date,
+    // asking the painting thread for those shown that are, and taking them
+    // back.
+    bool onGpu() const;
+    quint64 styleKey() const;
+    bool ready(const QString &key) const;
+    bool stale(const QString &key, qreal scale) const;
+    void request();
+    void painted(const QString &key, const Layers &layers, qint64 ms);
+    // The software path's still layers of `key`, painted now if missing or
+    // out of date.
     const Layers &layersFor(const QString &key, qreal scale);
+    // `composite`: the graphics path's (`loaded` composed of the others, the
+    // gear's shadow as a layer of its own).
+    static Layers paintLayers(const QString &key, const Look &look, qreal scale, const QSizeF &size, bool composite);
     static Layer cropped(const QImage &image, const QPointF &reference, qreal ratio);
     void drawObject(QPainter *painter, const QString &key, qreal progress, qreal alpha);
     // The object's layers drawn as vectors in its own frame (the painter
     // already there); `item` and `scale` as for its glows (see heroicon.cpp).
-    void drawLayers(QPainter *painter, const QTransform &item, qreal scale, qreal sigmaScale, const QString &key,
-                    qreal progress, qreal alpha, qreal time, int layers, bool offsetShadow) const;
+    static void drawLayers(QPainter *painter, const QTransform &item, qreal scale, qreal sigmaScale,
+                           const QString &key, const Look &look, qreal progress, qreal alpha, qreal time,
+                           int layers, bool offsetShadow);
 
     QString m_icon = QStringLiteral("card");
     QString m_previous;
@@ -136,14 +189,18 @@ private:
     qreal m_litTarget = 0.16;
     bool m_running = true;
     Pace m_pace;              // of the gear and the float
-    int m_bob = 0;
+    qreal m_bob = 0;
     qreal m_time = 0;         // seconds of motion shown, for the gear and the float
-    QElapsedTimer m_clock;
+    qreal m_last = -1;        // SceneClock's seconds at the last frame; -1 after a pause
     QHash<QString, Layers> m_layers;   // of the object in focus and the one fading out
+    QHash<QString, bool> m_asked;      // the graphics path's: keys the painting thread is working on
     void cardRestyled();
     QImage m_window;          // the card's screen, from its Shape
     QString m_cardShape = QStringLiteral("card");
     qreal m_morph = 0;
     QColor m_cardGlow;
     qreal m_reveal = 1;
+    // Last: destroyed first, waiting for a painting in progress while the
+    // rest is still whole.
+    QThreadPool m_painter;
 };

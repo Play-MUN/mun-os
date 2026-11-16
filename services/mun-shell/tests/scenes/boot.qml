@@ -5,7 +5,8 @@ import MUN.Shell
 // here as the binary makes it on the first start of a boot (the start-up
 // plays), against the stand-ins for the card service and the launcher the
 // test runs. Every 100 ms it prints a BOOT line: the start-up's clock (t),
-// whether it plays, waits for the system (the LED breathing), may be skipped
+// whether it plays, waits for the system (the LED breathing) or is in standby
+// before it (the LED lit, its opacity in `led`), may be skipped
 // and shows its hint (-1: the layer's drawing is gone), whether Home is
 // powered and whether the memory has settled (src/memory.h). CONFIG's steps
 // press a key at a time ({"at": ms, "key": "A"}: the key goes through Main's
@@ -38,7 +39,9 @@ Item {
     function state() {
         // Looked up each time: the layer lets its drawing go once it has left.
         const hint = find(boot, it => it.objectName === "skipHint")
-        return { t: Math.round(boot.t * 100) / 100, playing: boot.playing, waiting: boot.waiting, canSkip: boot.canSkip,
+        const led = find(boot, it => it.objectName === "standbyLed")
+        return { t: Math.round(boot.t * 100) / 100, playing: boot.playing, waiting: boot.waiting, warming: boot.warming,
+                 standby: boot.standby, led: led ? Math.round(led.opacity * 100) / 100 : -1, canSkip: boot.canSkip,
                  hint: hint ? Math.round(hint.opacity * 100) / 100 : -1, shown: boot.shown,
                  ready: boot.ready, powered: main.powered, settled: Memory.settled }
     }

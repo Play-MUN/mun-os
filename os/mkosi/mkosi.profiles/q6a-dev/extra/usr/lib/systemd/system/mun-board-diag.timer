@@ -1,0 +1,12 @@
+# Development image for a board (profile q6a-dev): long enough for the shell
+# to have found its display or given up once (30 s wait, then a restart).
+[Unit]
+Description=MUN board diagnostics: dump 90 s after boot
+
+[Timer]
+OnBootSec=90s
+AccuracySec=1s
+Unit=mun-board-diag-boot.service
+
+[Install]
+WantedBy=timers.target

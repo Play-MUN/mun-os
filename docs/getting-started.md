@@ -50,10 +50,11 @@ Use the tools of the same release as the image when you can.
 
 ## 3. The image
 
-A preview release carries the image, its record (`BUILD-INFO.json`), three
-Game Cards (MUN Collect, MUN Collect dressed in the `sea` MUN Shape sample,
-and the MUN Test Card), the licence texts and `release.json`, which lists
-every file with its size and SHA-256. These pages are for v0.1.0-dev.4; if
+A preview release carries the image, its record (`BUILD-INFO.json`), four
+Game Cards (MUN Collect; MUN Collect dressed in the `sea` MUN Shape sample;
+MUN Collect dressed in Reef, the example of MUN Shape's motion; and the MUN
+Test Card), the licence texts and `release.json`, which lists every file
+with its size and SHA-256. These pages are for v0.1.0-dev.5; if
 it is not on the
 [releases page](https://github.com/Play-MUN/mun-os/releases) yet, use the
 latest preview there, with the pages of its own tag, or build this branch's
@@ -61,7 +62,7 @@ image ([build the image yourself](#build-the-image-yourself)). Give
 `./mun get` the address of its `release.json`:
 
 ```sh
-./mun get https://github.com/Play-MUN/mun-os/releases/download/v0.1.0-dev.4/release.json
+./mun get https://github.com/Play-MUN/mun-os/releases/download/v0.1.0-dev.5/release.json
 ```
 
 It downloads every file, checks each one against `release.json`, installs
@@ -69,6 +70,15 @@ the image under `.local/mun/builds/` and the cards under `.local/gamecards/`.
 An interrupted download resumes when you run the same command again. A Game
 Card that already exists is never replaced (it may hold your saves). On
 Windows: `py mun get …`.
+
+Before it fetches anything it compares what is left to download and unpack
+with the free space on the disk, and says so if there is not enough. It
+refuses a download it cannot hold to its rules, naming the reason: an
+address that redirects from https to plain http; a `release.json` whose
+file names a computer would not keep apart or whose sizes no release has;
+an image that does not hold all of itself (one that would read another file
+of your computer as its disk). None of that happens with a release from the
+releases page.
 
 If you played an earlier preview, its console (`play`) stays on that image:
 a console keeps the image it was made from, and a new one is made from the
@@ -104,11 +114,13 @@ has the keyboard while it is in front:
 | Esc (or B) | Go back |
 | Left, Right | Change a setting |
 
-Home has four entries, each with its panel on the right:
+Home has four entries on its orbit, each with its panel on the right:
 
-- **Game Card**: the slot. It is empty for now: "Slot empty".
-- **My games**: "There are no games on the console. Your games live on their
-  Game Cards."
+- **MUN Disk**: the slot. It is empty for now ("Insert a disk"; the line at
+  the top says "Slot empty"). MUN Disk is the name the console's medium is
+  taking; the format, the tools and this guide still say Game Card, and
+  they are the same thing.
+- **Universe**: "Nothing here yet. Your games travel on their MUN Disks."
 - **Settings**: six sections. *Display* (the resolution, which the window
   follows), *Sound* (the menus' sounds), *Appearance and accessibility*
   (MUN Shape, Reduce motion), *Language and time* (English or Spanish),
@@ -118,8 +130,12 @@ Home has four entries, each with its panel on the right:
 - **Turn off**: shuts the console down cleanly and closes the window; closing
   the window yourself is pulling the plug.
 
+![Home in the virtual console with the slot empty: MUN Disk, Universe, Settings and Turn off on an orbit, and MUN Disk's panel asking for a disk](images/home.en.jpg)
+
 The line at the top says which card is in, the network (*Offline*: the
-console needs none) and the time.
+console needs none), the moon's phase and the time.
+
+![Settings in the virtual console, on Display: the six sections on the orbit and the display's settings on the panel](images/settings.en.jpg)
 
 ## 5. Insert a Game Card and play
 
@@ -130,7 +146,7 @@ With Home on screen, from a second terminal in the same folder:
 ```
 
 That puts `.local/gamecards/collect.img` in the console's slot, as a hand
-would. The console reads the card and checks it, and Game Card shows MUN
+would. The console reads the card and checks it, and MUN Disk shows MUN
 Collect, its panel saying the card is ready. **Enter, Enter** is Play.
 
 In MUN Collect the arrows move the square, **S** saves on the card
@@ -140,10 +156,10 @@ OK.
 
 ## 6. Eject it safely, and continue later
 
-On the Game Card panel choose **Eject safely**: the console finishes with the
+On MUN Disk's panel choose **Eject safely**: the console finishes with the
 card and releases it ("You can remove the Game Card"), and the window takes
-it out of the slot at once: Game Card is empty again. Then **Turn off**: Up
-from Game Card, Enter, Enter.
+it out of the slot at once: MUN Disk asks for a disk again. Then **Turn
+off**: Up from MUN Disk (the menu goes round), Enter, Enter.
 
 Later, the card goes in as the console starts:
 
@@ -156,7 +172,7 @@ you saved it. The save is on the card (`.local/gamecards/collect.img`), not
 in the console: another console, or another build, continues from it.
 
 When you are done, **Esc** ends the game, **Enter** is OK on "Session
-ended", and **Turn off** (Up from Game Card, Enter, Enter) closes the
+ended", and **Turn off** (Up from MUN Disk, Enter, Enter) closes the
 console. The next section starts a console of its own.
 
 ## 7. See MUN Shape
@@ -180,8 +196,26 @@ Without e2fsprogs, the release's own dressed card shows the same:
 `./mun play --card collect-sea` (it is installed as
 `.local/gamecards/collect-sea.img` beside MUN Collect, with saves of its own).
 
+This release's image also plays MUN Shape's motion, an experimental draft
+([MUN Shape motion](shape-motion.md#trying-it)), and brings its example:
+`collect-reef`, MUN Collect dressed in Reef.
+
+```sh
+./mun play --card collect-reef
+```
+
+The reef moves behind Home: schools of fish, a shark, crabs, kelp. Move the
+focus to Play and a school gathers below the card; *Reduce motion* holds
+the scene still. Installing a release never replaces a card you already
+have.
+
+![Home with MUN Collect dressed in Reef: the reef behind the menus and the card's window on the disc](images/home-reef.en.jpg)
+
 *Settings* › *Appearance and accessibility* › *MUN Shape* (Full, Colours
 only, Off) and *Reduce motion* change how much of it you see.
+
+![Settings, on Appearance and accessibility: MUN Shape set to Full and Reduce motion off](images/settings-appearance.en.jpg)
+
 [See MUN Shape in action](guides/see-shape-in-action.md) shows how such a
 card is made and what to look at; [dress the console in your
 game](guides/shape-your-game.md) makes one of your own.

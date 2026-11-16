@@ -28,6 +28,11 @@ jobs:
           python-version: "3.12"
       - name: e2fsprogs (the card tools' mke2fs and debugfs)
         run: |
-          if [ "$RUNNER_OS" = Linux ]; then sudo apt-get install -y -q --no-install-recommends e2fsprogs; else brew install e2fsprogs; fi
+          if [ "$RUNNER_OS" = Linux ]; then
+            sudo apt-get update -q
+            sudo apt-get install -y -q --no-install-recommends e2fsprogs
+          else
+            brew install e2fsprogs
+          fi
       - name: make check
         run: make check

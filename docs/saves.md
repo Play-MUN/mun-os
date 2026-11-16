@@ -39,7 +39,15 @@ A card's save is `<saves.location>/<card.id>/save.json`, for example
 
 Next to it the console keeps `save.json.prev`, the previous envelope, and
 moves a file it cannot parse aside as `save.json.damaged-<time>` instead of
-deleting it.
+deleting it. If the card has no `saves.location` directory, the console
+makes it, and the game's directory in it, at the first save.
+
+The envelope of a single-object save is at most 112 KiB on the card: the
+game's 64 KiB as the console spaces them out, and the envelope's own fields.
+The console measures the bytes it is about to write against the bound it
+reads with, so a save it confirms is one it reads back whole; a larger file
+under that name is treated as a damaged save by the console and by
+`mun-card`.
 
 ### What "saved" means
 
@@ -50,6 +58,16 @@ operation, the directory was synced and the card was remounted read-only,
 which flushes the journal and marks the file system clean. At every step the
 card still holds a loadable save: the old one until the final rename, the new
 one after it.
+
+The kernel refuses that last remount while a file removed from the card is
+still open, and a save removes one, the previous copy it replaces; a game on
+a `mount`-access card can hold it open through its own view of the card.
+The save is then answered `sync_failed`, "La partida se escribió, pero la
+tarjeta no pudo cerrarse; no la retires todavía": the bytes are on the card,
+but a card pulled while writable is one the console would refuse. The
+console does not leave it so: it tries the remount again every 5 s and before
+any safe removal, which answers `card_busy` for as long as the card is still
+writable.
 
 The writer reaches the save directory one component at a time without
 following links; a link or a component of the wrong type anywhere on the way
@@ -91,11 +109,26 @@ To save, the game connects, sends one line and reads one line:
 ```
 
 - `schema` is a positive integer; `data` is a JSON object of at most 64 KiB,
-  stored verbatim and never interpreted by the console.
+  stored verbatim and never interpreted by the console. The 64 KiB are
+  measured as compact JSON in UTF-8, no space between values and every
+  character as itself, however the line spells it: a character sent as a
+  `\uXXXX` escape counts as its UTF-8 bytes. A larger object is
+  `save_too_large`. Text that UTF-8 cannot carry (half of a surrogate pair,
+  which JSON can spell) is `save_invalid`: the card would not keep what the
+  game sent.
+- The line itself may take up to 388 KiB (six times the bound, the most an
+  escaped object needs, and 4 KiB of framing); a longer one is answered
+  `save_too_large`. A line that is not a JSON object, is not UTF-8 or nests
+  arrays and objects more than 64 levels deep is not a request and gets no
+  answer.
+- One request per connection, sent within 10 s of connecting: a connection
+  that has not asked by then is closed, and anything after the request line
+  is ignored. The socket holds eight connections; a ninth takes the place of
+  the one that has kept silent longest, never of one waiting for its answer.
 - One save at a time per session (`save_busy`). A reply arrives only after the
   card holds the save, or with the reason it does not: `no_space`,
   `card_removed`, `card_mismatch`, `save_path_unsafe`, `save_too_large`,
-  `save_invalid`, `sync_failed`, `write_failed`, `no_session`,
+  `save_invalid`, `sync_failed`, `write_failed`, `save_failed`, `no_session`,
   `reader_unavailable`, `card_unavailable`.
 - A save is bound to the session and the insertion it was started from; a
   late reply for a session that has ended is not delivered, and a card that
@@ -133,8 +166,21 @@ in the game's home is saved; settings and caches stay in the session's RAM.
 | `any` | always; only for formats that cannot be torn |
 
 For both XML checks one NUL at the very end is ignored; document type and
-entity declarations are refused. A truncated in-place write fails `zlib` and
-`zlib-xml` by construction.
+entity declarations are refused. The document is read in UTF-8, US-ASCII,
+ISO-8859-1 or another single-byte encoding its declaration names; a unit in
+UTF-16, in a multibyte encoding (Shift-JIS, EUC-JP, GBK) or under a name the
+console does not know cannot be shown to be complete and fails its check. A
+truncated in-place write fails `zlib` and `zlib-xml` by construction.
+
+How far a unit may inflate is bounded: to 64 times the card's
+`saves.max_bytes` and never beyond 64 MiB, and a `zlib-xml` unit to 16 MiB.
+The units checked together (one save on the card, or one copy of the
+directory) also share a budget of four times that bound: when more than four
+`zlib` or `zlib-xml` units are checked at once, each may inflate to its share
+of it (with 64 of them, a sixteenth of the bound each). Units checked `any`
+or `xml` take no share. A unit that would inflate further fails its check. `mun-card` judges a unit
+by the same rule, bounds and encodings included, when it decides whether a
+card's save is one the console would restore.
 
 ### When the console copies them
 
@@ -168,10 +214,24 @@ player is told. Directory-save games get neither `MUN_SAVE_FILE` nor
 The session result carries the outcome, shown under the result line:
 "Partida guardada en la Game Card (HH:MM)"; "La última partida no se guardó:
 <cause>" when the last attempt failed; "Se perdieron los cambios de la
-partida posteriores a HH:MM" when the card was removed with unsaved changes;
-"Una ranura no estaba completa; se conservó su versión anterior" when a unit
-was carried; and whether the save was restored, recovered from the previous
-copy or could not be loaded.
+partida posteriores a las HH:MM" when the card was removed, or the reader
+lost, with unsaved changes, HH:MM being the time of the save the card holds,
+or "Los cambios de la partida de esta sesión no llegaron a la Game Card" when
+it holds none; "Una ranura no estaba completa; se conservó su versión
+anterior" when a unit was carried and "Una ranura nueva estaba incompleta y
+no se guardó" when a new one was left out; and whether the save was
+restored, recovered from the previous copy ("Partida recuperada de la copia
+anterior") or could not be loaded.
+
+If the console cannot take a read lease at all, it cannot tell whether the
+game is writing, and nothing is copied while the game runs (`save_unverified`):
+the result then says "No se pudo comprobar si el juego estaba escribiendo sus
+partidas, y no se copiaron mientras se jugaba".
+
+With the console in English the shell shows the outcome in its own words:
+"Progress saved on the Game Card."; "Progress after HH:MM was not saved on
+the Game Card." when the card left with unsaved changes; and "The latest
+progress was not saved on the Game Card." for any other failure.
 
 ### Limits
 
@@ -185,8 +245,9 @@ copy or could not be loaded.
 
 - **Safe removal** refuses while a session uses the card; otherwise no new
   writes are accepted, a write in flight completes, the card is unmounted
-  strictly, and only then may it be pulled. If the unmount fails, the card
-  stays mounted and usable and the request may be retried.
+  strictly, and only then may it be pulled. If the unmount fails, or the card
+  is still writable after a save ([What "saved" means](#what-saved-means)),
+  the card stays mounted and usable and the request may be retried.
 - **Unexpected removal** ends the session (`card_removed`); a write in flight
   fails and is reported; the previous save on the card is intact.
 - A card pulled during a write comes back needing journal recovery, and the

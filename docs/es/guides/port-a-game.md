@@ -108,7 +108,8 @@ inglés).
 
 ## Lo que aún no hay
 
-Mandos (por ahora solo teclado), actualizaciones del contenido de una
-tarjeta, otros perfiles de ejecución y hardware físico: véase la
+Mandos en los juegos (por ahora solo teclado), actualizaciones del contenido
+de una tarjeta, otros perfiles de ejecución y el hardware de la consola:
+véase la
 [arquitectura](../../architecture.md) (en inglés). El perfil GL es
 provisional: su lista de bibliotecas registra versiones, no promete una ABI.

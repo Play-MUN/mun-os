@@ -1,6 +1,8 @@
 #include "shape.h"
 
 #include "contrast.h"
+#include "decodingmarker.h"
+#include "pngchunks.h"
 #include "readpalette.h"
 #include "shapefront.h"
 
@@ -44,7 +46,8 @@ const QColor kNeutralInk(0x13, 0x14, 0x17);     // a chosen entry's label
 
 // A marker in the runtime directory, which outlives the shell's restarts
 // (RuntimeDirectoryPreserve=yes in the unit) and not a reboot: `shape-decoding`
-// names the insertion being decoded, `shape-cue` the one whose cue is spent.
+// names the insertion being decoded, `shape-skipped` the one a start skips
+// for it (decodingmarker.h), `shape-cue` the one whose cue is spent.
 // Without a runtime directory there are none.
 QString runtimeFile(const char *name)
 {
@@ -75,10 +78,18 @@ QColor colourOf(const QVariant &value)
     return isColour(value) ? QColor(value.toString()) : QColor();
 }
 
-// Decodes an image with its dimensions checked first and Qt's allocation
-// limit in force; null if it is not a decodable image within the limits.
+// Decodes an image with its chunks scanned and its dimensions checked first
+// and Qt's allocation limit in force; null if it is not a decodable image
+// within the limits. The scan comes before the reader: asked for a size, the
+// reader already keeps, and inflates, every text chunk in the file
+// (pngchunks.h), which no limit of Qt's covers.
 QImage decode(QIODevice *device, const QString &what)
 {
+    if (!pngchunks::withinBounds(*device)) {
+        qWarning("mun-shell: shape: %s has more ancillary data (text, profile) than the console accepts; not shown",
+                 qPrintable(what));
+        return {};
+    }
     QImageReader reader(device, "png");
     const QSize size = reader.size();
     if (!size.isValid() || size.width() < 1 || size.height() < 1 || size.width() > kWindowMaxSide
@@ -148,9 +159,17 @@ void ShapeLoader::load(quint64 token, const QVariantMap &request)
     const bool full = request.value("mode").toString() == QLatin1String("full");
 
     // The crash guard: if decoding below takes the shell down, the next start
-    // finds this and skips the insertion (Shape::Shape).
+    // finds this and skips the insertion (Shape::Shape). It guards only if it
+    // is there: when it cannot be written, no image is decoded, and the card
+    // object and the read level are as with images that do not decode.
+    // (Without a runtime directory there is no marker to write.)
     const QString marker = runtimeFile("shape-decoding");
-    writeMarker(marker, insertion);
+    std::string unwritten;
+    const bool guarded = marker.isEmpty() || decodingmarker::hold(QFile::encodeName(marker).toStdString(),
+                                                                  insertion.toStdString(), &unwritten);
+    if (!guarded)
+        qWarning("mun-shell: shape: the decoding marker could not be written (%s); no image of insertion %s is decoded",
+                 unwritten.c_str(), qPrintable(insertion));
 
     QVariantMap document;
     if (!path.isEmpty()) {
@@ -181,9 +200,9 @@ void ShapeLoader::load(quint64 token, const QVariantMap &request)
     bool windowFailed = false;
     if (full && !windowPath.isEmpty()) {
         QFile file(path + QLatin1Char('/') + windowPath);
-        if (kPackagePath.match(windowPath).hasMatch() && file.open(QIODevice::ReadOnly))
+        if (guarded && kPackagePath.match(windowPath).hasMatch() && file.open(QIODevice::ReadOnly))
             window = decode(&file, windowPath);
-        else
+        else if (guarded)
             qWarning("mun-shell: shape: %s could not be read; not shown", qPrintable(windowPath));
         windowFailed = window.isNull();
     }
@@ -193,7 +212,7 @@ void ShapeLoader::load(quint64 token, const QVariantMap &request)
     const bool readLevel = !document.contains("palette");
     QImage cover;
     const QByteArray coverBytes = QByteArray::fromBase64(request.value("cover").toString().toLatin1());
-    if (!coverBytes.isEmpty() && coverBytes.size() <= kCoverMaxBytes && (coverAsWindow || readLevel)) {
+    if (guarded && !coverBytes.isEmpty() && coverBytes.size() <= kCoverMaxBytes && (coverAsWindow || readLevel)) {
         QBuffer buffer;
         buffer.setData(coverBytes);
         buffer.open(QIODevice::ReadOnly);
@@ -208,8 +227,8 @@ void ShapeLoader::load(quint64 token, const QVariantMap &request)
     if (readLevel && !cover.isNull())
         result.insert("read", readPalette(cover));
 
-    if (!marker.isEmpty())
-        QFile::remove(marker);
+    if (!marker.isEmpty() && guarded)
+        decodingmarker::release(QFile::encodeName(marker).toStdString());
     emit loaded(token, result, window);
 }
 
@@ -217,13 +236,30 @@ void ShapeLoader::load(quint64 token, const QVariantMap &request)
 
 Shape::Shape(QObject *parent) : QObject(parent)
 {
-    const QString marker = runtimeFile("shape-decoding");
-    if (QFile::exists(marker)) {
-        m_skip = readMarker(marker);
-        QFile::remove(marker);
+    // A decoding marker left by the last start names the insertion to skip.
+    // It is kept (`shape-skipped`) for the starts that follow: a clean stop,
+    // as around every game, removes the markers but not what is kept, so the
+    // image that ended the shell is not read again after every game.
+    const auto pathOf = [](const char *name) { return QFile::encodeName(runtimeFile(name)).toStdString(); };
+    const decodingmarker::Skip identity = decodingmarker::resume(pathOf("shape-decoding"), pathOf("shape-skipped"));
+    m_skip = QString::fromStdString(identity.insertion);
+    if (identity.found)
         qWarning("mun-shell: shape: the last start ended while decoding insertion %s; its identity is skipped",
                  qPrintable(m_skip));
-    }
+    else if (!m_skip.isEmpty())
+        qInfo("mun-shell: shape: decoding insertion %s ended an earlier start; its identity is still skipped",
+              qPrintable(m_skip));
+    // The same for a motion's images (MotionScene's loader): that
+    // insertion's motion is not played again, its v1 look is.
+    const decodingmarker::Skip moving = decodingmarker::resume(pathOf("shape-decoding-motion"),
+                                                               pathOf("shape-skipped-motion"));
+    m_skipMotion = QString::fromStdString(moving.insertion);
+    if (moving.found)
+        qWarning("mun-shell: shape: the last start ended while decoding the motion of insertion %s; its motion is "
+                 "skipped, its v1 look shown", qPrintable(m_skipMotion));
+    else if (!m_skipMotion.isEmpty())
+        qInfo("mun-shell: shape: decoding the motion of insertion %s ended an earlier start; its motion is still "
+              "skipped, its v1 look shown", qPrintable(m_skipMotion));
     m_cueSpent = readMarker(runtimeFile("shape-cue"));
     // Every decode of the shell's (the card window, the cover, the world) has
     // this limit; set once, before any loader runs.
@@ -357,6 +393,7 @@ void Shape::clear(bool notify)
     m_sounds.clear();
     m_live = false;
     m_world.clear();
+    m_motion.clear();
     m_root.clear();
     m_plated = false;
     m_veil = QColor();
@@ -525,6 +562,13 @@ void Shape::apply(quint64 token, const QVariantMap &result, const QImage &window
 
     // The world and the transition (full mode: colours only draws no world).
     const QVariantMap world = document.value("world").toMap();
+    const QVariantMap motion = document.value("motion").toMap();
+    // Both, when the package has both: QML draws the world only if the
+    // motion cannot be loaded.
+    if (full && !motion.isEmpty() && insertion != m_skipMotion) {
+        m_motion = motion;
+        m_root = m_card.value("shape").toMap().value("path").toString();
+    }
     if (full && !world.isEmpty() && world.contains("backdrop")) {
         m_world = world;
         m_world.insert("bytes", m_card.value("shape").toMap().value("bytes"));
@@ -540,7 +584,7 @@ void Shape::apply(quint64 token, const QVariantMap &result, const QImage &window
     bool ok = false;
     const double seconds = transition.value("seconds").toDouble(&ok);
     m_seconds = ok && seconds >= 0.8 && seconds <= 4 ? seconds : 1.6;
-    m_plated = m_dressed || !m_world.isEmpty();
+    m_plated = m_dressed || !m_world.isEmpty() || !m_motion.isEmpty();
     if (!palette.isEmpty())
         m_veil = atLuminanceOf(colourOf(palette.value("deep")), kHandOver);
 
@@ -578,6 +622,8 @@ void Shape::apply(quint64 token, const QVariantMap &result, const QImage &window
     }
     if (!m_world.isEmpty())
         said << QStringLiteral("world");
+    if (!m_motion.isEmpty())
+        said << QStringLiteral("motion");
     if (package)
         said << QStringLiteral("%1 %2/%3 %4 s").arg(m_entry, m_transitionIn, m_transitionOut).arg(m_seconds, 0, 'f', 1);
     if (first)

@@ -11,7 +11,9 @@ use temporary directories and fake process, protocol and device boundaries.
 | File | Covers |
 | --- | --- |
 | `test_card.py` | Manifest validation, both naming generations, image creation and variants, offline inspection, conversion |
-| `test_shape.py` | MUN Shape packages (and the shell's agreement with the checker: its contrast rule, read palette, materials and sound bounds; MUN's surfaces never reading the card's identity; the fixtures, measure and wiring of the shell's behaviour regressions): the strict JSON profile, schema, file headers, budgets, contrast proofs and transition plans, the cover palette, the template, every defective package, the two samples, a card image read like its folder |
+| `test_shape.py` | MUN Shape packages (and the shell's agreement with the checker: its contrast rule, read palette, materials and sound bounds; MUN's surfaces never reading the card's identity; the fixtures, measure, stand-ins and wiring of the shell's behaviour regressions, and the release's judged run of their durations): the strict JSON profile, schema, file headers, budgets, contrast proofs and transition plans, the cover palette, the template, every defective package, the two samples, a card image read like its folder |
+| `test_shape_motion.py` | MUN Shape motion (`mun-shape/1.1`, draft): defaults, a 1.0 document keeping the blocks unknown, the look, sheets and frames, references, events, limits, the motion's own budget, states of actors, emitters and lights, the estimate; any defect drops the motion and keeps the v1 look |
+| `test_shape_export.py` | Exporting a MUN Shape package with its sources at one commit: only what Git tracks, every file with its SHA-256, the same identity for the same commit whatever the checkout knows of remotes, refused while something is not committed or a new file is not tracked, a verification that takes nothing but a whole export (its structure, its files, its package, the identity pinned), and a hook's repository never touched |
 | `test_cardd.py` | The card service: eligibility, states, framing, staging, single-object saves and their failures, safe release |
 | `test_cardd_shape.py` | The card service's MUN Shape export: after `valid`, whole or nothing, links and FIFOs, Play and saves during a copy, safe release within a chunk or pending past a stuck read, a release meeting a save and a copy in either order, removal, replacement and late completions, a retry beside a deferred cleanup, failures on the way to publication, start/stop cleanup |
 | `test_directory_saves.py` | Directory saves: checks, capture rule, carried units, restore, adoption, failure cases |
@@ -19,8 +21,8 @@ use temporary directories and fake process, protocol and device boundaries.
 | `test_launch_cleanup.py` | The cleanup helper and unit |
 | `test_deploy.py` | The services' staging scripts, run into temporary roots |
 | `test_reset.py` | The console reset: its plan against its README, a reset run twice and cut short after each step, links not followed, a card's files untouched, the mark written whole, the refusals |
-| `test_os.py` | The image composition, pinned inputs, BUILD-INFO and the `./mun` entry point |
-| `test_mundev.py` | Builds, the builder and image guests of `./mun dev` |
+| `test_os.py` | The image composition, pinned inputs, a profile's image format and pinned packages, BUILD-INFO and the `./mun` entry point |
+| `test_mundev.py` | Builds, profiles, the builder and image guests of `./mun dev`, which take only a qcow2 build |
 | `test_vm.py` | The laboratory tool: QMP and qemu-ga framing, card attach/detach, the attach registry, lifecycle locks, release reconciliation, audio, downloads |
 | `test_foundation.py` | The documentation check: GitHub's anchors (repeated and accented headings), links, the translation map and its pairs, links from a translation, an original changed after its review |
 

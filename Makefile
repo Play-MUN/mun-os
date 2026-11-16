@@ -7,6 +7,7 @@ PY_TOOLS := mun $(wildcard scripts/*.py vm/*.py os/builder/*.py tests/test_*.py 
 check:
 	python3 scripts/check_foundation.py
 	@if command -v cc >/dev/null 2>&1; then $(MAKE) -s -C examples/mun-collect test; else echo "no C compiler: MUN Collect save tests skipped"; fi
+	@if command -v c++ >/dev/null 2>&1; then $(MAKE) -s -C services/mun-shell/tests test; else echo "no C++ compiler: MUN Shell display rule tests skipped"; fi
 	python3 -c 'import ast, sys; [ast.parse(open(f).read(), f) for f in sys.argv[1:]]; print("Python syntax OK:", *sys.argv[1:])' $(PY_TOOLS)
 	$(MAKE) test
 

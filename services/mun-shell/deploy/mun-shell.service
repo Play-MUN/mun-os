@@ -6,7 +6,11 @@ Description=MUN Shell (console UI on tty1)
 Documentation=file:///opt/mun/shell/README.md
 Conflicts=getty@tty1.service
 After=systemd-user-sessions.service getty@tty1.service systemd-udevd.service
-ConditionPathExists=/dev/dri/card0
+# No condition on the display: a display driver can come up after this unit
+# starts. The shell waits for card0 itself (MUN_DISPLAY_WAIT_SECONDS) and,
+# without one, exits with 69; it is then started again, without a limit, so
+# the console never stays without its interface in silence.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -51,21 +55,58 @@ Environment=QT_QUICK_BACKEND=software
 # and chooses that mode itself, through QT_QPA_KMS_CONFIG. Setting
 # QT_SCALE_FACTOR here would override the scale, and a KMS configuration the
 # player's choice of resolution.
+# No pointer is drawn, on either path: the console is driven by keys and
+# gamepads. linuxfb hides its cursor with the first; eglfs (a board's GPU
+# path, set by its profile) would otherwise put one on a hardware plane.
 Environment=QT_QPA_FB_HIDECURSOR=1
+Environment=QT_QPA_EGLFS_HIDECURSOR=1
 Environment=QT_QPA_EVDEV_KEYBOARD_PARAMETERS=grab=1
 Environment=XDG_RUNTIME_DIR=/run/mun-shell
 Environment=QT_LOGGING_RULES=qt.qpa.*=false
 
 ExecStart=/opt/mun/shell/bin/mun-shell
+# A clean stop (the launcher's, around every game; a shutdown; a new
+# resolution) is not a crash: the decoding markers are removed then, so the
+# next start does not skip an identity or a motion that was only being
+# decoded (src/shape.cpp, src/motionscene.cpp). After a crash or a kill they
+# stay and name the insertion to skip. "$$" passes "$" to the shell.
+ExecStopPost=/bin/sh -c 'if [ "$$SERVICE_RESULT" = success ]; then rm -f -- "$$XDG_RUNTIME_DIR/shape-decoding" "$$XDG_RUNTIME_DIR/shape-decoding-motion"; fi'
 Restart=on-failure
-RestartSec=2
+# A new resolution is a restart (75, below), black until the shell is back:
+# one second, not more. Without a display the shell waits for one itself
+# (MUN_DISPLAY_WAIT_SECONDS) before it exits, and a crash while decoding a
+# card's images is not repeated (the decoding markers); any other failure to
+# start (an interface that does not load, a library missing) is tried again
+# every second without end, five times as often as before: the console has
+# no interface then either way, and the journal is bounded.
+RestartSec=1
 # Qt's framebuffer VT handler exits with status 1 after SIGTERM; that is a clean stop.
 # 75 is the shell asking to start again: Qt opens the display once, so a new
-# resolution takes a new process (src/displaymode.h).
+# resolution takes a new process (src/displaymode.h). Failures are other
+# statuses, never these: 69 without a display, 70 when the interface does
+# not load (src/main.cpp).
 SuccessExitStatus=1 75
 RestartForceExitStatus=75
+# A ceiling on the shell's memory. By itself the shell holds 150 to 250 MiB,
+# and what a Game Card may add is bounded (a world's 200 MiB at most, a
+# motion's 64 MiB of decoded images; services/mun-shell/README.md): 2 GiB is
+# about four times all of that together, so only a fault reaches it. Without
+# a ceiling such a fault took all the console's memory before the kernel
+# chose, among every process, one to kill. With it the shell alone is
+# killed, which is a failure as any other: the unit starts again and the
+# decoding markers stay (ExecStopPost), naming what the next start skips.
+# No MemoryHigh: slowed down instead of stopped, the interface would stay on
+# screen, frozen.
+MemoryMax=2G
+OOMPolicy=stop
 
 # Hardening that does not interfere with fb/evdev access.
+# Sockets: local ones (its services, D-Bus) and netlink (the network panel's
+# addresses, udev's device events); no Internet socket, though the shell reads
+# what cards bring. Applied before the service user is taken, so it does not
+# imply no-new-privileges: sudo, which turning off and the reset go through,
+# still works (measured).
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
 NoNewPrivileges=no
 ProtectSystem=strict
 ProtectHome=yes

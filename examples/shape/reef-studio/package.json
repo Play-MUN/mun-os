@@ -1,0 +1,16 @@
+{
+  "name": "mun-shape-reef-studio",
+  "private": true,
+  "description": "Renders the reef template's sea (three.js) into a MUN Shape package's images",
+  "type": "module",
+  "scripts": {
+    "bake": "node bake.mjs",
+    "package": "python3 make_package.py"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "three": "0.187.0"
+  }
+}

@@ -1,5 +1,7 @@
 #include "shapeworld.h"
 
+#include "decodingmarker.h"
+#include "pngchunks.h"
 #include "sceneclock.h"
 #include "shapefront.h"
 
@@ -59,9 +61,15 @@ struct Header {
     QImage::Format format = QImage::Format_Invalid;
 };
 
+// Nothing (no size, no format) for a file whose chunks are over their bounds
+// (pngchunks.h), as for one that cannot be read: reading a header already
+// makes the reader keep, and inflate, every text chunk in the file.
 Header headerOf(const QString &path)
 {
-    QImageReader reader(path, "png");
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly) || !pngchunks::withinBounds(file))
+        return {};
+    QImageReader reader(&file, "png");
     return {reader.size(), reader.imageFormat()};
 }
 
@@ -389,6 +397,7 @@ bool WorldPainter::take(qint64 bytes, const QString &what, QString *why, bool *o
 }
 
 // Decodes one of the package's images (`what` names it in the journal) once
+// its chunks are within their bounds (pngchunks.h, before any reader) and
 // its header says it may be: within `maxSide`, and its decoding within what
 // the level has left, which is taken (*scratch) for the caller to give back
 // once the image is used. Qt's allocation limit (set once by Shape) holds too.
@@ -400,6 +409,10 @@ QImage WorldPainter::decode(const QVariant &name, int maxSide, const QString &wh
     QFile file(path);
     if (path.isEmpty() || !file.open(QIODevice::ReadOnly)) {
         *why = QStringLiteral("%1 cannot be read").arg(what);
+        return {};
+    }
+    if (!pngchunks::withinBounds(file)) {
+        *why = QStringLiteral("%1 has more ancillary data (text, profile) than the console accepts").arg(what);
         return {};
     }
     QImageReader reader(&file, "png");
@@ -456,6 +469,30 @@ void WorldPainter::prepare(quint64 generation, const QVariantMap &world, const Q
         wake();
         return;
     }
+    // The crash guard, as the card window's and the cover's (ShapeLoader::load):
+    // while this world's images are read (their headers by estimateFor, their
+    // pixels by load) the marker names its insertion, so that if reading one
+    // takes the shell down, its next start skips the insertion's identity
+    // (Shape) instead of reading the same image again at every restart. The
+    // insertion is the one the export's folder is named for; a root that is
+    // no export's (the laboratory's scenes) has no marker, nor has a shell
+    // without a runtime directory. A marker that cannot be written leaves
+    // nothing to guard the reading, so nothing is read.
+    const std::string insertion = decodingmarker::insertionOf(root.section(QLatin1Char('/'), -1).toStdString());
+    const QString runtime = qEnvironmentVariable("XDG_RUNTIME_DIR");
+    const QString marker = insertion.empty() || runtime.isEmpty() ? QString()
+                                                                  : runtime + QStringLiteral("/shape-decoding");
+    if (!marker.isEmpty()) {
+        std::string unwritten;
+        if (!decodingmarker::hold(QFile::encodeName(marker).toStdString(), insertion, &unwritten)) {
+            m_detail = 4;
+            emit prepared(generation, false, 4, 0,
+                          QStringLiteral("is not read: the marker that guards its decoding could not be written (%1)")
+                              .arg(QString::fromStdString(unwritten)));
+            wake();
+            return;
+        }
+    }
     // The richest level the headers say fits. A level whose images would then
     // take more than that (a format the header did not foretell) is given up
     // before the memory is taken, and the next one is tried.
@@ -473,6 +510,9 @@ void WorldPainter::prepare(quint64 generation, const QVariantMap &world, const Q
         if (ok || !over)
             break;
     }
+    // Every header is read and every image decoded: what follows reads no file.
+    if (!marker.isEmpty())
+        decodingmarker::release(QFile::encodeName(marker).toStdString());
     if (!ok) {
         clearPrepared();
         m_detail = 4;

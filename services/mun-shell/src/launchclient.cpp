@@ -146,6 +146,14 @@ void LaunchClient::handleMessage(const QJsonObject &message)
         }
         if (m_state != QLatin1String("idle"))
             m_requestPending = false;
+        // This shell's launch ended with the shell still here: its game never
+        // started. Matched by session, so an older result, a repeated message
+        // or the result of a game before this start is not taken for it.
+        if (!m_launchSession.isEmpty() && m_state == QLatin1String("idle")
+                && m_lastResult.value("session").toString() == m_launchSession) {
+            m_launchSession.clear();
+            emit launchFailed(m_lastResult.value("reason").toString());
+        }
     } else if (type == QLatin1String("released")) {
         m_releasePending = false;
         const bool ok = message.value("ok").toBool();
@@ -153,6 +161,7 @@ void LaunchClient::handleMessage(const QJsonObject &message)
         emit releaseFinished(ok, error.value("code").toString(), ok ? QString() : error.value("message").toString());
     } else if (type == QLatin1String("launch_result")) {
         m_requestPending = false;
+        m_launchSession = message.value("accepted").toBool() ? message.value("session").toString() : QString();
         if (!message.value("accepted").toBool()) {
             const QJsonObject error = message.value("error").toObject();
             m_lastError = error.value("message").toString();

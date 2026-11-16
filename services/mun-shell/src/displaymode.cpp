@@ -1,28 +1,54 @@
 #include "displaymode.h"
 
 #include <QByteArray>
-#include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QHash>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QList>
-#include <QRegularExpression>
 #include <QSaveFile>
+#include <QSize>
 
 #include <algorithm>
+#include <cerrno>
+#include <chrono>
+#include <cstring>
 #include <optional>
+#include <string>
+#include <thread>
+#include <vector>
+
+#include <fcntl.h>
+#include <unistd.h>
+#include <xf86drm.h>
+#include <xf86drmMode.h>
 
 namespace display {
 
 const QStringList kModes{QStringLiteral("1280x720"), QStringLiteral("1920x1080"), QStringLiteral("2560x1440")};
 const QString kResolutionKey = QStringLiteral("display/resolution");
 const QString kTrialKey = QStringLiteral("display/resolution-trial");
+const QString kRangeKey = QStringLiteral("display/range");
 
 namespace {
 
 Plan g_plan;
+// The display awaitDisplay() found, and the exact mode asked of Qt when the
+// shell chose it from the connector's own list (the cap).
+std::optional<Display> g_display;
+std::optional<Timing> g_requested;
+
+static_assert(kFlagPHSync == DRM_MODE_FLAG_PHSYNC && kFlagNHSync == DRM_MODE_FLAG_NHSYNC &&
+              kFlagPVSync == DRM_MODE_FLAG_PVSYNC && kFlagNVSync == DRM_MODE_FLAG_NVSYNC &&
+              kFlagInterlace == DRM_MODE_FLAG_INTERLACE && kFlagDoubleScan == DRM_MODE_FLAG_DBLSCAN,
+              "displaydevice.h's flags are the kernel's");
+
+const char kDrmClass[] = "/sys/class/drm";
+const char kGraphicsClass[] = "/sys/class/graphics";
+constexpr int kDefaultWaitSeconds = 30;
+constexpr int kMaxWaitSeconds = 600;
 
 // The interface is laid out on a 1920x1080 logical canvas, the design's own
 // pixels (qml/Theme.qml).
@@ -39,8 +65,8 @@ const QHash<QString, QString> kModelines{
     {QStringLiteral("2560x1440"), QStringLiteral("241.50 2560 2608 2640 2720 1440 1443 1448 1481 +hsync -vsync")},
 };
 
-// The kernel's connector types, as sysfs spells them ("card0-HDMI-A-1"), to
-// the names Qt's KMS configuration uses for the same outputs ("HDMI1"): Qt
+// The kernel's connector types, as sysfs and libdrm spell them ("HDMI-A-1"),
+// to the names Qt's KMS configuration uses for the same outputs ("HDMI1"): Qt
 // names by its own table, in which several kernel types share a name. A type
 // Qt does not name is not configured.
 const QHash<QString, QString> kQtTypeNames{
@@ -71,39 +97,128 @@ QByteArray readFile(const QString &path, qint64 limit = 64 * 1024)
     return file.read(limit);
 }
 
-struct Connector {
-    QString qtName;
-    QStringList modes;  // "1920x1080", the preferred one first
-    bool isVirtual = false;
+QString devicePath()
+{
+    return QStringLiteral("/dev/dri/") + QString::fromLatin1(kCard.data(), int(kCard.size()));
+}
+
+// Qt draws through its framebuffer platform on DRM (the unit's setting):
+// the case in which it opens card0 and nothing else.
+bool drawsOnCard0()
+{
+    return qEnvironmentVariable("QT_QPA_PLATFORM").startsWith(QStringLiteral("linuxfb")) &&
+           qEnvironmentVariableIntValue("QT_QPA_FB_DRM") != 0;
+}
+
+// card0, opened for reading what it reports; closed again before Qt opens
+// it, so the shell never holds the display's master role.
+class Card0
+{
+public:
+    Card0() : m_fd(::open(QFile::encodeName(devicePath()).constData(), O_RDWR | O_CLOEXEC)) {}
+    ~Card0()
+    {
+        if (m_fd >= 0)
+            ::close(m_fd);
+    }
+    Card0(const Card0 &) = delete;
+    Card0 &operator=(const Card0 &) = delete;
+    int fd() const { return m_fd; }
+
+    // The connector the kernel calls `name` ("HDMI-A-1"). `probe` reads it
+    // from the display again (its EDID, its state); otherwise what the
+    // kernel last saw. Freed by the caller (drmModeFreeConnector).
+    drmModeConnectorPtr connector(const std::string &name, bool probe) const
+    {
+        drmModeResPtr resources = m_fd >= 0 ? drmModeGetResources(m_fd) : nullptr;
+        if (!resources)
+            return nullptr;
+        uint32_t id = 0;
+        for (int i = 0; i < resources->count_connectors && !id; ++i) {
+            drmModeConnectorPtr current = drmModeGetConnectorCurrent(m_fd, resources->connectors[i]);
+            if (!current)
+                continue;
+            const char *type = drmModeGetConnectorTypeName(current->connector_type);
+            if (type && name == std::string(type) + "-" + std::to_string(current->connector_type_id))
+                id = current->connector_id;
+            drmModeFreeConnector(current);
+        }
+        drmModeFreeResources(resources);
+        return !id ? nullptr : probe ? drmModeGetConnector(m_fd, id) : drmModeGetConnectorCurrent(m_fd, id);
+    }
+
+    // Has the kernel read every connector again. Without a client that
+    // has (the kernel's own console on DRM, or a hotplug), a connector's
+    // state in sysfs can still read "unknown".
+    void probeAll() const
+    {
+        drmModeResPtr resources = m_fd >= 0 ? drmModeGetResources(m_fd) : nullptr;
+        if (!resources)
+            return;
+        for (int i = 0; i < resources->count_connectors; ++i) {
+            if (drmModeConnectorPtr connector = drmModeGetConnector(m_fd, resources->connectors[i]))
+                drmModeFreeConnector(connector);
+        }
+        drmModeFreeResources(resources);
+    }
+
+private:
+    int m_fd;
 };
 
-// The first connected connector of card0, in name order.
-std::optional<Connector> firstConnector()
+Timing timingOf(const drmModeModeInfo &mode)
 {
-    static const QRegularExpression entryRe(QStringLiteral("^card0-(.+)-(\\d+)$"));
-    static const QRegularExpression modeRe(QStringLiteral("^\\d{3,5}x\\d{3,5}$"));
-    const QDir drm(QStringLiteral("/sys/class/drm"));
-    const QStringList entries = drm.entryList({QStringLiteral("card0-*")}, QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
-    for (const QString &entry : entries) {
-        if (readFile(drm.filePath(entry + QStringLiteral("/status"))).trimmed() != "connected")
-            continue;
-        const QRegularExpressionMatch match = entryRe.match(entry);
-        const QString type = match.hasMatch() ? kQtTypeNames.value(match.captured(1)) : QString();
-        if (type.isEmpty())
-            continue;
-        Connector connector;
-        connector.qtName = type + match.captured(2);
-        connector.isVirtual = match.captured(1) == QStringLiteral("Virtual");
-        // One mode per line, sorted by the kernel with the preferred first;
-        // interlaced ones ("1920x1080i") are not offered.
-        for (const QByteArray &line : readFile(drm.filePath(entry + QStringLiteral("/modes"))).split('\n')) {
-            const QString mode = QString::fromLatin1(line.trimmed());
-            if (modeRe.match(mode).hasMatch() && !connector.modes.contains(mode))
-                connector.modes << mode;
-        }
-        return connector;
-    }
-    return std::nullopt;
+    Timing timing;
+    timing.clock = mode.clock;
+    timing.hdisplay = mode.hdisplay;
+    timing.hsyncStart = mode.hsync_start;
+    timing.hsyncEnd = mode.hsync_end;
+    timing.htotal = mode.htotal;
+    timing.vdisplay = mode.vdisplay;
+    timing.vsyncStart = mode.vsync_start;
+    timing.vsyncEnd = mode.vsync_end;
+    timing.vtotal = mode.vtotal;
+    timing.flags = mode.flags;
+    timing.preferred = mode.type & DRM_MODE_TYPE_PREFERRED;
+    return timing;
+}
+
+bool sameTiming(const Timing &a, const Timing &b)
+{
+    return a.clock == b.clock && a.hdisplay == b.hdisplay && a.hsyncStart == b.hsyncStart && a.hsyncEnd == b.hsyncEnd &&
+           a.htotal == b.htotal && a.vdisplay == b.vdisplay && a.vsyncStart == b.vsyncStart && a.vsyncEnd == b.vsyncEnd &&
+           a.vtotal == b.vtotal;
+}
+
+// The connector's modes, in its order (the preferred first), read from the
+// display.
+std::vector<Timing> readModes(const std::string &output)
+{
+    std::vector<Timing> modes;
+    Card0 card;
+    drmModeConnectorPtr connector = card.connector(output, true);
+    if (!connector)
+        return modes;
+    for (int i = 0; i < connector->count_modes; ++i)
+        modes.push_back(timingOf(connector->modes[i]));
+    drmModeFreeConnector(connector);
+    return modes;
+}
+
+// Qt's name for the kernel's connector ("HDMI-A-1" is "HDMI1"); empty for a
+// type Qt does not name.
+QString qtName(const QString &output)
+{
+    const qsizetype dash = output.lastIndexOf(QLatin1Char('-'));
+    if (dash <= 0)
+        return {};
+    const QString type = kQtTypeNames.value(output.left(dash));
+    return type.isEmpty() ? QString() : type + output.mid(dash + 1);
+}
+
+QString text(const std::string &value)
+{
+    return QString::fromStdString(value);
 }
 
 void setScale(int width, int height)
@@ -123,13 +238,14 @@ void scaleToFramebuffer()
         setScale(parts[0].toInt(), parts[1].toInt());
 }
 
-// Qt's KMS configuration for `mode` on the plan's connector, in the runtime
-// directory; its path, or empty if it could not be written.
-QString writeKmsConfig(const QString &runtime, const Plan &plan, const QString &mode, bool listed)
+// Qt's KMS configuration for `mode` ("1920x1080" or a modeline) on the
+// plan's connector, in the runtime directory; its path, or empty if it could
+// not be written. Qt 6.8's framebuffer platform ignores its device (card0
+// regardless); it is written for the platforms that read it.
+QString writeKmsConfig(const QString &runtime, const Plan &plan, const QString &mode)
 {
-    const QJsonObject output{{QStringLiteral("name"), plan.connector},
-                             {QStringLiteral("mode"), listed ? mode : kModelines.value(mode)}};
-    const QJsonObject config{{QStringLiteral("device"), QStringLiteral("/dev/dri/card0")},
+    const QJsonObject output{{QStringLiteral("name"), plan.connector}, {QStringLiteral("mode"), mode}};
+    const QJsonObject config{{QStringLiteral("device"), devicePath()},
                              {QStringLiteral("outputs"), QJsonArray{output}}};
     QSaveFile file(runtime + QStringLiteral("/kms.json"));
     if (!file.open(QIODevice::WriteOnly) || file.write(QJsonDocument(config).toJson()) < 0 || !file.commit())
@@ -146,10 +262,306 @@ QString takeResume(const QString &runtime)
         return {};
     const QString where = QString::fromLatin1(readFile(marker.fileName(), 32).trimmed());
     marker.remove();
-    return where == QStringLiteral("resolution") || where == QStringLiteral("reset") ? where : QString();
+    return where == QStringLiteral("resolution") || where == QStringLiteral("range") || where == QStringLiteral("reset")
+               ? where
+               : QString();
+}
+
+// One property of a DRM object, by name: its id, its value, a range
+// property's bounds and an enum's values by name.
+struct Property {
+    uint32_t id = 0;
+    uint64_t value = 0;
+    uint64_t min = 0;
+    uint64_t max = 0;
+    QHash<QString, uint64_t> enums;
+};
+
+std::optional<Property> property(int fd, uint32_t object, uint32_t type, const char *name)
+{
+    drmModeObjectPropertiesPtr props = drmModeObjectGetProperties(fd, object, type);
+    if (!props)
+        return std::nullopt;
+    std::optional<Property> found;
+    for (uint32_t i = 0; i < props->count_props && !found; ++i) {
+        drmModePropertyPtr p = drmModeGetProperty(fd, props->props[i]);
+        if (!p)
+            continue;
+        if (std::strcmp(p->name, name) == 0) {
+            Property q;
+            q.id = p->prop_id;
+            q.value = props->prop_values[i];
+            if ((p->flags & DRM_MODE_PROP_RANGE) && p->count_values >= 2) {
+                q.min = p->values[0];
+                q.max = p->values[1];
+            }
+            for (int e = 0; e < p->count_enums; ++e)
+                q.enums.insert(QString::fromLatin1(p->enums[e].name), p->enums[e].value);
+            found = q;
+        }
+        drmModeFreeProperty(p);
+    }
+    drmModeFreeObjectProperties(props);
+    return found;
+}
+
+// The CRTCs that can show `connector`: Qt picks one of them.
+std::vector<uint32_t> crtcsFor(int fd, const drmModeConnector &connector)
+{
+    drmModeResPtr resources = drmModeGetResources(fd);
+    if (!resources)
+        return {};
+    uint32_t mask = 0;
+    for (int i = 0; i < connector.count_encoders; ++i) {
+        if (drmModeEncoderPtr encoder = drmModeGetEncoder(fd, connector.encoders[i])) {
+            mask |= encoder->possible_crtcs;
+            drmModeFreeEncoder(encoder);
+        }
+    }
+    std::vector<uint32_t> crtcs;
+    for (int i = 0; i < resources->count_crtcs && i < 32; ++i) {
+        if (mask & (1u << i))
+            crtcs.push_back(resources->crtcs[i]);
+    }
+    drmModeFreeResources(resources);
+    return crtcs;
+}
+
+QString failure() { return QString::fromLocal8Bit(std::strerror(errno)); }
+
+// Sets the signal on the wire (displaydevice.h). card0 is opened only for
+// this: before Qt nobody holds it, so the open makes the shell the display's
+// master for these few calls, and what is set stays in the display's state
+// for Qt, which sets neither. Logged once, as "signal: …".
+void applySignal(const std::string &output, Range range)
+{
+    Card0 card;
+    const int fd = card.fd();
+    if (fd < 0 || !drmIsMaster(fd)) {
+        qWarning("mun-shell: display: card0 is held by another program; the signal is left as it is");
+        return;
+    }
+    drmModeConnectorPtr connector = card.connector(output, false);
+    if (!connector)
+        return;
+    QStringList said;
+
+    const QByteArray capText = qgetenv("MUN_DISPLAY_MAX_BPC");
+    if (!capText.isEmpty()) {
+        const std::optional<int> cap = parseMaxBpc(capText.toStdString());
+        const std::optional<Property> bpc = property(fd, connector->connector_id, DRM_MODE_OBJECT_CONNECTOR, "max bpc");
+        if (!cap) {
+            qWarning("mun-shell: display: MUN_DISPLAY_MAX_BPC \"%s\" is not a number of bits from 6 to 16; no cap applies",
+                     capText.constData());
+        } else if (!bpc) {
+            said << QStringLiteral("no cap on bits per channel (%1 has no \"max bpc\")").arg(text(output));
+        } else {
+            const uint64_t value = std::clamp<uint64_t>(uint64_t(*cap), bpc->min, std::max(bpc->min, bpc->max));
+            if (drmModeObjectSetProperty(fd, connector->connector_id, DRM_MODE_OBJECT_CONNECTOR, bpc->id, value) == 0)
+                said << QStringLiteral("at most %1 bits per channel (the board's cap)").arg(value);
+            else
+                said << QStringLiteral("the cap of %1 bits per channel failed (%2)").arg(value).arg(failure());
+        }
+    }
+
+    const std::optional<Property> broadcast = property(fd, connector->connector_id, DRM_MODE_OBJECT_CONNECTOR, "Broadcast RGB");
+    const RangeAction action = rangeAction(range, broadcast.has_value());
+    const QString name = text(std::string(rangeName(range)));
+    if (broadcast) {
+        const QString value = text(action.broadcast);
+        if (!broadcast->enums.contains(value))
+            said << QStringLiteral("range %1: Broadcast RGB has no \"%2\"").arg(name, value);
+        else if (drmModeObjectSetProperty(fd, connector->connector_id, DRM_MODE_OBJECT_CONNECTOR, broadcast->id,
+                                          broadcast->enums.value(value)) == 0)
+            said << QStringLiteral("range %1 (Broadcast RGB \"%2\")").arg(name, value);
+        else
+            said << QStringLiteral("range %1 failed (%2)").arg(name, failure());
+    }
+
+    // Every CRTC that can show the connector, since Qt chooses one later: its
+    // gamma table compresses, or is cleared.
+    int compressed = 0;
+    QStringList failed;
+    for (const uint32_t crtc : crtcsFor(fd, *connector)) {
+        const std::optional<Property> lut = property(fd, crtc, DRM_MODE_OBJECT_CRTC, "GAMMA_LUT");
+        const std::optional<Property> size = property(fd, crtc, DRM_MODE_OBJECT_CRTC, "GAMMA_LUT_SIZE");
+        if (!lut || (!action.compress && lut->value == 0))
+            continue;
+        uint32_t blob = 0;
+        if (action.compress) {
+            if (!size || size->value < 2)
+                continue;
+            const std::vector<std::uint16_t> ramp = limitedRamp(size->value);
+            std::vector<drm_color_lut> table(ramp.size());
+            for (size_t i = 0; i < ramp.size(); ++i)
+                table[i] = {ramp[i], ramp[i], ramp[i], 0};
+            if (drmModeCreatePropertyBlob(fd, table.data(), uint32_t(table.size() * sizeof(drm_color_lut)), &blob) != 0) {
+                failed << QStringLiteral("CRTC %1: %2").arg(crtc).arg(failure());
+                continue;
+            }
+        }
+        if (drmModeObjectSetProperty(fd, crtc, DRM_MODE_OBJECT_CRTC, lut->id, blob) != 0)
+            failed << QStringLiteral("CRTC %1: %2").arg(crtc).arg(failure());
+        else if (blob)
+            ++compressed;
+        // The display's state keeps its own reference to the table.
+        if (blob)
+            drmModeDestroyPropertyBlob(fd, blob);
+    }
+    if (!broadcast) {
+        if (!action.compress)
+            said << QStringLiteral("range %1: full, the pixels as they are (%2 has no Broadcast RGB)").arg(name, text(output));
+        else if (compressed)
+            said << QStringLiteral("range limited: 16-235 by the gamma table");
+        else
+            said << QStringLiteral("range limited: no gamma table could take it; full range goes out");
+    }
+    if (!failed.isEmpty())
+        said << QStringLiteral("gamma table failed on %1").arg(failed.join(QStringLiteral(", ")));
+    drmModeFreeConnector(connector);
+    qInfo("mun-shell: display: signal: %s", qPrintable(said.join(QStringLiteral("; "))));
+}
+
+int waitSeconds()
+{
+    if (!qEnvironmentVariableIsSet("MUN_DISPLAY_WAIT_SECONDS"))
+        return kDefaultWaitSeconds;
+    bool ok = false;
+    const int seconds = qEnvironmentVariableIntValue("MUN_DISPLAY_WAIT_SECONDS", &ok);
+    if (ok && seconds >= 0 && seconds <= kMaxWaitSeconds)
+        return seconds;
+    qWarning("mun-shell: display: MUN_DISPLAY_WAIT_SECONDS is not a number of seconds from 0 to %d; %d applies",
+             kMaxWaitSeconds, kDefaultWaitSeconds);
+    return kDefaultWaitSeconds;
+}
+
+// The board's cap for Automatic, if the environment gives one.
+std::optional<Cap> cap()
+{
+    if (!qEnvironmentVariableIsSet("MUN_DISPLAY_MAX"))
+        return std::nullopt;
+    const QByteArray value = qgetenv("MUN_DISPLAY_MAX");
+    const std::optional<Cap> parsed = parseCap(std::string_view(value.constData(), size_t(value.size())));
+    if (!parsed)
+        qWarning("mun-shell: display: MUN_DISPLAY_MAX \"%s\" is not WIDTHxHEIGHT@HZ; no cap applies", value.constData());
+    return parsed;
+}
+
+QString pickNote(Pick pick, const Cap &limit)
+{
+    const QString capText = QStringLiteral("%1x%2@%3").arg(limit.width).arg(limit.height).arg(limit.hz);
+    switch (pick) {
+    case Pick::Target:
+        return QStringLiteral("the cap %1").arg(capText);
+    case Pick::Fallback:
+        return QStringLiteral("a fallback: the display lists no %1x%2 at %3 Hz").arg(limit.width).arg(limit.height).arg(limit.hz);
+    case Pick::AboveCap:
+        return QStringLiteral("above the cap %1: no listed mode fits it").arg(capText);
+    }
+    return {};
 }
 
 } // namespace
+
+int capLink()
+{
+    const QByteArray capText = qgetenv("MUN_DISPLAY_MAX_BPC");
+    if (capText.isEmpty()) {
+        qInfo("mun-shell: display: no cap on bits per channel to set (MUN_DISPLAY_MAX_BPC)");
+        return 0;
+    }
+    const std::optional<int> cap = parseMaxBpc(capText.toStdString());
+    if (!cap) {
+        qWarning("mun-shell: display: MUN_DISPLAY_MAX_BPC \"%s\" is not a number of bits from 6 to 16; no cap applies",
+                 capText.constData());
+        return 0;
+    }
+    Card0 card;
+    const int fd = card.fd();
+    if (fd < 0 || !drmIsMaster(fd)) {
+        qWarning("mun-shell: display: card0 cannot be set (%s); the cap is left for the shell's start",
+                 fd < 0 ? "not there" : "held by another program");
+        return 0;
+    }
+    drmModeResPtr resources = drmModeGetResources(fd);
+    if (!resources) {
+        qWarning("mun-shell: display: card0's outputs cannot be read; the cap is left for the shell's start");
+        return 0;
+    }
+    // Every outcome is said: without a line, the journal could not tell an
+    // output whose cap was set from none that takes one.
+    bool capped = false;
+    for (int i = 0; i < resources->count_connectors; ++i) {
+        drmModeConnectorPtr connector = drmModeGetConnectorCurrent(fd, resources->connectors[i]);
+        if (!connector)
+            continue;
+        const std::optional<Property> bpc = connector->connection == DRM_MODE_CONNECTED
+            ? property(fd, connector->connector_id, DRM_MODE_OBJECT_CONNECTOR, "max bpc") : std::nullopt;
+        if (bpc) {
+            capped = true;
+            const char *type = drmModeGetConnectorTypeName(connector->connector_type);
+            const uint64_t value = std::clamp<uint64_t>(uint64_t(*cap), bpc->min, std::max(bpc->min, bpc->max));
+            if (bpc->value == value)
+                qInfo("mun-shell: display: %s-%u is at most %llu bits per channel already", type ? type : "connector",
+                      connector->connector_type_id, static_cast<unsigned long long>(value));
+            else if (drmModeObjectSetProperty(fd, connector->connector_id, DRM_MODE_OBJECT_CONNECTOR, bpc->id, value) == 0)
+                qInfo("mun-shell: display: %s-%u set to at most %llu bits per channel (it was %llu), before anything is shown",
+                      type ? type : "connector", connector->connector_type_id, static_cast<unsigned long long>(value),
+                      static_cast<unsigned long long>(bpc->value));
+            else
+                qWarning("mun-shell: display: the cap of %llu bits per channel failed (%s)",
+                         static_cast<unsigned long long>(value), qPrintable(failure()));
+        }
+        drmModeFreeConnector(connector);
+    }
+    drmModeFreeResources(resources);
+    if (!capped)
+        qInfo("mun-shell: display: no connected output takes a cap on bits per channel (none has \"max bpc\"); nothing is set");
+    return 0;
+}
+
+bool awaitDisplay()
+{
+    if (!drawsOnCard0())
+        return true;
+    const int seconds = waitSeconds();
+    QElapsedTimer waited;
+    waited.start();
+    qint64 lastProbe = -1;
+    bool announced = false;
+    for (;;) {
+        std::vector<Card> cards = scanCards(kDrmClass);
+        g_display = usableDisplay(cards);
+        if (g_display) {
+            const QString after = announced ? QStringLiteral(" after %1 s").arg(waited.elapsed() / 1000.0, 0, 'f', 1)
+                                            : QString();
+            qInfo("mun-shell: display: %s %s (%s)%s", g_display->card.c_str(), g_display->connector.c_str(),
+                  g_display->driver.empty() ? "driver unknown" : g_display->driver.c_str(), qPrintable(after));
+            return true;
+        }
+        const qint64 elapsed = waited.elapsed();
+        if (elapsed >= qint64(seconds) * 1000) {
+            qCritical("mun-shell: display: no usable display after %d s; exiting to be started again", seconds);
+            for (const std::string &line : describe(cards, kGraphicsClass))
+                qWarning("mun-shell: display:   %s", line.c_str());
+            return false;
+        }
+        if (!announced) {
+            qInfo("mun-shell: display: waiting up to %d s for a display on %s", seconds, kCard.data());
+            announced = true;
+        }
+        // card0 is the real driver's, but no connector reads as connected
+        // yet: have the kernel look again, every two seconds at most.
+        const auto card0 = std::find_if(cards.begin(), cards.end(), [](const Card &card) { return card.name == kCard; });
+        if (card0 != cards.end() && !card0->firmware && !card0->connectors.empty() &&
+            (lastProbe < 0 || elapsed - lastProbe >= 2000)) {
+            Card0().probeAll();
+            lastProbe = elapsed;
+            continue;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    }
+}
 
 void prepare(QSettings &settings)
 {
@@ -181,12 +593,34 @@ void prepare(QSettings &settings)
             trial.clear();
     }
 
-    std::optional<Connector> connector = firstConnector();
-    if (connector) {
-        result.connector = connector->qtName;
-        result.preferred = connector->modes.value(0);
+    // eglfs, or a start that did not wait: card0 as it is now.
+    if (!g_display)
+        g_display = usableDisplay(scanCards(kDrmClass));
+    const Range range = parseRange(settings.value(kRangeKey).toString().toStdString());
+    result.range = text(std::string(rangeName(range)));
+    if (g_display)
+        applySignal(g_display->connector, range);
+    std::vector<Timing> timings;
+    QStringList sizes; // "1920x1080", the preferred one first, once each
+    bool isVirtual = false;
+    if (g_display) {
+        result.output = text(g_display->connector);
+        result.connector = qtName(result.output);
+        isVirtual = result.output.startsWith(QStringLiteral("Virtual-"));
+        timings = readModes(g_display->connector);
+        if (timings.empty())
+            qWarning("mun-shell: display: %s lists no modes", g_display->connector.c_str());
+        // Interlaced modes are not offered.
+        for (const Timing &timing : timings) {
+            const QString size = QStringLiteral("%1x%2").arg(timing.hdisplay).arg(timing.vdisplay);
+            if (!(timing.flags & kFlagInterlace) && !sizes.contains(size))
+                sizes << size;
+        }
+    }
+    if (!result.connector.isEmpty()) {
+        result.preferred = sizes.value(0);
         for (const QString &mode : kModes) {
-            if (connector->isVirtual || connector->modes.contains(mode))
+            if (isVirtual || sizes.contains(mode))
                 result.offered << mode;
         }
     }
@@ -197,27 +631,93 @@ void prepare(QSettings &settings)
         result.active = stored;
     }
 
+    // What Qt is asked for: the player's mode, by size when the display
+    // lists it (Qt takes the first of that size) or as a CVT modeline on a
+    // virtual connector; under Automatic with a cap, the chosen mode as its
+    // own modeline; otherwise nothing, and Qt takes the display's own mode.
+    QString mode;
+    QSize size;
     if (result.active != QStringLiteral("auto")) {
-        const QString path = writeKmsConfig(runtime, result, result.active, connector->modes.contains(result.active));
+        mode = sizes.contains(result.active) ? result.active : kModelines.value(result.active);
+        const QStringList parts = result.active.split(QLatin1Char('x'));
+        size = QSize(parts[0].toInt(), parts[1].toInt());
+        result.requested = result.active + (result.trial ? QStringLiteral(" (the player's choice, on trial)")
+                                                        : QStringLiteral(" (the player's choice)"));
+    } else if (const std::optional<Cap> limit = cap(); limit && !result.connector.isEmpty()) {
+        const std::optional<Choice> choice = chooseMode(timings, *limit);
+        const std::optional<std::string> line = choice ? modeline(timings[choice->index]) : std::nullopt;
+        if (line) {
+            const Timing &chosen = timings[choice->index];
+            mode = text(*line);
+            size = QSize(chosen.hdisplay, chosen.vdisplay);
+            g_requested = chosen;
+            result.requested = QStringLiteral("%1 (%2)").arg(text(modeName(chosen)), pickNote(choice->pick, *limit));
+            if (choice->pick != Pick::Target)
+                qWarning("mun-shell: display: %s", qPrintable(result.requested));
+        } else {
+            qWarning("mun-shell: display: no mode for the cap %s; the display's own mode applies",
+                     choice ? "can be written as a modeline" : "among the listed ones");
+        }
+    }
+
+    if (!mode.isEmpty()) {
+        const QString path = writeKmsConfig(runtime, result, mode);
         if (path.isEmpty()) {
             qWarning("mun-shell: could not write the display configuration; the display's own mode applies");
             result.active = QStringLiteral("auto");
             result.trial = false;
+            mode.clear();
+            g_requested.reset();
         } else {
             qputenv("QT_QPA_KMS_CONFIG", QFile::encodeName(path));
-            if (!scaleGiven) {
-                const QStringList size = result.active.split(QLatin1Char('x'));
-                setScale(size[0].toInt(), size[1].toInt());
-            }
+            if (!scaleGiven)
+                setScale(size.width(), size.height());
         }
     }
-    if (result.active == QStringLiteral("auto")) {
+    if (mode.isEmpty()) {
+        result.requested = QStringLiteral("the display's own mode");
         // No configuration of an earlier start is left looking current.
         QFile::remove(runtime + QStringLiteral("/kms.json"));
         if (!scaleGiven)
             scaleToFramebuffer();
     }
     g_plan = result;
+}
+
+void reportApplied()
+{
+    if (!g_display || g_plan.output.isEmpty() || !drawsOnCard0())
+        return;
+    const std::string output = g_display->connector;
+    Card0 card;
+    drmModeConnectorPtr connector = card.connector(output, false);
+    drmModeEncoderPtr encoder = connector && connector->encoder_id ? drmModeGetEncoder(card.fd(), connector->encoder_id) : nullptr;
+    drmModeCrtcPtr crtc = encoder && encoder->crtc_id ? drmModeGetCrtc(card.fd(), encoder->crtc_id) : nullptr;
+    if (!crtc || !crtc->mode_valid) {
+        qCritical("mun-shell: display: requested %s, but no mode is set on %s %s", qPrintable(g_plan.requested),
+                  kCard.data(), output.c_str());
+    } else {
+        const Timing applied = timingOf(crtc->mode);
+        // An exact request must come out exact; the player's mode by size;
+        // the display's own mode is whatever Qt took.
+        bool same = true;
+        if (g_requested)
+            same = sameTiming(*g_requested, applied);
+        else if (g_plan.active != QStringLiteral("auto"))
+            same = g_plan.active == QStringLiteral("%1x%2").arg(applied.hdisplay).arg(applied.vdisplay);
+        const QString line = QStringLiteral("display: requested %1, applied %2 on %3 %4")
+                                 .arg(g_plan.requested, text(modeName(applied)), text(std::string(kCard)), text(output));
+        if (same)
+            qInfo("mun-shell: %s", qPrintable(line));
+        else
+            qCritical("mun-shell: %s, which is not the mode requested", qPrintable(line));
+    }
+    if (crtc)
+        drmModeFreeCrtc(crtc);
+    if (encoder)
+        drmModeFreeEncoder(encoder);
+    if (connector)
+        drmModeFreeConnector(connector);
 }
 
 const Plan &plan()

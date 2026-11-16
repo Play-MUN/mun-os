@@ -11,12 +11,26 @@ Requires=run-mun-launch.mount
 After=run-mun-launch.mount mun-cardd.service
 # If the launcher itself fails, get the shell back regardless.
 OnFailure=mun-shell-restore.service
+# No start limit. With the default one (five starts in ten seconds) a launcher
+# that failed quickly a few times stayed failed until the next boot, and the
+# console with it: a removed card no longer ended the game, Play answered
+# "unavailable" and safe removal was refused. Whatever made it fail, the
+# next start can adopt the running game or bring the shell back.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 ExecStart=/usr/bin/python3 /opt/mun/launchd/launchd.py
+# Always, and after a pause: at most one start a second however it keeps
+# ending. Each failed run goes through the failed state before it restarts
+# (RestartMode= is left at its default), which is what triggers OnFailure=.
 Restart=always
 RestartSec=1
+# A backstop: the launcher's largest legitimate work (a card's biggest save
+# envelope, read and checked) stays under 200 MiB; past this the kernel ends
+# it inside its own cgroup, and it restarts as above, instead of the machine
+# running short.
+MemoryMax=512M
 Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=PYTHONUNBUFFERED=1
 

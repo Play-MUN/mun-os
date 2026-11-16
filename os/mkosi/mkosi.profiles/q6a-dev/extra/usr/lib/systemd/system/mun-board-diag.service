@@ -1,0 +1,17 @@
+# Development image for a board (profile q6a-dev): the diagnostic dump when
+# the system stops (/usr/lib/mun/board-diag). Started at boot so that it is
+# stopped, and runs, before the boot partition is unmounted.
+[Unit]
+Description=MUN board diagnostics: dump at shutdown
+RequiresMountsFor=/boot
+After=local-fs.target boot.automount boot.mount
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/true
+ExecStop=/usr/lib/mun/board-diag shutdown
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target

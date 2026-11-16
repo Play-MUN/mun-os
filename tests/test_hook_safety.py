@@ -49,7 +49,8 @@ class HookEnvironmentTests(unittest.TestCase):
             before = state()
             environment = clean_environment()
             environment.update(GIT_DIR=str(sentinel / ".git"), GIT_INDEX_FILE=str(sentinel / ".git" / "index"))
-            run = subprocess.run([sys.executable, "-m", "unittest", "tests.test_mundev.SourceTests", "tests.test_recipes"],
+            run = subprocess.run([sys.executable, "-m", "unittest", "tests.test_mundev.SourceTests", "tests.test_recipes",
+                                  "tests.test_shape_export"],
                                  cwd=ROOT, env=environment, capture_output=True, text=True)
             self.assertEqual(run.returncode, 0, run.stderr[-2000:])
             self.assertEqual(state(), before)

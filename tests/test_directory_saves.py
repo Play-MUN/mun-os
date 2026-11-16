@@ -11,6 +11,7 @@ import sys
 import tempfile
 import time
 import shutil
+import socket
 import unittest
 import unittest.mock
 import zlib
@@ -154,6 +155,35 @@ class CaptureRuleTests(SyncCase):
         self.game_writes("save-0000.sav", SLOT); self.sync.poll()
         self.assertEqual(self.sent, []); self.assertEqual(self.host.calls, ["freeze", "thaw"], "nothing read unfrozen")
 
+    def test_when_writers_cannot_be_told_the_result_says_why_nothing_was_copied(self):
+        self.prepare()
+        self.host.writing = None                   # no read lease can be taken at all
+        self.game_writes("save-0000.sav", SLOT); self.sync.poll()
+        self.assertEqual(self.sent, [])
+        self.sync.final(lambda: None, write=False)                 # the card is pulled
+        summary = self.sync.summary("card_removed")
+        self.assertFalse(summary["ok"])
+        self.assertEqual(summary["error"]["code"], "save_unverified")
+        self.assertEqual(summary["message"].split("\n"),
+                         ["Los cambios de la partida de esta sesión no llegaron a la Game Card",
+                          "No se pudo comprobar si el juego estaba escribiendo sus partidas, y no se copiaron mientras se jugaba"])
+
+    def test_a_writer_in_the_middle_or_a_later_capture_leaves_no_such_notice(self):
+        self.prepare()
+        self.host.writing = ["pid 7 fd 12"]
+        self.game_writes("save-0000.sav", SLOT); self.sync.poll()
+        self.assertIsNone(self.sync.last_error, "a writer closes, and its close is the next save point")
+        self.host.writing = None
+        self.game_writes("save-0000.sav", SLOT); self.sync.poll()
+        self.assertEqual(self.sync.last_error["code"], "save_unverified")
+        done = []
+        self.sync.final(lambda: done.append(True))                 # the game stops: no lease is needed
+        self.assertEqual(self.files_sent(), {"save-0000.sav": SLOT})
+        self.answer()
+        summary = self.sync.summary("exited")
+        self.assertEqual((done, summary["ok"], summary["error"]), ([True], True, None))
+        self.assertIn("Partida guardada en la Game Card", summary["message"])
+
     def test_a_torn_unit_keeps_its_last_valid_version(self):
         self.prepare(envelope({"save-0000.sav": SLOT, "save-0001.sav": SLOT}))
         self.game_writes("save-0000.sav", SLOT2[:len(SLOT2) // 2])     # crash mid-write
@@ -224,6 +254,35 @@ class CaptureRuleTests(SyncCase):
         self.assertEqual(len(self.sent), 1, "one write at a time")
         self.answer(); self.sync.poll()
         self.assertEqual(self.files_sent(), {"save-0000.sav": SLOT2})
+
+    def test_units_are_listed_through_a_descriptor_opened_for_that_listing(self):
+        # On overlayfs a directory descriptor that has listed once keeps
+        # serving that listing: through the descriptor held for the whole
+        # session, a unit created later was never seen.
+        served, real_listdir, real_close = {}, os.listdir, os.close
+
+        def listdir(target="."):
+            if not isinstance(target, int):
+                return real_listdir(target)
+            if target not in served:
+                served[target] = real_listdir(target)
+            return list(served[target])
+
+        def close(fd):
+            served.pop(fd, None)             # a closed descriptor's number may be given out again
+            real_close(fd)
+
+        self.prepare()
+        with unittest.mock.patch.object(os, "listdir", listdir), unittest.mock.patch.object(os, "close", close):
+            self.game_writes("save-0000.sav", SLOT)
+            self.sync.poll()
+            self.assertEqual(self.files_sent(), {"save-0000.sav": SLOT})
+            self.answer()
+            self.game_writes("save-0001.sav", SLOT2)
+            self.sync.poll()
+            self.assertEqual(self.files_sent(), {"save-0000.sav": SLOT, "save-0001.sav": SLOT2},
+                             "the unit created after the first capture is in the second")
+            self.assertNotIn(self.sync.dir_fd, served, "the held descriptor is never the one listed through")
 
     def test_the_directory_itself_moved_is_reported(self):
         self.prepare()
@@ -430,7 +489,7 @@ class RestoreTests(SyncCase):
         # The converter (mun_card.saves) must not certify what this refuses,
         # nor refuse what this restores: the same cases, the same verdicts.
         sys.path.insert(0, str(ROOT / "tools" / "mun-card"))
-        from mun_card.saves import envelope_problem
+        from mun_card.saves import envelope_problem, parse_envelope
         info = {"id": SPEC["card_id"], "saves_directory": SPEC["directory"], "saves_units": SPEC["units"],
                 "saves_checks": SPEC["checks"], "saves_max_bytes": SPEC["max_bytes"]}
         cases = {
@@ -444,13 +503,16 @@ class RestoreTests(SyncCase):
             "other format": envelope({"save-0000.sav": SLOT}, format="mun-save/1"),
             "hash mismatch": envelope({"save-0000.sav": SLOT}).replace(b'"sha256": "', b'"sha256": "0'),
             "over the declared size": envelope({"screen-0000.zsc": zlib.compress(os.urandom(SPEC["max_bytes"] + 1))}),
+            "countless small values": b"[" + b"0," * 60000 + b"0]",
+            "many inflation bombs": envelope({f"screen-{n:04d}.zsc": zlib.compress(b"\0" * (SPEC["max_bytes"] * 60))
+                                              for n in range(64)}),
         }
         self.sync.max_bytes = SPEC["max_bytes"]
         for what, raw in cases.items():
             with self.subTest(what):
                 launcher = self.sync._check_envelope(raw)[0]
                 try:
-                    tool = envelope_problem(json.loads(raw), info, "neptune-save/1")
+                    tool = envelope_problem(parse_envelope(raw), info, "neptune-save/1")
                 except ValueError:
                     tool = "not JSON"
                 self.assertEqual(launcher is None, tool is None, f"launcher: {launcher!r}; card tool: {tool!r}")
@@ -789,13 +851,19 @@ class StartupReconcileTests(unittest.TestCase):
                 pass
             shell = unittest.mock.Mock()
             shell.start.side_effect = StopBeforeLoop
+            # Sessions are reconciled once the loop's sockets are registered,
+            # so the listener is a socket the selector can take.
+            listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            self.addCleanup(listener.close)
+            server = unittest.mock.Mock()
+            server.start.return_value = listener
             with unittest.mock.patch.object(launchd, "LAUNCH_ROOT", root), \
                     unittest.mock.patch.object(launchd, "CONTENT_MOUNT", Path(td) / "content"), \
                     unittest.mock.patch.object(launchd, "Runner", return_value=runner), \
                     unittest.mock.patch.object(launchd, "ResultStore", return_value=store), \
-                    unittest.mock.patch.object(launchd, "Server", return_value=unittest.mock.Mock()), \
+                    unittest.mock.patch.object(launchd, "Server", return_value=server), \
                     unittest.mock.patch.object(launchd, "ShellControl", return_value=shell), \
-                    unittest.mock.patch.object(launchd.socket, "socketpair", return_value=[unittest.mock.Mock(), unittest.mock.Mock()]), \
+                    unittest.mock.patch.object(launchd.signal, "signal"), \
                     unittest.mock.patch.object(launchd.subprocess, "run", return_value=unittest.mock.Mock(stdout="rw,exec")):
                 with self.assertRaises(StopBeforeLoop):
                     launchd.main([])

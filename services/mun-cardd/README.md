@@ -10,20 +10,36 @@ stages a game's entry and writes saves. Card format:
 ## Behaviour
 
 - Eligible devices: virtio disks whose serial starts with `NPT-` (what
-  `./mun vm card-attach` assigns). System disks and anything else are never
-  inspected or mounted.
+  `./mun vm card-attach` assigns) and, when the image names a board's card
+  reader in `MUN_CARDD_SLOTS` (sysfs paths of the reader's controller,
+  separated by `:`; none by default), the whole card in that reader, named
+  `NPT-sd-` and the card's CID. Only a whole disk whose sysfs path lies
+  under a named controller counts: the board's other disks, its system
+  eMMC among them, never do, although the device policy that lets the
+  service open the reader's MMC devices also covers them. System disks and
+  anything else are never inspected or mounted.
 - Present at start and inserted later: udev events plus a sysfs rescan every
   5 s as a safety net.
 - Before mounting: whole-image ext4, clean superblock, no recovery flag, no
-  partition table. Mount options `ro,nosuid,nodev,noexec`, with the journal
-  loaded (see *Saves*), under `/run/mun/cards/<slot>`; `<slot>` is `c1`,
-  `c2`… chosen by the service.
+  partition table. Mount options `ro,nosuid,nodev,noexec,errors=remount-ro`,
+  with the journal loaded (see *Saves*), under `/run/mun/cards/<slot>`;
+  `<slot>` is `c1`, `c2`… chosen by the service.
 - Validation runs in a worker thread; results for a card removed meanwhile are
-  discarded (generation counter). Invalid cards are unmounted immediately.
+  discarded (generation counter). Invalid cards are published as such and
+  then unmounted, and the journal names each one once per insertion: slot,
+  device, serial, code and reason (`c1 (vdc, NPT-card01) refused:
+  image_has_errors: …`).
 - One active card. A second card waits unmounted with reason
   `another_card_active`; when the active card is removed the waiting one is
   evaluated automatically. Nothing is launched, ever.
 - Removal: unmount (lazy if busy), `removed` event, promotion of a waiting card.
+- An unmount that cannot even start (no process to be had: the service's
+  task limit, memory) leaves the mount as it is and recorded: the card is
+  still published as refused or removed, the service's loop tries its
+  unmount again every 5 seconds (no thread is needed for that, nor for any
+  timer whose thread cannot start), and a safe release meanwhile is
+  answered `unmount_failed`, never `released`, whether the card is still
+  in or already gone.
 - For a valid card, its MUN Shape package is copied to RAM for the shell
   ([MUN Shape export](#mun-shape-export)).
 
@@ -65,7 +81,9 @@ exceed the budget, the state is sent with `cover_omitted` instead of the
 picture. Writes are queued per client: a peer that has not drained its socket
 yet keeps its bytes queued until the socket is writable again, and only a
 peer that leaves more than 8 MiB unread is dropped. A partial write therefore
-never disconnects a slow shell or launcher.
+never disconnects a slow shell or launcher. Text that UTF-8 cannot carry (a
+lone surrogate in a card's file) crosses the socket, and reaches the journal,
+as `?`.
 
 ## MUN Shape export
 
@@ -127,21 +145,36 @@ window on this side never makes the game's view writable.
 
 ## Saves
 
-Cards mount `ro,nosuid,nodev,noexec` with the journal loaded: a read-only
-mount writes nothing (the image hash is unchanged after mount and unmount),
-and a card that needs recovery is still rejected before mounting, so nothing
-is ever replayed on its own. The `noload` option of earlier versions is gone
-because a filesystem mounted that way cannot be remounted read-write with
-journaling, and a save must be journaled.
+Cards mount `ro,nosuid,nodev,noexec,errors=remount-ro` with the journal
+loaded: a read-only mount writes nothing (the image hash is unchanged after
+mount and unmount), and a card that needs recovery is still rejected before
+mounting, so nothing is ever replayed on its own. The `noload` option of
+earlier versions is gone because a filesystem mounted that way cannot be
+remounted read-write with journaling, and a save must be journaled.
+
+The error policy is the console's, never the card's: without `errors=` ext4
+takes it from the card's superblock, where `panic` stops the kernel at the
+first damaged inode it reads, on a read-only mount too. Every mount and
+remount names `errors=remount-ro` together with `nosuid,nodev,noexec`, so
+what holds never depends on which options a remount keeps. In a save's
+read-write window it stops every write at the first inconsistency: the save
+fails and says so. A card that asks for `panic` is not refused; `mun-card
+inspect` reports it.
 
 The root-only control socket accepts, besides `stage`:
 
 - `save {slot, insertion, serial, version, game, session, schema, payload}`:
   after checking that the active card is exactly that insertion, serial,
-  version and game, and that `payload` is an object of at most 64 KiB with a
-  positive integer `schema`, the service remounts the card `rw` and writes
+  version and game, and that `payload` is an object of at most 64 KiB,
+  measured as compact JSON in UTF-8, with a positive integer `schema`
+  (text UTF-8 cannot carry, a lone surrogate, is `save_invalid`; an
+  envelope that would take more than 112 KiB on the card is
+  `save_too_large` before anything is written), the service remounts the
+  card `rw` and writes
   through a directory descriptor for `<saves>/<game>` obtained one component
-  at a time with `O_NOFOLLOW` (a link anywhere is `save_path_unsafe`): it
+  at a time with `O_NOFOLLOW` (a link anywhere is `save_path_unsafe`; a
+  directory missing on the way, the saves location included, is made by name
+  in its parent's descriptor): it
   removes any object left under `save.json.tmp` by name, creates the
   temporary exclusively, `fsync`s it, gives the current `save.json` a second
   name `save.json.prev` with a hard link (a current file that is not an
@@ -154,9 +187,21 @@ The root-only control socket accepts, besides `stage`:
   `sync_failed`, `write_failed`, `card_removed`. On any error the temporary
   file is removed and the slot still holds a loadable save (the old one until
   the final rename); the card is remounted read-only whatever happened.
-- `stage` also copies the current `save.json` (up to the bound, one byte over
+  The kernel refuses that remount (`EBUSY`) while a file removed from the
+  card is still open, and a save removes the previous copy it replaces; a
+  game with mount access can hold that file open through its own mount of
+  the same device. The save is then answered `sync_failed` ("La partida se
+  escribió, pero la tarjeta no pudo cerrarse; no la retires todavía"), and
+  the remount is owed: the service tries it again every 5 s and before a
+  release, never under a save in flight, and logs "is read-only again" when
+  it succeeds.
+- `stage` also copies the current `save.json` (up to the bound, 112 KiB for a
+  single-object save, one byte over
   so an oversized file reads as damaged) into `<dest>/work/save.json` owned by
-  the game user, and reports `save: {present, copied, bytes, recovered}`. The
+  the game user and readable by it alone (0600), created exclusively through
+  a descriptor of that `work/` directory opened without following a link
+  (a name already there is removed, never opened), and reports
+  `save: {present, copied, bytes, recovered}`. The
   copy is read through the same link-safe walk; only a regular file counts,
   and the type is checked by name before a non-blocking open, so a FIFO or a
   device under a save name is answered as absent instead of hanging the
@@ -169,7 +214,19 @@ The root-only control socket accepts, besides `stage`:
   then the reply says so. If the unmount fails the reply is
   `released {ok: false, error: unmount_failed}`, the card stays mounted and
   usable, and the host must not unplug; the request may be retried. Only a
-  device that already vanished is cleaned up with a lazy detach.
+  device that already vanished is cleaned up with a lazy detach. A card that
+  a save left writable is closed first; while that remount is still refused
+  the reply is `released {ok: false, error: card_busy}`, as it is when the
+  MUN Shape copy has not closed its files in time, and the card is not
+  unmounted.
+
+A line that is not JSON, is not a JSON object or names no known request is
+answered `error {code: bad_request}`, and so is a line still unfinished
+after 112 KiB (the bound of a single-object envelope, which admits every
+save within its limit), which also closes the connection. A request whose handling fails unexpectedly is
+answered in its own reply type with `internal_error` (a `stage` or a `save`
+that fails so once its work has begun, with `stage_failed` or
+`write_failed`), and the service goes on.
 
 - Directory saves: `save {…, payload_kind: "files", payload_file,
   payload_size, payload_sha256}` for a card that declares `saves.directory`.
@@ -179,7 +236,7 @@ The root-only control socket accepts, besides `stage`:
   SHA-256; its files must be single safe names whose data match their own
   size and hash, at most 64 files and `saves.max_bytes` in total. The bounds
   come from the card: payload `4/3 × max_bytes + 64 KiB`, envelope file
-  8 KiB more (without `saves.directory`, 64 KiB as before). The envelope
+  8 KiB more (without `saves.directory`, 64 KiB and 112 KiB). The envelope
   carries `payload_kind: "files"`. For such a card a single-object save is
   `save_invalid`, an envelope whose files do not match is damaged (never
   kept as `save.json.prev`, moved aside on the next write), and `stage`
@@ -215,4 +272,7 @@ into the image and takes the service's runtime packages from
 
 Recovery: `systemctl restart mun-cardd`; the shell reconnects on its
 own. Mount points survive a service restart only through re-detection, which
-the rescan performs at start.
+the rescan performs at start. The unit restarts the service itself however
+it ends (`Restart=always`, 2 s apart) and has no start limit: a service that
+ended quickly a few times would otherwise stay failed until the next boot,
+and with it the console's only reader.

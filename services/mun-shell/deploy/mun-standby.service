@@ -1,0 +1,17 @@
+# MUN Shell's standby picture on the display while the console starts
+# (deploy/mun-standby): as soon as the image's root is mounted, before the
+# rest of the boot, so that MUN is on screen instead of black until the
+# shell draws.
+[Unit]
+Description=MUN standby picture until the shell draws
+Documentation=file:///opt/mun/shell/README.md
+DefaultDependencies=no
+ConditionPathExists=/dev/fb0
+Before=sysinit.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/mun-standby
+
+[Install]
+WantedBy=sysinit.target

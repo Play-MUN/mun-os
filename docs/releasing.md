@@ -40,7 +40,30 @@ name: `dev2` here. Build names take 2 to 16 lowercase letters, digits and
 ```
 
 `BUILD-INFO.json` must say `"clean": true` and name the commit; a build of
-uncommitted changes is for local tests only (`./mun dev bundle` warns).
+uncommitted changes is for local tests only (`./mun dev bundle` warns, and
+its `release.json` says so).
+
+The image build runs the shell's behaviour regressions and fails with
+them, but it only records how long Home's transitions take (`--timing
+record`): a builder's frames are the builder's, not the shell's. Judge
+them once on the same commit, on a machine doing nothing else, with Debian
+13 and Qt 6.8 as the image build has them, and Xvfb:
+
+```sh
+fresh="$(mktemp -d)"
+git archive <commit> | tar -x -C "$fresh"
+sh "$fresh/services/mun-shell/deploy/build.sh" "$fresh/services/mun-shell" "$fresh/shell" <build_id>
+python3 "$fresh/services/mun-shell/tests/behaviour.py" "$fresh/shell/mun-shell" \
+    --work "$fresh/home" --only home --timing check
+```
+
+`<build_id>` is the one `BUILD-INFO.json` gives. It must exit with status
+0, in each of Home's three ways (the previous and the orbital designs on
+the software renderer, the orbital design through OpenGL). Keep its output
+and `$fresh/home/report.json`, with the machine it ran on (processor, cores,
+system, container). A duration out of its bounds holds the release until it
+is understood: a slower shell is a regression; a busy machine is no
+measurement, and the run is repeated on a quiet one.
 
 ## 3. The bundle
 
@@ -51,9 +74,22 @@ uncommitted changes is for local tests only (`./mun dev bundle` warns).
 `.local/mun/bundles/dev2/` then holds the files a release carries: the
 image, `BUILD-INFO.json`, the Game Cards (`card-collect.img.xz`,
 `card-collect-sea.img.xz`, MUN Collect dressed in the `sea` MUN Shape
-sample, and `card-demo.img.xz`), `LICENSE`, `NOTICE`, `NAME-AND-LOGO.txt`,
+sample, `card-collect-reef.img.xz`, dressed in Reef, the example of MUN
+Shape's motion, and `card-demo.img.xz`), `LICENSE`, `NOTICE`, `NAME-AND-LOGO.txt`,
 the typefaces' licences and `release.json`, which lists all of them with
 their sizes and SHA-256.
+
+The image and the game come from the build; the cards' MUN Shape packages,
+the card tool that makes them and the licence texts come from the checkout
+the command runs in, and `release.json` names the build's commit for all of
+it. So run it in a checkout at exactly the build's commit, with a clean
+working tree: for a build recorded clean, any other checkout is refused,
+saying which commit the build is of, and the game put on the cards must
+match the hash `BUILD-INFO.json` recorded for it. `release.json` then
+carries `"one_commit": true` in its `source`. A build of uncommitted
+changes is still bundled for a local test, with `"one_commit": false`,
+which `./mun get` remarks when it installs it; a release image is never
+bundled that way.
 
 ## 4. The corresponding source
 
@@ -67,8 +103,10 @@ tar -tf .local/mun/mun-os-v0.1.0-dev.2-sources.tar | grep -E '(^|/)\._'    # pri
 ```
 
 The first command fetches, verified, the Debian source of every package in
-the image, its initrd and its kernel, and of what they were built using
-(vm/sources.py; about 1.1 GB), and `SOURCES.json` names the build and lists
+the image, its initrd and its kernel, and of what they were built using,
+as their `Built-Using` and `Static-Built-Using` fields record it (the second
+is where Debian 13 names code linked statically, as in Go and Rust
+programs; vm/sources.py; about 1.1 GB), and `SOURCES.json` names the build and lists
 the sources with the binaries each built
 ([licensing](licensing.md#images-and-their-corresponding-source)). Running
 it again only fetches what is missing, and a copy of another build's
@@ -88,27 +126,50 @@ bundle="$PWD/.local/mun/bundles/dev2"
 fresh="$(mktemp -d)"
 git archive <commit> | tar -x -C "$fresh"
 (cd "$fresh" && ./mun dev smoke --bundle "$bundle")
+(cd "$fresh" && ./mun dev smoke --bundle "$bundle" --guest smoke-reef --card collect-reef --motion)
 ```
 
 The console starts, plays MUN Collect, gives the card back and powers off.
+The second run, in a guest of its own with the card dressed in Reef (the
+bundle is installed already), also requires the shell to say it plays the
+card's motion, not the package's v1 look.
 The copy installs the image and the cards in its own `.local/`; remove
-`"$fresh"` afterwards.
+`"$fresh"` afterwards. Installing never replaces a card that exists, so in
+a copy that already had one the check would play that card: it says so
+before it starts the guest, when the card there is not the bundle's own
+(another card, or one with saves on it). A fresh copy has none.
 
-## 6. Publish, then run the hosts
+## 6. Check the hosts on a draft, then publish
+
+The hosts check the candidate's own bundle before anything is published. A
+draft release carries it: only the repository's members see a draft, and
+its tag is not created until it is published.
 
 ```sh
-gh release create v0.1.0-dev.2 --prerelease --target <commit> \
+gh release create v0.1.0-dev.2 --draft --prerelease --target <commit> \
     --title "MUN OS 0.1.0-dev.2 — development image for QEMU" --notes-file notes.md \
     .local/mun/bundles/dev2/* \
     .local/mun/mun-os-v0.1.0-dev.2-sources.tar .local/mun/mun-os-v0.1.0-dev.2-sources.tar.sha256
-gh workflow run hosts.yml -f release=v0.1.0-dev.2
+gh workflow run hosts.yml --ref <branch> -f draft=v0.1.0-dev.2
 ```
 
-`./mun get` downloads only what `release.json` lists: players never download
-the sources. The Hosts workflow downloads the release on macOS, Linux
-(x86_64, ARM64) and Windows (x86_64, ARM64) and runs the same check there.
-If it fails, the release is marked as such in its notes and the fix goes
-into the next one.
+The Hosts workflow takes the draft's bundle and, on macOS, Linux (x86_64,
+ARM64) and Windows (x86_64, ARM64), runs the same two checks as step 5 and,
+on Windows, those of the console's control channel. Reading a draft needs
+write access: each job reads it itself, the token goes to that download
+alone, and nothing of the draft is kept in the run, whose artifacts anyone
+signed in to GitHub could download. When every host passes, publish the
+draft as it is, and its tag is created at `<commit>`:
+
+```sh
+gh release edit v0.1.0-dev.2 --draft=false
+```
+
+If a host fails, the draft is not published: the fix goes into a new
+commit, whose image, bundle and draft are made again from step 2.
+`./mun get` downloads only what `release.json` lists: players never
+download the sources. A published release can be checked again with
+`gh workflow run hosts.yml -f release=<tag>`.
 
 ## Release notes
 

@@ -55,11 +55,12 @@ imagen.
 
 ## 3. La imagen
 
-Una versión preliminar trae la imagen, su registro (`BUILD-INFO.json`), tres
-Game Cards (MUN Collect, MUN Collect vestido con el ejemplo `sea` de MUN
-Shape y la MUN Test Card), los textos de las licencias y `release.json`, que
-lista cada archivo con su tamaño y su SHA-256. Estas páginas son de la
-v0.1.0-dev.4; si todavía no está en la
+Una versión preliminar trae la imagen, su registro (`BUILD-INFO.json`),
+cuatro Game Cards (MUN Collect; MUN Collect vestido con el ejemplo `sea` de
+MUN Shape; MUN Collect vestido con Reef, el ejemplo del movimiento de MUN
+Shape; y la MUN Test Card), los textos de las licencias y `release.json`,
+que lista cada archivo con su tamaño y su SHA-256. Estas páginas son de la
+v0.1.0-dev.5; si todavía no está en la
 [página de versiones](https://github.com/Play-MUN/mun-os/releases), usa la
 última versión preliminar que haya allí, con las páginas de su propia
 etiqueta, o construye la imagen de esta rama
@@ -67,7 +68,7 @@ etiqueta, o construye la imagen de esta rama
 `./mun get` la dirección de su `release.json`:
 
 ```sh
-./mun get https://github.com/Play-MUN/mun-os/releases/download/v0.1.0-dev.4/release.json
+./mun get https://github.com/Play-MUN/mun-os/releases/download/v0.1.0-dev.5/release.json
 ```
 
 Descarga cada archivo, lo comprueba contra `release.json` e instala la imagen
@@ -75,6 +76,15 @@ en `.local/mun/builds/` y las tarjetas en `.local/gamecards/`. Una descarga
 interrumpida continúa si vuelves a ejecutar la misma orden. Una Game Card que
 ya existe nunca se sustituye (puede tener tus partidas). En Windows:
 `py mun get …`.
+
+Antes de traer nada compara lo que queda por descargar y descomprimir con
+el espacio libre del disco, y lo dice si no alcanza. Rechaza una descarga
+que no puede someter a sus reglas, diciendo el motivo: una dirección que
+redirige de https a http sin cifrar; un `release.json` con nombres de
+archivo que un ordenador no distinguiría o con tamaños que ninguna
+versión tiene; una imagen que no se contiene entera a sí misma (una que
+leería otro archivo de tu ordenador como su disco). Nada de eso ocurre con
+una versión de la página de versiones.
 
 Si jugaste una versión preliminar anterior, su consola (`play`) sigue con
 aquella imagen: una consola conserva la imagen con la que se creó, y una
@@ -116,12 +126,15 @@ La consola arranca en inglés. Para verla en español, elige *Español* en
 dicen *Configuración* › *Idioma y hora* › *Idioma*, y esta guía usa esas
 etiquetas ([glosario](glossary.md#las-palabras-de-la-consola)).
 
-La pantalla principal tiene cuatro entradas, cada una con su panel a la
-derecha:
+La pantalla principal tiene cuatro entradas en su órbita, cada una con su
+panel a la derecha:
 
-- **Game Card**: la ranura. Por ahora está vacía: «Ranura vacía».
-- **Mis juegos**: «No hay ningún juego en la consola. Tus juegos viven en
-  sus Game Cards.»
+- **MUN Disk**: la ranura. Por ahora está vacía («Inserta un disco»; la
+  línea de arriba dice «Ranura vacía»). MUN Disk es el nombre que está
+  tomando el soporte de la consola; el formato, las herramientas y esta
+  guía siguen diciendo Game Card, y son lo mismo.
+- **Universo**: «Todavía no hay nada aquí. Tus juegos viajan en sus MUN
+  Disk.»
 - **Configuración**: seis secciones. *Pantalla* (la resolución, que la
   ventana sigue), *Sonido* (los sonidos de los menús), *Apariencia y
   accesibilidad* (MUN Shape, Reducir movimiento), *Idioma y hora* (inglés o
@@ -131,8 +144,12 @@ derecha:
 - **Apagar**: apaga la consola limpiamente y cierra la ventana; cerrar tú la
   ventana es como desenchufarla.
 
+![La pantalla principal en la consola virtual con la ranura vacía: MUN Disk, Universo, Configuración y Apagar en una órbita, y el panel de MUN Disk pidiendo un disco](../images/home.es.jpg)
+
 La línea de arriba dice qué tarjeta hay dentro, la red (*Sin conexión*: la
-consola no la necesita) y la hora.
+consola no la necesita), la fase de la luna y la hora.
+
+![Configuración en la consola virtual, en Pantalla: las seis secciones en la órbita y los ajustes de la pantalla en el panel](../images/settings.es.jpg)
 
 ## 5. Inserta una Game Card y juega
 
@@ -144,7 +161,7 @@ carpeta:
 ```
 
 Eso mete `.local/gamecards/collect.img` en la ranura de la consola, como lo
-haría una mano. La consola lee la tarjeta y la comprueba, y *Game Card*
+haría una mano. La consola lee la tarjeta y la comprueba, y *MUN Disk*
 muestra MUN Collect, con su panel diciendo que la tarjeta está lista.
 **Intro, Intro** es *Jugar*.
 
@@ -154,10 +171,11 @@ con *Sesión terminada*: **Intro** para *Aceptar*.
 
 ## 6. Retírala con seguridad y continúa más tarde
 
-En el panel de *Game Card* elige **Retirar con seguridad**: la consola
+En el panel de *MUN Disk* elige **Retirar con seguridad**: la consola
 termina con la tarjeta y la libera («Puedes retirar la Game Card»), y la
-ventana la saca de la ranura enseguida: *Game Card* vuelve a estar vacía.
-Después, **Apagar**: Arriba desde *Game Card*, Intro, Intro.
+ventana la saca de la ranura enseguida: *MUN Disk* vuelve a pedir un disco.
+Después, **Apagar**: Arriba desde *MUN Disk* (el menú da la vuelta), Intro,
+Intro.
 
 Más tarde, la tarjeta entra al arrancar la consola:
 
@@ -170,7 +188,7 @@ lo guardaste. La partida está en la tarjeta (`.local/gamecards/collect.img`),
 no en la consola: otra consola, u otra build, continúa desde ella.
 
 Cuando termines, **Esc** acaba el juego, **Intro** es *Aceptar* en *Sesión
-terminada* y **Apagar** (Arriba desde *Game Card*, Intro, Intro) cierra la
+terminada* y **Apagar** (Arriba desde *MUN Disk*, Intro, Intro) cierra la
 consola. La sección siguiente arranca una consola propia.
 
 ## 7. Mira MUN Shape
@@ -197,9 +215,27 @@ Sin e2fsprogs, la tarjeta vestida que trae la versión muestra lo mismo:
 `.local/gamecards/collect-sea.img` junto a MUN Collect, con sus propias
 partidas).
 
+La imagen de esta versión reproduce además el movimiento de MUN Shape, un
+borrador experimental ([MUN Shape motion](../shape-motion.md#trying-it), en
+inglés), y trae su ejemplo: `collect-reef`, MUN Collect vestido con Reef.
+
+```sh
+./mun play --card collect-reef
+```
+
+El arrecife se mueve detrás de la pantalla principal: bancos de peces, un
+tiburón, cangrejos, algas. Lleva el foco a Jugar y un banco se reúne bajo
+la tarjeta; *Reducir movimiento* deja la escena quieta. Instalar una
+versión nunca sustituye una tarjeta que ya tengas.
+
+![La pantalla principal con MUN Collect vestido con Reef: el arrecife detrás de los menús y la ventana de la tarjeta en el disco](../images/home-reef.es.jpg)
+
 *Configuración* › *Apariencia y accesibilidad* › *MUN Shape* (Completo,
 Solo colores, Desactivado) y *Reducir movimiento* cambian cuánto de ella
 ves.
+
+![Configuración, en Apariencia y accesibilidad: MUN Shape en Completo y Reducir movimiento desactivado](../images/settings-appearance.es.jpg)
+
 [Ver MUN Shape en acción](guides/see-shape-in-action.md) enseña cómo se hace
 una tarjeta así y qué mirar;
 [vestir la consola con tu juego](guides/shape-your-game.md) hace una tuya.

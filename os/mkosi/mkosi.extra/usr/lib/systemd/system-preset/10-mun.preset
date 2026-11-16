@@ -4,6 +4,8 @@ enable run-mun-launch.mount
 enable mun-cardd.service
 enable mun-launchd.service
 enable mun-shell.service
+# The shell's standby picture on the display while the console starts.
+enable mun-standby.service
 # Carries out a console reset at boot, only when one was asked for.
 enable mun-reset.service
 # The shell owns tty1: no login prompt there.
@@ -13,3 +15,7 @@ disable systemd-networkd.service
 disable systemd-networkd.socket
 disable systemd-networkd-wait-online.service
 disable systemd-network-generator.service
+# The restart chord's target is masked (etc/systemd/system/ctrl-alt-del.target).
+# reboot.target carries it as an Alias=, so enabling reboot.target, as the
+# distribution's preset would, writes the alias over the mask.
+disable reboot.target

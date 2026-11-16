@@ -10,10 +10,12 @@ import os
 import random
 import re
 import shutil
+import socket
 import struct
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import unittest.mock
 import zlib
@@ -1146,7 +1148,8 @@ class ShellAgreementTests(unittest.TestCase):
 
     def test_mun_keeps_its_own_surfaces(self):
         # Settings, their panels and every dialog never read the card's
-        # identity; only the main arc, the game's panel and the bands do.
+        # identity; only the main menu (the arc, or in the orbital design
+        # the orbit), the game's panel and the bands do.
         for name in ("ModalLayer.qml", "BootLayer.qml"):
             self.assertNotIn("Shape.", self.source(f"qml/{name}"), name)
         theme = self.source("qml/Theme.qml")
@@ -1154,12 +1157,21 @@ class ShellAgreementTests(unittest.TestCase):
         self.assertRegex(theme, r"readonly property color accentDeep: copper\b")
         self.assertNotIn("CardClient", theme, "MUN's focus never comes from a card")
         main = self.source("qml/Main.qml")
-        self.assertEqual(main.count("dressed: true"), 1, "one arc is dressed, the main one")
+        menus = re.findall(r"(?:ArcMenu|OrbitalMenu) \{(.*?)onActivated", main, re.S)
+        self.assertEqual(len(menus), 4, "a main menu and Settings' in each design")
+        dressed = [menu for menu in menus if "dressed: true" in menu]
+        self.assertEqual(len(dressed), 2, "one menu per design is dressed")
+        for menu in dressed:
+            self.assertIn("entries: window.mainEntries", menu, "the dressed one is the main menu")
+        self.assertEqual(main.count("dressed: true"), 2)
         self.assertIn('dressed: window.focusedEntry.key === "card" && !window.inSettings', main)
         self.assertIn("property color focusColour: Theme.accent", self.source("qml/OptionRow.qml"))
         arc = self.source("qml/ArcNode.qml")
         self.assertIn("readonly property bool gameFocus: shaped ? look.game : dressed && !Shape.plated", arc)
         self.assertIn("readonly property color accent: gameFocus ? Shape.focus : Theme.accent", arc)
+        node = self.source("qml/OrbitalNode.qml")
+        self.assertIn('readonly property bool gameFocus: shaped ? look.game : dressed && !Shape.plated && Shape.source !== "none"', node)
+        self.assertIn("readonly property color accent: gameFocus ? Shape.focus : root.tint", node)
         self.assertIn("qml/Material.qml", self.source("CMakeLists.txt"))
         for name in ("shape.cpp", "readpalette.cpp"):
             self.assertIn(f"src/{name}", self.source("CMakeLists.txt"))
@@ -1197,9 +1209,29 @@ class ShellBehaviourTests(unittest.TestCase):
         line = next(text for text in build.splitlines() if run in text)
         self.assertNotIn("||", line, "a failed expectation fails the build")
         self.assertTrue(build.startswith("#!/bin/sh") and "set -eu" in build)
-        for scene in ("controller.qml", "arrival.qml", "surfaces.qml", "world.qml", "boot.qml", "home.qml"):
+        for scene in ("controller.qml", "arrival.qml", "surfaces.qml", "world.qml", "boot.qml", "home.qml", "paths.qml"):
             self.assertIn(f'"{scene}"', (self.SHELL / "tests" / "behaviour.py").read_text(encoding="utf-8"))
             self.assertTrue((self.SHELL / "tests" / "scenes" / scene).is_file(), scene)
+
+    def test_a_release_judges_the_durations_the_image_build_records(self):
+        build = (ROOT / "os" / "mkosi" / "mkosi.build.chroot").read_text(encoding="utf-8")
+        self.assertIn("--timing record", build)
+        releasing = (ROOT / "docs" / "releasing.md").read_text(encoding="utf-8")
+        self.assertIn('--work "$fresh/home" --only home --timing check', releasing)
+        self.assertIn("git archive <commit>", releasing)
+
+    def test_the_drawing_paths_are_compared_frame_against_frame(self):
+        # The paths case's measure: mean absolute channel difference, and the
+        # share of channels more than 16 levels apart, within a box.
+        b = self.behaviour
+        software = (2, 2, bytes([0, 0, 0, 10, 10, 10, 50, 50, 50, 0, 0, 0]))
+        opengl = (2, 2, bytes([0, 0, 0, 40, 10, 10, 50, 50, 50, 0, 0, 0]))
+        mean, share = b.difference(software, opengl)
+        self.assertAlmostEqual(mean, 30 / 12)
+        self.assertAlmostEqual(share, 1 / 12)
+        self.assertEqual(b.difference(software, opengl, (0, 1, 2, 2)), (0, 0))
+        # Its OpenGL path needs a display, which the image build's overlay has.
+        self.assertIn("\n        xvfb\n", (ROOT / "os" / "mkosi" / "mkosi.conf").read_text(encoding="utf-8"))
 
     def test_the_short_window_passes_the_checker_and_does_not_decode(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1305,12 +1337,90 @@ class ShellBehaviourTests(unittest.TestCase):
         self.assertNotIn("elapsed()", cpp, "the cue depends on no clock")
         self.assertIn('runtimeFile("shape-cue")', cpp)
         # The presence runs from Main: the world, the animation and its ends.
-        self.assertIn("world: Shape.world", main)
+        # (the v1 world, unless the package's motion plays in its place)
+        self.assertIn("world: Object.keys(Shape.motion).length === 0 || motionScene.failed ? Shape.world : ({})", main)
         self.assertIn("onFinished: to === 1 ? Shape.arrived() : Shape.left()", main)
         self.assertIn("Binding { target: FrameWatch; property: \"judging\"; value: world.drawn && window.powered }", main)
         self.assertIn("function onStrained(why) { world.stepDown(why) }", main)
         for name in ("ArcNode.qml", "DetailPanel.qml"):
             self.assertIn("Shape.reach(Shape.phase, Shape.kind, Shape.progress, box)", self.source_of(name))
+
+    def stand_in(self, tmp, scripts):
+        # A stand-in on a real socket, and the shell's end of it.
+        service = self.behaviour.Service(Path(tmp) / "s.sock", scripts)
+        self.addCleanup(service.close)
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.addCleanup(client.close)
+        client.connect(str(service.path))
+        client.settimeout(1.0)
+
+        def reader():
+            # One message, or socket.timeout when none comes within 1 s.
+            line = b""
+            while not line.endswith(b"\n"):
+                byte = client.recv(1)
+                if not byte:
+                    raise EOFError
+                line += byte
+            return json.loads(line)
+        return service, reader
+
+    def test_a_stand_in_sends_what_follows_a_moment_once_the_scene_shows_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            service, reader = self.stand_in(tmp, [[(0, {"n": 1}), ({"on": "shown", "within": 5}, {"n": 2})]])
+            self.assertEqual(reader(), {"n": 1})
+            service.signal("shown")
+            self.assertEqual(reader(), {"n": 2})
+            service.signal("asked")
+            self.assertTrue(service.expect("asked", 0.5))
+            service.close()
+            self.assertEqual(service.errors, [])
+
+    def test_a_moment_that_does_not_come_stops_the_stand_in_and_is_kept(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            service, reader = self.stand_in(tmp, [[(0, {"n": 1}), ({"on": "shown", "within": 0.2}, {"n": 2}),
+                                                   (0, {"n": 3})],
+                                                  [(0, {"n": 4})]])
+            self.assertEqual(reader(), {"n": 1})
+            with self.assertRaises(socket.timeout, msg="nothing after the missing moment is sent"):
+                reader()
+            self.assertEqual(len(service.errors), 1, service.errors)
+            self.assertIn("'shown' did not come within 0.2 s", service.errors[0])
+            # The scripts after it are not served either.
+            other = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            self.addCleanup(other.close)
+            other.connect(str(service.path))
+            other.settimeout(0.5)
+            with self.assertRaises(socket.timeout):
+                other.recv(64)
+            # An answer's wait: the same failure, and False.
+            self.assertFalse(service.expect("asked", 0.1))
+            self.assertIn("'asked' did not come within 0.1 s", service.errors[-1])
+            # Shown too late: the stand-in has given up on it.
+            service.signal("shown")
+            with self.assertRaises(socket.timeout):
+                reader()
+
+    def test_a_stand_in_closed_while_waiting_says_which_moment_never_came(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            service, reader = self.stand_in(tmp, [[(0, {"n": 1}), ({"on": "shown"}, {"n": 2})]])
+            self.assertEqual(reader(), {"n": 1})
+            deadline = time.monotonic() + 2
+            while not service.awaiting and time.monotonic() < deadline:
+                time.sleep(0.01)
+            service.close()
+            self.assertEqual(len(service.errors), 1, service.errors)
+            self.assertIn("'shown' had not come when the scene ended", service.errors[0])
+            self.assertFalse(service.expect("shown", 0.1), "closed: nothing more is sent")
+            self.assertEqual(len(service.errors), 1)
+
+    def test_home_cases_fail_on_a_stand_ins_missed_moment(self):
+        source = (self.SHELL / "tests" / "behaviour.py").read_text(encoding="utf-8")
+        self.assertIn("missed = cardd.errors + launchd.errors", source)
+        self.assertIn('"every moment a stand-in waited for came within its limit", not missed', source)
+        self.assertIn('if not service.expect("asked", 30):', source)
+        self.assertNotIn(".wait(60)", source)
+        self.assertNotIn('event("asked").wait', source)
 
     def source_of(self, name):
         return (self.SHELL / "qml" / name).read_text(encoding="utf-8")

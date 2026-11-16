@@ -1,17 +1,32 @@
-// SceneClock paces the shell's painted animation layers (Backdrop, HeroIcon)
-// with one timer, so layers that move in the same frame are painted for one
-// scene-graph frame instead of several. Each layer states the rate it needs
-// while it has motion to show and paints on the ticks of that rate; with no
-// demand the timer stops, and a still screen costs nothing.
+// SceneClock paces the shell's animation layers (Backdrop, HeroIcon) with one
+// clock, so layers that move in the same frame are drawn for one scene-graph
+// frame instead of several. Each layer states the rate it needs while it has
+// motion to show and draws on the ticks of that rate; with no demand the
+// clock stops, and a still screen costs nothing.
 //
 // Rates are 60, 20, 10 and 5 frames per second, each a multiple of the next,
-// so every layer's frames fall on the ticks of the fastest one. Pace, below,
+// so every layer's frames fall on the ticks of the fastest one. The ticks
+// come from one of two sources:
+// - A timer (the default, and what Qt Quick's software renderer keeps): it
+//   ticks at the fastest rate demanded. Its interval is whole milliseconds,
+//   not the display's frame.
+// - Qt Quick's animation driver, once setSynced(true) (an accelerated
+//   renderer, src/renderinfo.h) and while a layer demands 60: one tick per
+//   frame the window renders, which on the threaded render loop is the
+//   display's frame. A layer at 60 then moves on every frame, whatever the
+//   display's rate (seconds() keeps the speed), and a lower rate on every
+//   third, sixth... frame as at 60. With only lower rates demanded the timer
+//   ticks instead, synced or not: a running animation would have the window
+//   draw every frame of the display for a layer that changes on few of them.
+// seconds() is the time of the current tick; layers move by it. Pace, below,
 // eases a layer's motion to a stop and back.
 //
 // GUI thread only: the layers are Qt Quick items, and the ticks are delivered
-// on the thread that created the clock.
+// on the thread that created the clock (the animation driver advances the
+// GUI thread's animations there).
 #pragma once
 
+#include <QElapsedTimer>
 #include <QHash>
 #include <QObject>
 #include <QTimer>
@@ -36,17 +51,33 @@ public:
     static bool due(quint64 frame, int rate);
     static int allowedRate(int rate);
 
+    // Ticks on the animation driver's frames (true) or on the timer (false,
+    // the default). Set once the renderer is known; logged.
+    void setSynced(bool synced);
+    bool synced() const { return m_synced; }
+    // Seconds of the current tick, from an arbitrary start; never decreases.
+    qreal seconds() const { return m_seconds; }
+
 signals:
     void tick(quint64 frame);
+    // Layers whose rates depend on the source state their demand again.
+    void syncedChanged();
 
 private:
+    class Ticker;
+
     SceneClock();
     void retime();
+    void advance(qreal seconds);
 
     QTimer m_timer;
+    QElapsedTimer m_sinceTick;   // the timer's: since its last tick or start
+    Ticker *m_ticker;
     QHash<const QObject *, int> m_demands;
     quint64 m_frame = 0;
-    int m_step = 1;   // base ticks per timer tick
+    int m_step = 1;   // base ticks per tick
+    bool m_synced = false;
+    qreal m_seconds = 0;
 };
 
 // The speed of a layer's ongoing motion (a drift, a float, a turning gear),

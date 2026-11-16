@@ -2,8 +2,10 @@
 # build's overlay (os/mkosi/mkosi.conf BuildPackages).
 qt6-base-dev
 qt6-declarative-dev
+qt6-shadertools-dev
 cmake
 ninja-build
 g++
 pkgconf
 libasound2-dev
+libdrm-dev

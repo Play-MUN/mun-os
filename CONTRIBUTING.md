@@ -2,8 +2,9 @@
 
 **English** · [Español](CONTRIBUTING.es.md)
 
-MUN™ OS is at an early stage: one development image for QEMU, no supported
-release and no selected hardware. Contributions are welcome: fixes, tests,
+MUN™ OS is at an early stage: a development image for QEMU and an
+experimental profile for a development board, no supported release and no
+supported hardware. Contributions are welcome: fixes, tests,
 documentation, card and game tooling, ports of the laboratory to more
 computers. Read the [README](README.md), [getting started](docs/getting-started.md)
 and the [architecture](docs/architecture.md) first; the contracts a change

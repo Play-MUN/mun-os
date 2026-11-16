@@ -1,0 +1,10 @@
+# The Dragon Q6A's wired network is a Realtek RTL8111H (10ec:8168) on PCIe.
+# Its link's L1 substates (L1.1 and L1.2) stay off: with them on, pulling a
+# card out of the microSD slot ended the link with a PCIe completion
+# timeout, which r8169 cannot recover from (no AER handling), and the
+# network stayed down until the next boot. With L1 kept and only the
+# substates off, the link survived every pull. The rule also runs when the
+# driver binds, after its probe has set the link's states.
+ACTION=="add|bind", SUBSYSTEM=="pci", ATTR{vendor}=="0x10ec", ATTR{device}=="0x8168", \
+  ATTR{link/l1_1_aspm}="0", ATTR{link/l1_2_aspm}="0", \
+  ATTR{link/l1_1_pcipm}="0", ATTR{link/l1_2_pcipm}="0"

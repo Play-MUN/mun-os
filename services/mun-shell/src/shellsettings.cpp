@@ -55,6 +55,11 @@ QString ShellSettings::filePath()
     return directory + QStringLiteral("/settings.ini");
 }
 
+bool ShellSettings::systemSoundsIn(const QSettings &file)
+{
+    return readChoice(file, kSoundsKey, kOnOff) == kOnOff.first();
+}
+
 ShellSettings::ShellSettings(QObject *parent)
     : QObject(parent), m_file(std::make_unique<QSettings>(filePath(), QSettings::IniFormat))
 {
@@ -62,7 +67,7 @@ ShellSettings::ShellSettings(QObject *parent)
     m_language = readChoice(*m_file, kLanguageKey, kLanguages);
     m_clockFormat = readChoice(*m_file, kClockKey, kClockFormats);
     m_safeArea = readNumber(*m_file, kSafeAreaKey, kSafeAreas, 100);
-    m_systemSounds = readChoice(*m_file, kSoundsKey, kOnOff) == kOnOff.first();
+    m_systemSounds = systemSoundsIn(*m_file);
     m_autoPowerOffHours = readNumber(*m_file, kAutoOffKey, kAutoOffHours, 1);
     m_shapeMode = readChoice(*m_file, kShapeKey, kShapeModes);
     m_reduceMotion = readChoice(*m_file, kMotionKey, kOffOn) == QLatin1String("on");
@@ -157,6 +162,26 @@ QString ShellSettings::nativeResolution() const
     return display::plan().preferred;
 }
 
+QString ShellSettings::colourRange() const
+{
+    return display::plan().range;
+}
+
+void ShellSettings::changeColourRange(const QString &range)
+{
+    static const QStringList ranges{QStringLiteral("auto"), QStringLiteral("full"), QStringLiteral("limited")};
+    if (m_restarting || !ranges.contains(range) || range == display::plan().range)
+        return;
+    if (range == ranges.first())
+        m_file->remove(display::kRangeKey);
+    else
+        m_file->setValue(display::kRangeKey, range);
+    sync();
+    // A choice that was not written would not survive the restart.
+    if (m_lastError.isEmpty())
+        restart(QStringLiteral("range"));
+}
+
 QString ShellSettings::resume() const
 {
     return display::plan().resume;
@@ -216,9 +241,11 @@ void ShellSettings::resetKeepingLanguage()
     m_file->remove(kMotionKey);
     m_file->remove(kGameSoundsKey);
     m_file->remove(display::kResolutionKey);
+    m_file->remove(display::kRangeKey);
     sync();
     emit changed();
-    if (display::plan().active != QStringLiteral("auto") && m_lastError.isEmpty())
+    const display::Plan &plan = display::plan();
+    if ((plan.active != QStringLiteral("auto") || plan.range != QStringLiteral("auto")) && m_lastError.isEmpty())
         restart(QStringLiteral("reset"));
 }
 
@@ -239,9 +266,18 @@ void ShellSettings::store(const QString &key, const QVariant &value)
 
 void ShellSettings::sync()
 {
+    // status() keeps the first error for as long as the object lives, and
+    // nothing clears it: after one failed write every later one would look
+    // failed, and a choice that needs a restart would be refused until the
+    // shell started again. An object that has reported an error is replaced
+    // by a new one on the same file, which reports this write's own outcome.
+    // The values not written yet are Qt's per file, not per object, and the
+    // new object is made before the old one goes, so none is lost.
+    if (m_file->status() != QSettings::NoError)
+        m_file = std::make_unique<QSettings>(m_file->fileName(), QSettings::IniFormat);
     m_file->sync();
-    // status() keeps the first error; a format error found when reading is
-    // repaired by this write, so only a failure to write counts now.
+    // A format error found when reading is repaired by this write, so only
+    // a failure to write counts now.
     const QString error = m_file->status() == QSettings::AccessError
                               ? QStringLiteral("could not write %1; the choice lasts until the shell restarts").arg(path())
                               : QString();

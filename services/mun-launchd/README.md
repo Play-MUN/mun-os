@@ -20,9 +20,11 @@ saves: [docs/saves.md](../../docs/saves.md).
    `0555` and renames it to `game`. If the card goes away during the copy,
    cardd aborts and removes the partial file.
 4. launchd stops the shell, then starts `mun-game-<sid>.service` with
-   `systemd-run`: uid/gid `mun-game`, groups video+input, own cgroup,
-   `DevicePolicy=closed` with only `/dev/fb0` and input devices allowed,
-   `PrivateNetwork`, `ProtectSystem=strict`, `NoNewPrivileges`, an empty
+   `systemd-run`: uid/gid `mun-game`, the groups of its runtime profile
+   (`SupplementaryGroups=`) and no other, own cgroup,
+   `DevicePolicy=closed` with only the profile's devices allowed, input
+   devices to read and never to write,
+   `PrivateNetwork`, `PrivateIPC`, a `/dev/shm` of its own, `ProtectSystem=strict`, `NoNewPrivileges`, an empty
    `CapabilityBoundingSet`, `MemoryMax`, `TasksMax`, `TimeoutStopSec=3`,
    `KillMode=control-group`, environment `MUN_CARD_ID`,
    `MUN_CONTENT_VERSION`, `MUN_SESSION` (see *Game environment* below). The unit is not `--collect`ed:
@@ -46,15 +48,33 @@ The manifest's `content.profile`, accepted by the validator, decides what the
 unit may touch; everything else about the unit is common (no capabilities,
 no network, a read-only system with `work/` and the unit's private `/tmp`
 and `/var/tmp` writable, the fixed command path). `linux-arm64-v0` grants `/dev/fb0` and evdev with the groups
-`video` and `input`. `linux-arm64-gl-v0` (provisional) grants the
+`video` and `input`, 512 MiB and 32 tasks. `linux-arm64-gl-v0` (provisional) grants the
 DRM class (card and render nodes), the ALSA class and evdev, groups `video`,
 `render`, `audio`, `input`, 2 GiB and 64 tasks, and sets
 `SDL_VIDEODRIVER=kmsdrm`, `SDL_AUDIODRIVER=alsa`, `ALSOFT_DRIVERS=alsa` so
 SDL and OpenAL Soft do not probe display and sound servers the console does
-not run. Every game receives `MUN_RUNTIME_PROFILE`. `deploy/sysusers.conf`
-adds the game user to the two groups; the image installs the system
-libraries the GL profile promises and records their versions in its
-BUILD-INFO.
+not run. Every game receives `MUN_RUNTIME_PROFILE`.
+
+The game user is a member of no device group: systemd gives a unit every
+group its user belongs to, so a membership would reach every game whatever
+its profile. Each profile names its groups itself (`SupplementaryGroups=`),
+and `deploy/sysusers.conf` only creates the user and makes sure the four
+groups exist. The image installs the system libraries the GL profile
+promises and records their versions in its BUILD-INFO.
+
+Input devices are allowed for reading only (`char-input r`) in both
+profiles. An event written to an input device is delivered to the whole
+console as if a key had been pressed, so a game with write access could type
+on the console's keyboard. Reading, and grabbing a device, need no write
+access; force feedback and keyboard LEDs do, and games do not get them.
+
+Shared memory and IPC are the session's own: the unit has a tmpfs of its
+own on `/dev/shm` (`TemporaryFileSystem=`, mode 1777, `nosuid,nodev`, 128 MiB
+for `linux-arm64-v0` and 512 MiB for `linux-arm64-gl-v0`, charged to the
+unit's memory) and an IPC namespace of its own (`PrivateIPC=yes`), which
+also brings its own `/dev/mqueue`. In the system's `/dev/shm` a game's files
+outlived it, counted against no session and readable by the next card's
+game.
 
 ## Game environment
 
@@ -75,8 +95,11 @@ For a card whose manifest declares `mount`, the card service's staging reply
 names the card's block device and `content.root`. The launcher accepts only
 a plain `/dev/<name>` node and a safe relative root (anything else cancels
 the launch with `prepare_failed`), then adds to the unit
-`MountImages=-<device>:/run/mun/card:root:ro,nosuid,nodev,noexec` and
+`MountImages=-<device>:/run/mun/card:root:ro,nosuid,nodev,noexec,errors=remount-ro` and
 `DeviceAllow=<device> r`, and sets `MUN_CONTENT_DIR=/run/mun/card/<root>`.
+The error policy is named for the same reason the card service names it
+([its README](../mun-cardd/README.md#saves)): without one ext4 takes the
+card's own, and a card may say `panic`.
 `/run/neptune/card`, the path before the MUN naming, is a link to
 `/run/mun/card` (`deploy/tmpfiles.conf`): engines built with it compiled in,
 on earlier cards, still find their data.
@@ -117,6 +140,10 @@ game's own read-only mount.
 - The card feed is read through a bounded line reader (2 MiB per line, the
   budget cardd enforces); an unfinished line beyond it means a protocol break
   and the feed is reconnected for a fresh snapshot.
+- JSON the launcher did not write (the card service's feed, the shell's
+  requests, a game's save request, a card's save envelope) is read as UTF-8
+  and refused before parsing when it nests arrays and objects more than 64
+  levels deep; such a line is skipped like any malformed one.
 - Preparation or start taking too long: `prepare_failed` / `start_failed`.
 
 ## Recovery without the launcher
@@ -133,8 +160,19 @@ game's own read-only mount.
   change RO state", `EBUSY`), so a hook in there never ran and the unit
   failed although the game had exited 0. The game unit's
   `Result` is now only the game's.
-- `mun-launchd.service` has `Restart=always` and `OnFailure=` the restore
-  unit, which starts the shell if no game unit is running.
+- `mun-launchd.service` has `Restart=always`, one second apart, no start
+  limit (`StartLimitIntervalSec=0`) and `OnFailure=` the restore unit, which
+  starts the shell if no game unit is running. With the default limit a
+  launcher that failed quickly a few times stayed failed until the next
+  boot. Each failed run still passes through the failed state before it
+  restarts, which is what triggers `OnFailure=`.
+- Inside the launcher, an exception nobody expected stays the failure of
+  the step it happened in (a request, a message from the card service, a
+  scheduled step, a tick): its traceback goes to the journal once and the
+  launcher goes on supervising. The shell is answered `launcher_error` for
+  a `launch` or a `release` that failed so (`launch_result {accepted:
+  false}`, `released {ok: false}`), a game `save_failed`. Only a launcher
+  that cannot wait for events at all ends, and is restarted.
 - On start, launchd reconciles: an active game unit with a `session.json` is
   adopted and supervised to its end; stale units are stopped and stale session
   directories removed and reported as an `interrupted` result, so a player who
@@ -178,14 +216,27 @@ Right before the game unit starts, launchd opens `<session>/save.sock`
 (root:mun-game 0660) and hands the game `MUN_SAVE_SOCKET` and
 `MUN_SAVE_FILE` (`work/save.json`, the current save the card service
 copied at staging). The game connects once per save and sends one line,
-`{"type":"save","schema":N,"data":{…}}`, at most 64 KiB plus framing. launchd
-accepts it only while that session is `running` and the reader is connected,
+`{"type":"save","schema":N,"data":{…}}`. `data` is at most 64 KiB measured
+as the card service stores it, compact and in UTF-8, however the line spells
+it (`save_too_large`; text UTF-8 cannot carry is `save_invalid`); the line
+may take 6 × 64 KiB + 4 KiB, since an escaped character takes up to six
+times its bytes, and a longer one is answered `save_too_large`. The socket
+takes one request per connection, gives a connection 10 s to send it and
+holds eight at once, making room by closing the one silent longest:
+connections that never ask would otherwise use up the descriptors the
+launcher needs. launchd
+accepts a save only while that session is `running` and the reader is connected,
 one save at a time, and forwards it to the card service bound to the session's
 id and insertion token; the card service refuses any other insertion. The
 reply (`saved {ok, bytes}` or `saved {ok: false, error}`) reaches the game
 only if the session still exists when it comes back: a late confirmation for a
 session that ended is logged and dropped. The socket is closed with the
-session; an adopted game gets a fresh one.
+session; an adopted game gets a fresh one under the same name as it is
+adopted, since the one it knew died with the previous launcher.
+
+The launcher's own socket holds 16 clients (the shell and, for a moment, the
+safe-removal command; one more is closed at once) and reads lines of at most
+64 KiB.
 
 ## Directory saves
 
@@ -215,10 +266,17 @@ service). Per session:
   mapped shared and writable), read it within the bound, and `systemctl
   thaw`. A refused lease, a lease that cannot be taken or a failed freeze
   means no save point: nothing is taken and the next close tries again.
+  When no lease can be taken at all, the session's result carries
+  `save_unverified` until a capture succeeds.
   Measured in a QEMU guest with a GL-profile game: 24–36 ms from freeze to thaw.
 - **Completeness** per unit: `zlib` (a whole stream with its end marker),
   `zlib-xml` / `xml` (well-formed once wrapped in one root; one final NUL,
-  a C string terminator some engines write, is ignored), `any`. A unit that fails, or
+  a C string terminator some engines write, is ignored), `any`. A unit may
+  inflate to min(64 MiB, 64 × `saves.max_bytes`) and a `zlib-xml` unit to
+  16 MiB; it is inflated in steps and its XML checked without building a
+  tree, so one unit costs bounded time and memory. XML is read in UTF-8,
+  US-ASCII, ISO-8859-1 or another single-byte encoding; any other fails the
+  check and never raises. A unit that fails, or
   vanished, keeps its version from `synced.json` (carried); a new unit that
   fails is left out. Both are reported. A snapshot equal to the last one
   written is not written again.
@@ -269,21 +327,23 @@ the same tmpfs in every namespace. `/run` itself stays `noexec`.
 ## Privileges
 
 launchd: root for `systemd-run --uid` and `systemctl`, with
-`PrivateDevices`, `PrivateNetwork`, `ProtectSystem=strict`, writes only under
+`DevicePolicy=closed` and one device allowed, the display's card
+(`/dev/dri/card0`, to keep the console's mode from the shell to a game;
+`PrivateDevices` would hide it), `PrivateNetwork`, `ProtectSystem=strict`, writes only under
 `/run/mun`, capabilities `CHOWN FOWNER DAC_OVERRIDE DAC_READ_SEARCH KILL
 LEASE` (the lease proves no writer on a save file the game owns).
 It ignores `SIGIO`, the signal a lease break would send it.
 It differs from cardd on purpose: no `CAP_SYS_ADMIN`, no block devices, but
 it may talk to PID 1. The game: unprivileged user, cannot modify services,
 the copy (`0555`, root-owned) or anything outside its `work/` directory, its
-private temporary directories and the shared-memory file systems.
+private temporary directories and its own `/dev/shm`.
 
 ## Install
 
 Two ways, the same files. A MUN OS image build (`os/`) runs
 `deploy/stage.sh SRC DESTDIR` into the image: the launcher, the cleanup
 helper, the exec tmpfs, the cleanup and restore units and the launcher unit,
-and `deploy/sysusers.conf` (the `mun-game` user and its groups). Its
+and `deploy/sysusers.conf` (the `mun-game` user and the groups the profiles name). Its
 runtime packages and the GL profile's libraries (`deploy/packages`,
 `deploy/runtime-linux-arm64-gl-v0.packages`) are in `os/mkosi/mkosi.conf`
 and in the image's BUILD-INFO.

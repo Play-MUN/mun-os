@@ -49,6 +49,13 @@ public:
 signals:
     void changed();
     void launchRejected(const QString &code, const QString &message);
+    // A launch the launcher accepted ended while this shell still runs: the
+    // game never started (its preparation failed or was cancelled; the
+    // launcher stops the shell before a game starts). Said once, only for
+    // the session this shell's own launch got; `reason` is its result's.
+    // A result of another session (an earlier one, or the game this shell
+    // was started again after) is not this.
+    void launchFailed(const QString &reason);
     void releaseFinished(bool ok, const QString &code, const QString &message);
 
 private:
@@ -64,6 +71,7 @@ private:
     bool m_snapshotSeen = false;
     bool m_requestPending = false;
     bool m_releasePending = false;
+    QString m_launchSession;   // the session this shell's accepted launch got, until it ends
     QString m_state = QStringLiteral("idle");
     QVariantMap m_session;
     QVariantMap m_lastResult;

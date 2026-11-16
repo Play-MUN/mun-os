@@ -2,21 +2,32 @@
 the service installers. No builder, mkosi or QEMU is needed; the image build
 itself is exercised in a builder VM (os/README.md)."""
 
+import contextlib
 import hashlib
 import importlib.util
+import io
 import json
+import os
 import re
+import shlex
+import shutil
 import stat
 import subprocess
 import sys
 import tempfile
 import unittest
+import urllib.request
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 OS = ROOT / "os"
 MKOSI = OS / "mkosi"
-PROFILE = MKOSI / "mkosi.profiles" / "qemu-dev" / "mkosi.conf"
+# The QEMU development profile: what only the laboratory's guests have
+# (qemu-ga, the lab display, the host's time zone) is checked against it.
+QEMU_DEV = MKOSI / "mkosi.profiles" / "qemu-dev" / "mkosi.conf"
+# Every profile this checkout has (os/mkosi/mkosi.profiles/<name>/).
+PROFILES = sorted(MKOSI.glob("mkosi.profiles/*/mkosi.conf"))
 
 
 def load(name, path):
@@ -28,6 +39,7 @@ def load(name, path):
 
 inputs_tool = load("mun_inputs", OS / "builder" / "inputs.py")
 build_info = load("mun_build_info", OS / "builder" / "build_info.py")
+profiles = load("mun_profiles", OS / "builder" / "profiles.py")
 
 
 def mkosi_list(path, key):
@@ -68,20 +80,32 @@ class CompositionTests(unittest.TestCase):
             self.assertFalse(missing, f"{path.relative_to(ROOT)}: {sorted(missing)} missing from BuildPackages")
 
     def test_compilers_stay_out_of_the_image(self):
-        image = set(mkosi_list(MKOSI / "mkosi.conf", "Packages")) | set(mkosi_list(PROFILE, "Packages"))
-        for tool in ("gcc", "g++", "cmake", "make", "qt6-base-dev", "libsdl2-dev"):
-            self.assertNotIn(tool, image)
+        for profile in PROFILES:
+            image = set(mkosi_list(MKOSI / "mkosi.conf", "Packages")) | set(mkosi_list(profile, "Packages"))
+            for tool in ("gcc", "g++", "cmake", "make", "qt6-base-dev", "qt6-shadertools-dev", "libsdl2-dev"):
+                self.assertNotIn(tool, image, profile.parent.name)
 
     def test_the_qemu_profile_says_it_is_a_development_build(self):
-        text = PROFILE.read_text()
+        text = QEMU_DEV.read_text()
         self.assertIn("MUN_ENVIRONMENT=qemu-arm64", text)
         self.assertIn("MUN_RELEASE=false", text)
         self.assertNotIn("MUN_RELEASE=true", (MKOSI / "mkosi.conf").read_text())
+        self.assertEqual(profiles.image_format(QEMU_DEV.parent), "qcow2", "the guests' image, by default")
+        self.assertEqual(profiles.pinned(QEMU_DEV.parent), [], "Debian's kernel, from the snapshot")
+
+    def test_every_profile_is_a_development_profile_with_a_known_format(self):
+        self.assertIn(QEMU_DEV, PROFILES)
+        for profile in PROFILES:
+            settings = profiles.settings(profile.parent)
+            self.assertEqual(settings.get("MUN_RELEASE"), ["false"], profile.parent.name)
+            self.assertEqual(len(settings.get("MUN_ENVIRONMENT", [])), 1, profile.parent.name)
+            self.assertIn(profiles.image_format(profile.parent), profiles.FORMATS)
+            profiles.pinned(profile.parent)
 
     def test_settings_sit_in_the_sections_mkosi_expects(self):
         # mkosi warns, and a later version may refuse, when a setting is in
         # another section: Environment= belongs to [Build].
-        for path in (MKOSI / "mkosi.conf", PROFILE):
+        for path in (MKOSI / "mkosi.conf", *PROFILES):
             section = None
             for line in path.read_text().splitlines():
                 if re.match(r"^\[\w+\]$", line):
@@ -93,18 +117,18 @@ class CompositionTests(unittest.TestCase):
         # Everything the profile adds beyond booting (the kernel and systemd-boot)
         # is development access or tooling, and none of it is common.
         boot = {"linux-image-arm64", "systemd-boot-efi"}
-        development = set(mkosi_list(PROFILE, "Packages")) - boot
+        development = set(mkosi_list(QEMU_DEV, "Packages")) - boot
         self.assertTrue(any(name.startswith("qemu-guest") for name in development), "qemu-ga comes with the profile")
         self.assertFalse(development & set(mkosi_list(MKOSI / "mkosi.conf", "Packages")))
         common = (MKOSI / "mkosi.conf").read_text() + (MKOSI / "mkosi.postinst.chroot").read_text()
         for access in ("qemu-guest", "openssh-server", "RootPassword", "Autologin", "Ssh="):
             self.assertNotIn(access, common)
-        self.assertNotIn("RootPassword", PROFILE.read_text())
-        self.assertNotIn("Autologin", PROFILE.read_text())
+        self.assertNotIn("RootPassword", QEMU_DEV.read_text())
+        self.assertNotIn("Autologin", QEMU_DEV.read_text())
 
     def test_the_image_boots_quietly(self):
-        # Firmware, then a blank display, then the shell's splash.
-        cmdline = mkosi_list(PROFILE, "KernelCommandLine")
+        # Firmware, then the shell's standby picture (deploy/mun-standby), then its start-up.
+        cmdline = mkosi_list(QEMU_DEV, "KernelCommandLine")
         for parameter in ("quiet", "loglevel=3", "vt.global_cursor_default=0"):
             self.assertIn(parameter, cmdline)
         self.assertIn("systemd.firstboot=off", cmdline, "first boot must never wait for an answer")
@@ -112,13 +136,13 @@ class CompositionTests(unittest.TestCase):
     def test_the_console_services_are_enabled_and_tty1_left_to_the_shell(self):
         preset = (MKOSI / "mkosi.extra" / "usr" / "lib" / "systemd" / "system-preset" / "10-mun.preset").read_text()
         for unit in ("run-mun-launch.mount", "mun-cardd.service", "mun-launchd.service",
-                     "mun-shell.service", "mun-reset.service"):
+                     "mun-shell.service", "mun-standby.service", "mun-reset.service"):
             self.assertIn(f"enable {unit}", preset)
         self.assertIn("disable getty@.service", preset)
 
     def test_the_lab_image_resolves_its_own_name(self):
-        hostname = re.search(r"(?m)^Hostname=(\S+)$", PROFILE.read_text()).group(1)
-        hosts = (PROFILE.parent / "extra" / "etc" / "hosts").read_text()
+        hostname = re.search(r"(?m)^Hostname=(\S+)$", QEMU_DEV.read_text()).group(1)
+        hosts = (QEMU_DEV.parent / "extra" / "etc" / "hosts").read_text()
         self.assertRegex(hosts, rf"(?m)^127\.0\.1\.1\s+{re.escape(hostname)}$")
         self.assertRegex(hosts, r"(?m)^127\.0\.0\.1\s+localhost$")
 
@@ -132,6 +156,26 @@ class CompositionTests(unittest.TestCase):
         syslog = (extra / "etc" / "systemd" / "journald.conf.d" / "syslog.conf").read_text()
         self.assertRegex(syslog, r"(?m)^ForwardToSyslog=no$")
         self.assertNotIn("rsyslog", mkosi_list(MKOSI / "mkosi.conf", "Packages"))
+
+    def test_no_key_chord_restarts_the_console(self):
+        # Whoever can write key events (a keyboard, or a process that reaches
+        # an input device) must not be able to restart the console with them:
+        # systemd's burst action, the target the kernel's signal starts, and
+        # the kernel's own SysRq keys.
+        extra = MKOSI / "mkosi.extra"
+        manager = (extra / "usr" / "lib" / "systemd" / "system.conf.d" / "60-mun.conf").read_text()
+        self.assertRegex(manager, r"(?m)^\[Manager\]$")
+        self.assertRegex(manager, r"(?m)^CtrlAltDelBurstAction=none$")
+        target = extra / "etc" / "systemd" / "system" / "ctrl-alt-del.target"
+        self.assertTrue(target.is_symlink(), "ctrl-alt-del.target is not masked")
+        self.assertEqual(os.readlink(target), "/dev/null")
+        # reboot.target is the chord's target by an Alias=: enabling it, as
+        # the distribution's preset does for every unit, writes that alias
+        # over the mask when the image is composed.
+        preset = (extra / "usr" / "lib" / "systemd" / "system-preset" / "10-mun.preset").read_text()
+        self.assertRegex(preset, r"(?m)^disable reboot\.target$")
+        sysctl = (extra / "usr" / "lib" / "sysctl.d" / "60-mun.conf").read_text()
+        self.assertRegex(sysctl, r"(?m)^kernel\.sysrq = 0$")
 
     def test_package_translations_go_only_with_the_c_locale(self):
         # Removing them is safe only while no other locale is generated.
@@ -174,6 +218,79 @@ class ShellTests(unittest.TestCase):
         self.assertIn(status, success)
         self.assertIn("1", success, "Qt's VT handler exits 1 after SIGTERM: a stop, not a failure")
 
+    def test_a_clean_stop_removes_the_decoding_markers_and_a_crash_keeps_them(self):
+        # The launcher stops the shell around every game (SIGTERM, a clean
+        # stop): an identity or a motion that was only being decoded then must
+        # not be skipped at the next start. After a crash the markers stay.
+        unit = (self.SHELL / "deploy" / "mun-shell.service").read_text()
+        self.assertRegex(unit, r"(?m)^Environment=XDG_RUNTIME_DIR=/run/mun-shell$")
+        self.assertRegex(unit, r"(?m)^RuntimeDirectory=mun-shell$")
+        line = re.search(r"(?m)^ExecStopPost=(.+)$", unit).group(1)
+        argv = shlex.split(line.replace("$$", "$"))
+        self.assertEqual(argv[:2], ["/bin/sh", "-c"])
+        names = ("shape-decoding", "shape-decoding-motion")
+        sources = (self.SHELL / "src" / "shape.cpp").read_text() + (self.SHELL / "src" / "motionscene.cpp").read_text()
+        for name in names:
+            self.assertRegex(sources, rf'"/?{name}"', f"{name} is the shell's own marker")
+        for result, kept in (("success", False), ("signal", True), ("core-dump", True), ("exit-code", True),
+                             ("oom-kill", True), ("watchdog", True)):
+            with tempfile.TemporaryDirectory() as runtime:
+                for name in names:
+                    (Path(runtime) / name).write_text("0123456789abcdef")
+                (Path(runtime) / "started").write_text("")
+                subprocess.run(["/bin/sh", "-c", argv[2]], check=True,
+                               env={"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "SERVICE_RESULT": result,
+                                    "XDG_RUNTIME_DIR": runtime})
+                self.assertEqual([(Path(runtime) / name).exists() for name in names], [kept, kept], result)
+                self.assertTrue((Path(runtime) / "started").exists(), "nothing else is removed")
+
+    def test_the_shell_reaches_only_local_and_kernel_sockets(self):
+        # Its service sockets and D-Bus are local (AF_UNIX); the network
+        # panel's addresses and udev's device events come over netlink. No
+        # Internet socket: content from a card is read here, and a shell made
+        # to misbehave by one must not reach a network. Measured in a guest
+        # with this restriction: turning off and the console reset (both
+        # through sudo), the network panel and the sounds all work.
+        unit = (self.SHELL / "deploy" / "mun-shell.service").read_text()
+        self.assertRegex(unit, r"(?m)^RestrictAddressFamilies=AF_UNIX AF_NETLINK$")
+
+    def test_the_shell_waits_for_its_display_and_failures_restart_it(self):
+        # A display driver can come up after the unit: no condition may skip
+        # the unit (a skipped unit is never retried), the shell waits itself
+        # and exits with its own status without a display, and systemd keeps
+        # starting it. Its failure statuses must not count as clean stops.
+        unit = (self.SHELL / "deploy" / "mun-shell.service").read_text()
+        self.assertNotRegex(unit, r"(?m)^Condition", "a condition would skip the unit for good")
+        unit_section = unit.split("[Service]", 1)[0]
+        self.assertRegex(unit_section, r"(?m)^StartLimitIntervalSec=0$", "never stop restarting")
+        self.assertRegex(unit, r"(?m)^Restart=on-failure$")
+        # One second: a new resolution is a restart (status 75), and the
+        # screen stays black for this long before the shell starts again.
+        # Without a display the shell waits for one itself before it exits,
+        # so a missing display does not make it spin.
+        self.assertRegex(unit, r"(?m)^RestartSec=1$")
+        self.assertEqual(re.search(r"(?m)^SuccessExitStatus=(.+)$", unit).group(1).split(), ["1", "75"])
+        no_display = re.search(r"kNoDisplayStatus = (\d+);", (self.SHELL / "src" / "displaydevice.h").read_text()).group(1)
+        no_interface = re.search(r"kInterfaceFailedStatus = (\d+);", (self.SHELL / "src" / "main.cpp").read_text()).group(1)
+        self.assertEqual((no_display, no_interface), ("69", "70"))
+        main = (self.SHELL / "src" / "main.cpp").read_text()
+        self.assertIn("return display::kNoDisplayStatus;", main)
+        self.assertNotRegex(main, r"exit\(1\)|return 1;", "1 is Qt's clean stop, not a failure")
+        self.assertLess(main.index("display::awaitDisplay()"), main.index("QGuiApplication app("),
+                        "the wait comes before Qt opens the display")
+
+    def test_the_display_rules_are_tested_on_the_host(self):
+        # src/displaydevice.* is standard C++ so that `make check` runs its
+        # rules (tests/displaydevice_test.cpp); the shell compiles the same file.
+        cmake = (self.SHELL / "CMakeLists.txt").read_text()
+        self.assertIn("src/displaydevice.cpp", cmake)
+        self.assertRegex(cmake, r"pkg_check_modules\(DRM REQUIRED IMPORTED_TARGET libdrm\)")
+        header = (self.SHELL / "src" / "displaydevice.h").read_text()
+        self.assertNotRegex(header + (self.SHELL / "src" / "displaydevice.cpp").read_text(), r"#include <(Q|xf86)",
+                            "no Qt and no libdrm in the rules")
+        makefile = (ROOT / "Makefile").read_text()
+        self.assertIn("services/mun-shell/tests test", makefile)
+
     def test_every_offered_resolution_has_a_modeline_of_its_size(self):
         # A virtual connector gets each mode as a modeline: its displayed size
         # must be the mode's, or the canvas would be scaled for another one.
@@ -198,7 +315,10 @@ class ShellTests(unittest.TestCase):
         # samples: authoring tools add chunks (metadata, provenance) that have
         # no place in the console.
         sounds = sorted((self.SHELL / "sounds").glob("*.wav"))
-        self.assertEqual([p.stem for p in sounds], ["back", "enter", "move", "startup"])
+        menus = {"move", "enter", "back"}
+        events = {"launch", "game_return", "shape_exit", "eject", "shutdown", "success", "warning", "error",
+                  "controller_connect", "controller_disconnect"}
+        self.assertEqual({p.stem for p in sounds}, menus | events | {"startup"})
         cmake = (self.SHELL / "CMakeLists.txt").read_text()
         player = (self.SHELL / "src" / "systemsounds.cpp").read_text()
         for path in sounds:
@@ -215,17 +335,42 @@ class ShellTests(unittest.TestCase):
             self.assertEqual((tag, channels, rate, int.from_bytes(fmt[14:16], "little")), (1, 2, 48000, 16), path.name)
             if path.stem == "startup":
                 self.assertLessEqual(len(samples) / (48000 * 4), 13.1, "the start-up lasts as long as its picture")
-            else:
+            elif path.stem in menus:
                 self.assertLessEqual(len(samples) / (48000 * 4), 1.0, f"{path.name}: a menu sound lasts under a second")
+            else:
+                self.assertLessEqual(len(samples) / (48000 * 4), 3.5, f"{path.name}: an event's sound is short")
             self.assertIn(f"sounds/{path.name}", cmake, "compiled in")
             self.assertIn(f'"{path.stem}"', player, "loaded by the player")
-        played = set(re.findall(r'sound\("([a-z]+)"\)', (self.SHELL / "qml" / "Main.qml").read_text()))
-        self.assertEqual(played, {p.stem for p in sounds} - {"startup"}, "every sound the menus ask for exists, and every one is used")
+        # Asked for by the menus and events (Main.qml), named by an option or
+        # a dialog's answer (Panels.qml), or played by the shell's own code.
+        panels = (self.SHELL / "qml" / "Panels.qml").read_text()
+        played = set(re.findall(r'sound\("([a-z_]+)"\)', (self.SHELL / "qml" / "Main.qml").read_text()))
+        played |= set(re.findall(r'sound: "([a-z_]+)"', panels)) | set(re.findall(r'"", "([a-z_]+)"\)', panels))
+        for source in (self.SHELL / "src").glob("*.cpp"):
+            played |= set(re.findall(r'play\(QStringLiteral\("([a-z_]+)"\)\)', source.read_text()))
+        self.assertEqual(played, {p.stem for p in sounds} - {"startup"}, "every sound asked for exists, and every one is used")
         boot = (self.SHELL / "qml" / "BootLayer.qml").read_text()
         self.assertIn('SystemSounds.play("startup")', boot, "the start-up plays its sound")
         self.assertIn("ShellSettings.systemSounds", boot, "and only with the interface sounds on")
         unit = (self.SHELL / "deploy" / "mun-shell.service").read_text()
         self.assertRegex(unit, r"(?m)^SupplementaryGroups=.*\baudio\b", "the shell may open the sound device")
+
+    def test_turning_off_waits_for_its_sound(self):
+        # Turning off (Main.qml) plays `shutdown` and goes down when the
+        # shutdownSound timer fires, counted from when the sound is asked
+        # for: the sound is over by then, and the README says the timer's
+        # figure. A new sound, or a new wait, changes all three together.
+        data = (self.SHELL / "sounds" / "shutdown.wav").read_bytes()
+        at = 12
+        while data[at:at + 4] != b"data":
+            at += 8 + int.from_bytes(data[at + 4:at + 8], "little")
+        seconds = int.from_bytes(data[at + 4:at + 8], "little") / (48000 * 4)
+        main = (self.SHELL / "qml" / "Main.qml").read_text()
+        wait = int(re.search(r"id: shutdownSound\s+interval: (\d+)", main).group(1)) / 1000
+        self.assertLessEqual(seconds, wait, "the console goes down after its sound, not during it")
+        self.assertGreater(seconds, wait - 0.5, "and not long after it")
+        readme = (self.SHELL / "README.md").read_text()
+        self.assertIn(f"it goes down once the sound has played, {wait:g} s", " ".join(readme.split()))
 
     def test_the_lab_display_describes_the_shells_three_modes(self):
         # The virtual display's EDID (os/builder/lab_edid.py): what the
@@ -360,10 +505,19 @@ class InputTests(unittest.TestCase):
         self.assertNotIn("sources", self.inputs, "no third-party game source is pinned here")
         self.assertEqual(sorted(p.name for p in (ROOT / "examples").iterdir() if p.is_dir()),
                          ["mun-collect", "mun-gl-probe", "shape"])
-        # examples/shape holds Shape packages drawn by its own script, data
-        # for the console's presentation, not a game.
-        suffixes = {p.suffix for p in (ROOT / "examples" / "shape").rglob("*") if p.is_file()}
-        self.assertLessEqual(suffixes, {".py", ".md", ".json", ".png", ".wav"})
+        # examples/shape holds Shape packages drawn by its own scripts, data
+        # for the console's presentation, not a game; the reef's studio is
+        # the 3D scene and the bake that draw one of them (its installed
+        # modules and its renders stay local, ignored).
+        listed = subprocess.run(["git", "ls-files", "-z", "--", "examples/shape"], cwd=ROOT, capture_output=True)
+        files = ([Path(name) for name in listed.stdout.decode().split("\0") if name] if listed.returncode == 0 else
+                 [p.relative_to(ROOT) for p in (ROOT / "examples" / "shape").rglob("*")
+                  if p.is_file() and not {"node_modules", "render"} & set(p.parts)])
+        studio = Path("examples/shape/reef-studio")
+        self.assertLessEqual({p.suffix for p in files if studio not in p.parents},
+                             {".py", ".md", ".json", ".png", ".wav"})
+        self.assertLessEqual({p.suffix for p in files if studio in p.parents},
+                             {".js", ".mjs", ".html", ".json", ".py", ".md", ""})
         build = (OS / "mkosi" / "mkosi.build.chroot").read_text()
         self.assertIn('"$SRCDIR"/recipes/*/', build, "other games come from recipes only")
 
@@ -382,56 +536,93 @@ class InputTests(unittest.TestCase):
         self.assertEqual(inputs_tool.get(self.inputs, "debian.snapshot"), self.inputs["debian"]["snapshot"])
 
 
+DEBIAN_KERNEL = {"type": "deb", "name": "linux-image-6.12.107+deb13-arm64", "version": "6.12.107-1",
+                 "architecture": "arm64"}
+PINNED_KERNEL = {"name": "linux-image-7.1.2-example", "version": "7.1.2-3", "architecture": "arm64",
+                 "url": "https://example.invalid/pool/linux-image-7.1.2-example_7.1.2-3_arm64.deb",
+                 "sha256": "b" * 64, "size": 1234, "license": "GPL-2.0-only",
+                 "source": {"repository": "https://example.invalid/kernel.git", "commit": "f" * 40}}
+
+
 class BuildInfoTests(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.tmp = Path(directory.name)
+
+    def build_info(self, image_name="mun-os-0.1.0-dev-qemu-arm64.qcow2", image_format="qcow2", pinned=(),
+                   kernel=DEBIAN_KERNEL, check=True, config=MKOSI, clean=True):
+        """BUILD-INFO of a fake build of the qemu-dev profile's configuration,
+        as build_info.py writes it, or the finished process with check=False."""
+        tmp = self.tmp
+        (tmp / "games" / "mun-collect").mkdir(parents=True, exist_ok=True)
+        game = tmp / "games" / "mun-collect" / "mun-collect"
+        game.write_bytes(b"\x7fELF game")
+        game.chmod(0o755)
+        image = tmp / image_name
+        image.write_bytes(b"image")
+        raw = tmp / "mun-os.raw"
+        raw.write_bytes(b"raw")
+        manifest = tmp / "manifest.json"
+        manifest.write_text(json.dumps({"packages": [
+            {"type": "deb", "name": "systemd", "version": "257.13-1~deb13u1", "architecture": "arm64"},
+            kernel,
+            {"type": "deb", "name": "libgl1-mesa-dri", "version": "25.0.7-2+deb13u1", "architecture": "arm64"}]}))
+        builder = tmp / "builder-packages.tsv"
+        builder.write_text("mkosi\t25.3-7\tall\nsystemd\t257.13-1~deb13u1\tarm64\n")
+        toolchain = tmp / "toolchain.tsv"
+        toolchain.write_text("gcc\t4:14.2.0-1\tarm64\ncmake\t3.31.6-2\tarm64\n")
+        initrd_manifest = tmp / "initrd-manifest.json"
+        initrd_manifest.write_text(json.dumps({"packages": [
+            {"type": "deb", "name": "lvm2", "version": "2.03.31-2", "architecture": "arm64"}]}))
+        initrd = tmp / "initrd.cpio.zst"
+        initrd.write_bytes(b"cpio")
+        source = tmp / "source.json"
+        source.write_text(json.dumps({"commit": "c" * 40, "clean": clean}))
+        record = tmp / "pinned.json"
+        record.write_text(json.dumps(list(pinned)))
+        result = subprocess.run([sys.executable, str(OS / "builder" / "build_info.py"),
+                                 "--inputs", str(OS / "inputs.json"), "--source-info", str(source), "--profile", "qemu-dev",
+                                 "--build-id", "20260927T000000Z-cccccccccccc", "--started", "2026-09-27T00:00:00Z",
+                                 "--image", str(image), "--raw", str(raw), "--image-format", image_format,
+                                 "--pinned", str(record), "--manifest", str(manifest),
+                                 "--initrd-manifest", str(initrd_manifest), "--initrd", str(initrd),
+                                 "--builder-packages", str(builder), "--toolchain", str(toolchain),
+                                 "--config", str(config), "--out", str(tmp)],
+                                capture_output=True, text=True)
+        if not check:
+            return result
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout)
+
+    def test_a_release_is_never_recorded_for_uncommitted_changes(self):
+        # No profile is a release profile today; the day one is, a build of
+        # a tree with uncommitted changes must not come out saying "release".
+        config = self.tmp / "config"
+        profile = config / "mkosi.profiles" / "qemu-dev"
+        profile.mkdir(parents=True)
+        text = QEMU_DEV.read_text()
+        self.assertIn("MUN_RELEASE=false", text)
+        (profile / "mkosi.conf").write_text(text.replace("MUN_RELEASE=false", "MUN_RELEASE=true"))
+        refused = self.build_info(config=config, clean=False, check=False)
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("uncommitted", refused.stderr)
+        self.assertTrue(self.build_info(config=config, clean=True)["release"])
+        self.assertFalse(self.build_info(clean=False)["release"], "a development build of changes is still made")
+
     def test_build_info_names_identity_inputs_and_absences(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp = Path(tmp)
-            (tmp / "games" / "mun-collect").mkdir(parents=True)
-            game = tmp / "games" / "mun-collect" / "mun-collect"
-            game.write_bytes(b"\x7fELF game")
-            game.chmod(0o755)
-            image = tmp / "mun-os-0.1.0-dev-qemu-arm64.qcow2"
-            image.write_bytes(b"qcow2")
-            raw = tmp / "mun-os.raw"
-            raw.write_bytes(b"raw")
-            manifest = tmp / "manifest.json"
-            manifest.write_text(json.dumps({"packages": [
-                {"type": "deb", "name": "systemd", "version": "257.13-1~deb13u1", "architecture": "arm64"},
-                {"type": "deb", "name": "linux-image-6.12.107+deb13-arm64", "version": "6.12.107-1", "architecture": "arm64"},
-                {"type": "deb", "name": "libgl1-mesa-dri", "version": "25.0.7-2+deb13u1", "architecture": "arm64"}]}))
-            builder = tmp / "builder-packages.tsv"
-            builder.write_text("mkosi\t25.3-7\tall\nsystemd\t257.13-1~deb13u1\tarm64\n")
-            toolchain = tmp / "toolchain.tsv"
-            toolchain.write_text("gcc\t4:14.2.0-1\tarm64\ncmake\t3.31.6-2\tarm64\n")
-            initrd_manifest = tmp / "initrd-manifest.json"
-            initrd_manifest.write_text(json.dumps({"packages": [
-                {"type": "deb", "name": "lvm2", "version": "2.03.31-2", "architecture": "arm64"}]}))
-            initrd = tmp / "initrd.cpio.zst"
-            initrd.write_bytes(b"cpio")
-            (tmp / "games" / "mygame").mkdir()
-            ported = tmp / "games" / "mygame" / "mygame"
-            ported.write_bytes(b"\x7fELF ported")
-            ported.chmod(0o755)
-            recipe = {"name": "mygame", "license": "GPL-2.0", "recipe_sha256": "d" * 64,
-                      "sources": [{"path": "source", "git": "https://example.invalid/mygame", "commit": "e" * 40}],
-                      "patches": []}
-            (tmp / "recipes.json").write_text(json.dumps([recipe]))
-            source = tmp / "source.json"
-            source.write_text(json.dumps({"commit": "c" * 40, "clean": True}))
-            out = tmp / "info.json"
-            with out.open("w") as handle:
-                subprocess.run([sys.executable, str(OS / "builder" / "build_info.py"),
-                                "--inputs", str(OS / "inputs.json"), "--source-info", str(source), "--profile", "qemu-dev",
-                                "--build-id", "20260927T000000Z-cccccccccccc", "--started", "2026-09-27T00:00:00Z",
-                                "--image", str(image), "--raw", str(raw), "--manifest", str(manifest),
-                                "--initrd-manifest", str(initrd_manifest), "--initrd", str(initrd),
-                                "--builder-packages", str(builder), "--toolchain", str(toolchain),
-                                "--config", str(MKOSI), "--out", str(tmp)],
-                               check=True, stdout=handle)
-            info = json.loads(out.read_text())
+        (self.tmp / "games" / "mygame").mkdir(parents=True)
+        ported = self.tmp / "games" / "mygame" / "mygame"
+        ported.write_bytes(b"\x7fELF ported")
+        ported.chmod(0o755)
+        recipe = {"name": "mygame", "license": "GPL-2.0", "recipe_sha256": "d" * 64,
+                  "sources": [{"path": "source", "git": "https://example.invalid/mygame", "commit": "e" * 40}],
+                  "patches": []}
+        (self.tmp / "recipes.json").write_text(json.dumps([recipe]))
+        info = self.build_info()
         self.assertEqual((info["name"], info["environment"], info["release"]), ("MUN OS", "qemu-arm64", False))
         self.assertTrue(info["version"].endswith("-dev"))
-        self.assertEqual(info["kernel"]["packages"], {"linux-image-6.12.107+deb13-arm64": "6.12.107-1"})
+        self.assertEqual(info["kernel"], {"packages": {"linux-image-6.12.107+deb13-arm64": "6.12.107-1"}})
         self.assertEqual(info["mesa"], {"libgl1-mesa-dri": "25.0.7-2+deb13u1"})
         self.assertTrue(info["firmware"].startswith("not installed"), "an absent component says so")
         self.assertEqual(info["toolchain"], {"gcc": "4:14.2.0-1", "cmake": "3.31.6-2"})
@@ -440,13 +631,236 @@ class BuildInfoTests(unittest.TestCase):
         self.assertEqual(info["games"]["mun-collect"]["sha256"], hashlib.sha256(b"\x7fELF game").hexdigest())
         self.assertNotIn("recipe", info["games"]["mun-collect"])
         self.assertEqual(info["games"]["mygame"]["recipe"], recipe, "a recipe's game records its recipe")
-        self.assertIn("mun-os-0.1.0-dev-qemu-arm64.qcow2", info["artifacts"])
         self.assertIn("mkosi.conf", info["config"]["files"])
         self.assertEqual(info["initrd"]["packages"], [{"name": "lvm2", "version": "2.03.31-2", "architecture": "arm64"}])
         self.assertEqual(info["initrd"]["sha256"], hashlib.sha256(b"cpio").hexdigest())
         self.assertEqual(info["debian"]["snapshot"], json.loads((OS / "inputs.json").read_text())["debian"]["snapshot"])
-        self.assertEqual(info["shape"], {"format": "mun-shape/1"},
-                         "the MUN Shape format the console reads, from the checker the card service uses")
+        self.assertEqual(info["shape"], {"format": "mun-shape/1", "minor": 1, "motion": {"draft": 1}},
+                         "the MUN Shape format the console reads, from the checker the card service uses, and "
+                         "beside it, for tools that know them, its minor version and the motion draft it plays")
+
+    def test_a_qemu_build_records_its_qcow2_and_no_pinned_package(self):
+        info = self.build_info()
+        self.assertEqual(info["image_format"], "qcow2")
+        self.assertEqual(info["pinned_packages"], [])
+        self.assertEqual(set(info["artifacts"]), {"mun-os-0.1.0-dev-qemu-arm64.qcow2", "raw_image"})
+        self.assertEqual(info["artifacts"]["raw_image"]["note"],
+                         "the uncompressed disk the qcow2 was converted from; not shipped")
+
+    def test_a_board_build_records_its_raw_image_and_pinned_kernel(self):
+        installed = {"type": "deb", "name": PINNED_KERNEL["name"], "version": PINNED_KERNEL["version"],
+                     "architecture": "arm64"}
+        info = self.build_info("mun-os-0.1.0-dev-example-arm64.img.xz", "raw", [PINNED_KERNEL], kernel=installed)
+        self.assertEqual(info["image_format"], "raw")
+        self.assertIn("mun-os-0.1.0-dev-example-arm64.img.xz", info["artifacts"])
+        self.assertIn("decompresses to", info["artifacts"]["raw_image"]["note"])
+        self.assertEqual(info["pinned_packages"], [dict(PINNED_KERNEL, installed=True)],
+                         "where it came from, its digest, licence and source")
+        self.assertEqual(info["kernel"]["pinned"], {PINNED_KERNEL["name"]: PINNED_KERNEL["version"]})
+        self.assertTrue(info["kernel"]["packages"].startswith("absent"),
+                        "a pinned kernel is not listed as one from the Debian snapshot")
+        self.assertNotIn("QEMU", info["firmware"])
+
+    def test_a_pinned_package_installed_at_another_version_fails_the_build(self):
+        other = {"type": "deb", "name": PINNED_KERNEL["name"], "version": "7.1.3-1", "architecture": "arm64"}
+        result = self.build_info("mun-os-0.1.0-dev-example-arm64.img.xz", "raw", [PINNED_KERNEL], kernel=other,
+                                 check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("not the pinned 7.1.2-3", result.stderr)
+
+    def test_an_unknown_image_format_is_refused(self):
+        result = self.build_info(image_format="vhd", check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--image-format", result.stderr)
+
+
+class ProfileTests(unittest.TestCase):
+    """A profile's image format and pinned packages (os/builder/profiles.py),
+    on temporary profiles: none of this repository's profiles pins one."""
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.root = Path(directory.name)
+
+    def profile(self, environment="", declaration=None, name="example-dev"):
+        profile = self.root / name
+        profile.mkdir(exist_ok=True)
+        (profile / "mkosi.conf").write_text(
+            "[Build]\nEnvironment=\n        MUN_ENVIRONMENT=example-arm64\n        MUN_RELEASE=false\n" + environment)
+        target = profile / "pinned-packages.json"
+        if declaration is not None:
+            target.write_text(declaration if isinstance(declaration, str) else json.dumps(declaration))
+        elif target.exists():
+            target.unlink()
+        return profile
+
+    @staticmethod
+    def entry(**changes):
+        entry = {"name": "linux-image-7.1.2-example", "version": "7.1.2-3",
+                 "url": "https://example.invalid/pool/linux-image-7.1.2-example_7.1.2-3_arm64.deb",
+                 "sha256": hashlib.sha256(b"deb").hexdigest(), "license": "GPL-2.0-only",
+                 "source": {"repository": "https://example.invalid/kernel.git", "commit": "f" * 40}}
+        entry.update(changes)
+        return {key: value for key, value in entry.items() if value is not None}
+
+    def declaration(self, *entries):
+        return {"format": "mun-pinned-packages/1", "packages": list(entries) or [self.entry()]}
+
+    def refused(self, declaration, message):
+        with self.assertRaises(profiles.ProfileError) as refused:
+            profiles.pinned(self.profile(declaration=declaration))
+        self.assertIn(message, str(refused.exception))
+
+    def test_the_format_is_qcow2_unless_the_profile_says_raw(self):
+        self.assertEqual(profiles.image_format(self.profile()), "qcow2")
+        self.assertEqual(profiles.image_format(self.profile("        MUN_IMAGE_FORMAT=raw\n", name="raw-dev")), "raw")
+        for index, setting in enumerate(("MUN_IMAGE_FORMAT=vhd\n", "MUN_IMAGE_FORMAT=\n",
+                                         "MUN_IMAGE_FORMAT=raw\n        MUN_IMAGE_FORMAT=qcow2\n")):
+            with self.assertRaises(profiles.ProfileError, msg=setting) as refused:
+                profiles.image_format(self.profile("        " + setting, name=f"bad{index}-dev"))
+            self.assertIn("MUN_IMAGE_FORMAT", str(refused.exception))
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(profiles.main(["format", str(self.root / "raw-dev")]), 0)
+        self.assertEqual(out.getvalue(), "raw\n", "what build.sh reads")
+
+    def test_no_declaration_pins_nothing(self):
+        profile = self.profile()
+        self.assertEqual(profiles.pinned(profile), [])
+        self.assertEqual(profiles.fetch(profile, self.root / "packages", opener=self.fail_open), [])
+        self.assertFalse((self.root / "packages").exists(), "nothing for mkosi to see")
+
+    def fail_open(self, url, timeout):
+        raise AssertionError("nothing may be downloaded")
+
+    def test_a_complete_entry_is_accepted_with_a_commit_or_a_tag(self):
+        tagged = self.entry(name="linux-dtb-example", url="https://example.invalid/linux-dtb-example_1.0_arm64.deb",
+                            source={"repository": "https://example.invalid/kernel.git", "tag": "v1.0"})
+        entries = profiles.pinned(self.profile(declaration=self.declaration(self.entry(), tagged)))
+        self.assertEqual([e["name"] for e in entries], ["linux-image-7.1.2-example", "linux-dtb-example"])
+
+    def test_a_digest_that_is_not_sha256_is_refused(self):
+        self.refused(self.declaration(self.entry(sha256="ab" * 20)), "sha256")
+
+    def test_only_https_is_allowed(self):
+        self.refused(self.declaration(self.entry(url="http://example.invalid/pool/x_1_arm64.deb")), "https")
+        self.refused(self.declaration(self.entry(url="ftp://example.invalid/x_1_arm64.deb")), "https")
+        self.refused(self.declaration(self.entry(url="https://user:secret@example.invalid/x_1_arm64.deb")),
+                     "credentials")
+        self.refused(self.declaration(self.entry(
+            source={"repository": "http://example.invalid/kernel.git", "commit": "f" * 40})), "https")
+
+    def test_the_file_name_is_one_plain_deb_name(self):
+        for url in ("https://example.invalid/pool/..%2F..%2Fetc%2Fpasswd.deb", "https://example.invalid/pool/",
+                    "https://example.invalid/pool/.hidden.deb", "https://example.invalid/pool/kernel.tar",
+                    "https://example.invalid/pool/a%2Fb.deb"):
+            self.refused(self.declaration(self.entry(url=url)), "file name")
+
+    def test_a_missing_or_unknown_field_is_refused(self):
+        self.refused(self.declaration(self.entry(license=None)), "missing license")
+        self.refused(self.declaration(self.entry(mirror="https://example.invalid/")), "unknown mirror")
+        self.refused(self.declaration(self.entry(source={"repository": "https://example.invalid/k.git"})), "source")
+        self.refused(self.declaration(self.entry(source={"repository": "https://example.invalid/k.git",
+                                                          "commit": "f" * 40, "tag": "v1"})), "source")
+        self.refused(self.declaration(self.entry(source={"repository": "https://example.invalid/k.git",
+                                                          "commit": "main"})), "commit")
+        self.refused(dict(self.declaration(), extra=True), "unknown extra")
+
+    def test_names_versions_and_the_document_itself_are_checked(self):
+        self.refused(self.declaration(self.entry(name="Linux Image")), "package name")
+        self.refused(self.declaration(self.entry(version="latest")), "Debian version")
+        self.refused(self.declaration(self.entry(), self.entry()), "given twice")
+        self.refused({"format": "mun-pinned-packages/2", "packages": [self.entry()]}, "not a mun-pinned-packages/1")
+        self.refused({"format": "mun-pinned-packages/1", "packages": []}, "at least one")
+        self.refused("{not json", str(self.root))
+
+    @staticmethod
+    def response(data):
+        return contextlib.closing(io.BytesIO(data))
+
+    def test_a_download_is_kept_only_if_it_matches_its_digest(self):
+        target = self.root / "x.deb"
+        profiles.download("https://example.invalid/x.deb", target, hashlib.sha256(b"deb").hexdigest(),
+                          opener=lambda url, timeout: self.response(b"deb"))
+        self.assertEqual(target.read_bytes(), b"deb")
+        other = self.root / "y.deb"
+        with self.assertRaises(profiles.ProfileError) as refused:
+            profiles.download("https://example.invalid/y.deb", other, hashlib.sha256(b"deb").hexdigest(),
+                              opener=lambda url, timeout: self.response(b"not the pinned file"))
+        self.assertIn("does not match", str(refused.exception))
+        self.assertEqual(sorted(p.name for p in self.root.iterdir()), ["x.deb"], "nothing else is left behind")
+
+    def test_a_download_larger_than_the_limit_stops(self):
+        with patch.object(profiles, "SIZE_LIMIT", 4), patch.object(profiles, "CHUNK", 2):
+            with self.assertRaises(profiles.ProfileError):
+                profiles.download("https://example.invalid/x.deb", self.root / "x.deb", "0" * 64,
+                                  opener=lambda url, timeout: self.response(b"too large"))
+        self.assertEqual(list(self.root.iterdir()), [])
+
+    def test_a_redirect_is_followed_only_to_https(self):
+        handler = profiles.HttpsOnly()
+        request = urllib.request.Request("https://example.invalid/x.deb")
+        with self.assertRaises(profiles.ProfileError):
+            handler.redirect_request(request, None, 302, "Found", {}, "http://example.invalid/x.deb")
+        followed = handler.redirect_request(request, None, 302, "Found", {}, "https://mirror.example.invalid/x.deb")
+        self.assertEqual(followed.full_url, "https://mirror.example.invalid/x.deb")
+
+    def fetch(self, fields):
+        profile = self.profile(declaration=self.declaration())
+        output = "".join(f"{key}: {value}\n" for key, value in fields.items())
+
+        def run(command, **kwargs):
+            self.assertEqual(command[:2], ["dpkg-deb", "--field"])
+            return subprocess.CompletedProcess(command, 0, output, "")
+        with contextlib.redirect_stderr(io.StringIO()):
+            return profiles.fetch(profile, self.root / "packages", opener=lambda url, timeout: self.response(b"deb"),
+                                  run=run)
+
+    def test_a_fetched_package_must_be_the_declared_one(self):
+        records = self.fetch({"Package": "linux-image-7.1.2-example", "Version": "7.1.2-3", "Architecture": "arm64"})
+        self.assertEqual(records[0]["architecture"], "arm64")
+        self.assertEqual((records[0]["size"], records[0]["license"]), (3, "GPL-2.0-only"))
+        self.assertTrue((self.root / "packages" / "linux-image-7.1.2-example_7.1.2-3_arm64.deb").is_file())
+        for fields, message in (({"Package": "linux-image-other", "Version": "7.1.2-3", "Architecture": "arm64"},
+                                 "not the declared"),
+                                ({"Package": "linux-image-7.1.2-example", "Version": "7.1.2-4", "Architecture": "arm64"},
+                                 "not the declared"),
+                                ({"Package": "linux-image-7.1.2-example", "Version": "7.1.2-3", "Architecture": "amd64"},
+                                 "amd64")):
+            shutil.rmtree(self.root / "packages")
+            with self.assertRaises(profiles.ProfileError) as refused:
+                self.fetch(fields)
+            self.assertIn(message, str(refused.exception))
+            self.assertEqual(list((self.root / "packages").iterdir()), [], "a refused file is not offered to mkosi")
+
+
+class BuildScriptTests(unittest.TestCase):
+    """What os/builder/build.sh does with a profile's format and pinned
+    packages; the script itself runs only in a builder."""
+
+    def setUp(self):
+        self.script = (OS / "builder" / "build.sh").read_text()
+
+    def test_a_qcow2_build_converts_the_disk_as_before(self):
+        self.assertIn('IMAGE="mun-os-$VERSION-${ENVIRONMENT:-$PROFILE}.qcow2"', self.script)
+        self.assertIn('qemu-img convert -O qcow2 -c -o compression_type=zstd "$WORK/image/mun-os.raw" "$OUT/$IMAGE"',
+                      self.script)
+
+    def test_a_raw_build_is_the_disk_compressed_with_xz(self):
+        self.assertIn('IMAGE="mun-os-$VERSION-${ENVIRONMENT:-$PROFILE}.img.xz"', self.script)
+        self.assertRegex(self.script, r'xz --threads=0 --check=crc64 --stdout "\$WORK/image/mun-os.raw" > "\$OUT/\$IMAGE"')
+        self.assertIn('IMAGE_FORMAT="$(python3 "$HERE/profiles.py" format "$PROFILE_DIR")"', self.script)
+        builder = json.loads((OS / "inputs.json").read_text())["builder"]["packages"]
+        self.assertIn("xz-utils", builder)
+
+    def test_pinned_packages_reach_mkosi_only_through_a_declaration(self):
+        self.assertIn(f'[ ! -f "$PROFILE_DIR/{profiles.DECLARATION}" ] || PINNED_DIR="$WORK/packages"', self.script)
+        self.assertIn('${PINNED_DIR:+--package-directory="$PINNED_DIR"}', self.script)
+        self.assertLess(self.script.index('profiles.py" fetch'), self.script.index("{ mkosi --profile"),
+                        "verified before mkosi runs")
+        self.assertIn('--image-format "$IMAGE_FORMAT" --pinned "$WORK/pinned.json"', self.script)
+        # mkosi 25 makes a package directory a local APT repository with reprepro.
+        self.assertIn("reprepro", json.loads((OS / "inputs.json").read_text())["builder"]["packages"])
 
 
 class EntryPointTests(unittest.TestCase):

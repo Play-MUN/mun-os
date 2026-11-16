@@ -2,7 +2,7 @@
 
 The console's interface: the start-up, Home with its menu arcs and the
 panel of the entry in focus, the Game Card states, playing and the session
-result, safe eject, settings (language, clock, resolution, safe area,
+result, safe eject, settings (language, clock, resolution, colour range, safe area,
 interface sounds, automatic power off), the menus' sounds, information about the console and a confirmed clean power-off, in
 English or Spanish. What the console cannot do yet is shown in its place as
 "Not available yet", never imitated. Launch contract:
@@ -12,45 +12,70 @@ Qt 6 Quick renders with the software scene graph through Qt's `linuxfb`
 plugin, drawing into DRM dumb buffers with page flips: no display server
 and no GPU dependency. When the shell stops for a game it releases the
 display, and a game drawing on `/dev/fb0` has it (see *Display path*).
+The same binary also runs on a graphics API (Qt's `eglfs` over a GPU's
+OpenGL ES, on hardware that has one); it finds out which at run time and
+draws the parts that depend on it accordingly (*How it is drawn*).
 
 ## Layout
 
 | Path | Role |
 | --- | --- |
-| `src/main.cpp` | Process entry: has the display mode chosen before Qt starts, loads the compiled-in fonts, tells QML whether this is the first start since boot, loads the QML module |
-| `src/displaymode.*` | The display mode: the player's resolution if the display takes it, else the display's own; Qt's KMS configuration and the canvas's scale for it; the one-shot trial of a new mode |
+| `src/main.cpp` | Process entry: waits for the display and has its mode chosen before Qt starts, loads the compiled-in fonts, tells QML whether this is the first start since boot, loads the QML module |
+| `src/displaymode.*` | The display mode: the player's resolution if the display takes it, else the display's own (or, under a board's cap, the mode the cap picks); Qt's KMS configuration and the canvas's scale for it; the one-shot trial of a new mode; the wait for the display and the mode actually set, in the journal |
+| `src/displaydevice.*` | The rules behind it, in standard C++ (no Qt, no libdrm): which DRM device is usable, what to say when none is, and which mode to start in under a cap |
 | `src/systeminfo.*` | Real system facts read from `/proc`, `/sys`, `/etc/os-release`, `/usr/lib/mun/release`, `statvfs` and `getifaddrs` (identity, hardware, display, time zone, network interfaces), raw so the interface words them in its language |
 | `src/shellsettings.*` | The player's settings, validated and kept in the service's state directory |
 | `src/systemsounds.*` | The menus' sounds (move, enter, back), mixed on a worker thread and played through ALSA |
-| `src/powercontrol.*` | The only privileged request: runs `mun-power` through `sudo -n`; reports failure to the UI |
+| `src/playbackhealth.h` | Whether the sound device plays what it is given at its rate (not just open), in standard C++, checked on the host |
+| `src/startupclock.h`, `src/bootclock.*` | The start-up's clock: following its sound while it can be trusted, alone at real speed once not; in standard C++, checked on the host, and given to QML on the monotonic clock |
+| `src/powercontrol.*` | The only privileged requests: runs `mun-power` and, for Reset console, `mun-reset request` through `sudo -n`; reports failure to the UI |
 | `src/cardclient.*` | Mirror of the card service over its UNIX socket: snapshot, events, reconnection; exposes state, manifest, error, cover (data URL) and whether the active card arrived while the shell was watching to QML |
 | `src/shape.*`, `src/contrast.h`, `src/readpalette.*` | A Game Card's MUN Shape on the eligible surfaces: the export read and decoded off the GUI thread, its colours verified again with the contrast rule, the palette read from a cover, the phases of its coming in and leaving (*A Game Card's identity*) |
+| `src/pngchunks.h`, `src/decodingmarker.h` | What guards the reading of a card's images, in standard C++, checked on the host: the scan of a PNG's chunk headers before any image reader opens the file, and the marker that names the insertion being decoded, with the insertion a start skips for it |
 | `src/shapeworld.*`, `src/shapefront.h` | The package's world, prepared and painted on its own thread, and the fronts of its transitions |
+| `src/motionscene.*`, `shaders/sprite.*` | The motion of a `mun-shape/1.1` package (draft, [docs/shape-motion.md](../../docs/shape-motion.md)): its images decoded off the GUI thread, one simulation drawn as one composed image or as scene graph nodes (on a graphics API, every run of things from one image as one node of quads), its reactions to the console's events |
 | `src/framewatch.*` | The interface's frame and key timings while a world is drawn; the step down when navigation suffers |
+| `src/renderinfo.*` | How the window is drawn: the software renderer or a graphics API, whether that API is accelerated, the renderer and render loop, in the journal |
 | `src/memory.*` | Once the start-up is over, most of the memory the shell frees goes back to the system (glibc's thresholds fixed, then a trim) |
 | `src/launchclient.*` | Client of `mun-launchd`: `launch(slot, serial, version)`, `release(serial)`, `acknowledge()`, launcher state and the last session result (read from `/run/mun/launch/last-result.json` at start, then over the socket) |
 | `src/backdrop.*`, `src/heroicon.*` | Home's painted layers: the network of light behind everything, and the large object of the entry in focus |
+| `src/networknode.*`, `shaders/network.*` | The network on a graphics API: one geometry, built once, that the GPU places on every frame |
+| `src/orbitalbackdrop.*`, `shaders/eclipse.*`, `shaders/wave.*` | Home's background in the orbital design: the night and its haze, the eclipse, the orbit and its dots, the waves; on a graphics API meshes and shaders moving at 10 frames a second, on the software renderer one still picture |
 | `src/cssbox.*`, `src/blur.*` | Surfaces with CSS semantics (radii, gradients at any angle, outer and inset box shadows) and the blur they and the glows use |
-| `src/projectedview.*` | Shows an item through a perspective transform, projected once per change |
-| `src/sceneclock.*` | One frame clock for the painted layers |
+| `src/surfacenode.*`, `shaders/box.*`, `shaders/shadow.*` | The same surfaces on a graphics API, drawn by the GPU from their parameters |
+| `src/projectedview.*`, `qml/ProjectedLayer.qml` | Shows an item through a perspective transform: projected once per change into a copy (software renderer), or rendered into a layer that the GPU projects (graphics API) |
+| `src/sceneclock.*` | One clock for the painted layers: a timer, or the frames the window renders |
 | `src/bootintro.*`, `src/bootintroshapes.h`, `images/boot-*.png` | The start-up's picture, part by part, as a function of the sound's time; its shapes (the MUN letters, the moon's arc, the LED) and its two images of the console's lid |
 | `qml/Main.qml` | The scene, the navigation, the actions and the key handling |
 | `qml/Panels.qml` | What each entry's panel and each dialog says, from the real state |
 | `qml/Theme.qml`, `qml/I18n.qml` | Design tokens and motion; the two languages |
+| `qml/OrbitalMenu.qml`, `OrbitalNode`, `OrbitalIcon`, `OrbitalFocus`, `src/orbitalcard.*` | The orbital design's menus: the entries as nodes on the orbit's ring with their pills, their icons (each part painted once and moved by a transform), and the entry in focus large at the orbit's centre, the card object among them |
 | `qml/ArcMenu.qml`, `ArcNode`, `DetailPanel`, `OptionRow`, `StatusBar`, `MoonPhase`, `ModalLayer`, `BootLayer`, `UiText`, `MarkText`, `Shadow`, `Material`, `Logo.js` | Components: the arcs and their entries, the panel and its options, the status line, dialogs, the start-up and power-off screen, text and shadows; the MUN logo |
-| `tests/behaviour.py`, `tests/scenes/` | Behaviour regressions run on the compiled binary, offscreen (*A Game Card's identity*) |
+| `tests/behaviour.py`, `tests/scenes/` | Behaviour regressions run on the compiled binary: offscreen with the software renderer, Home also through OpenGL on Xvfb (*A Game Card's identity*), and the two drawing paths side by side (*On a graphics API*) |
+| `tests/displaydevice_test.cpp`, `tests/startupclock_test.cpp`, `tests/playbackhealth_test.cpp`, `tests/pngchunks_test.cpp`, `tests/decodingmarker_test.cpp`, `tests/Makefile` | The display rules on fake sysfs trees and mode lists, the start-up's clock against sounds that stall, crawl, race, go back or recover, the device's health against devices that do, the chunk scan against PNGs that carry too much besides their pixels, and the decoding marker across starts; compiled and run on the host by `make check` |
+| `tests/qml_test.js`, `tests/sources_test.py` | The logic the interface keeps in its QML files (the start-up's wait for the sound, the hand-overs of the screen, turning off, the options that need the launcher, the session's result in English), its own functions run under node against stand-ins, where node is installed; and what the sources and the units promise each other (the unit's memory ceiling, the board's sound file, the quiet retries of the sound device); both run by `make check` |
 | `fonts/` | Archivo and Michroma, compiled in, with their licences |
-| `sounds/` | The interface's sounds, compiled in: the menus' `move.wav`, `enter.wav`, `back.wav` and the start-up's `startup.wav` |
+| `sounds/` | The interface's sounds, compiled in: the menus' `move.wav`, `enter.wav`, `back.wav`, the console's events' (`launch.wav`, `game_return.wav`, `shape_exit.wav`, `eject.wav`, `shutdown.wav`, `success.wav`, `warning.wav`, `error.wav`, `controller_connect.wav`, `controller_disconnect.wav`) and the start-up's `startup.wav` |
 | `deploy/mun-shell.service` | systemd unit on tty1 as user `mun-shell` with the display (DRM) and evdev environment and the state directory |
-| `deploy/mun-shell.sudoers` | Allows exactly `mun-power poweroff|reboot` for that user |
+| `deploy/mun-shell.sudoers` | Allows exactly `mun-power poweroff`, `mun-power reboot` and `mun-reset request` for that user |
 | `deploy/mun-power` | Root-side helper with a fixed vocabulary in front of `systemctl` |
 | `deploy/packages`, `deploy/build-packages` | Debian packages at run time and for compiling; the image build mirrors them in `os/mkosi/mkosi.conf` |
 | `deploy/build.sh` | Compiles out of tree with a given build id; run by the image build |
 | `deploy/stage.sh` | Installs a compiled shell, the unit, the power helper, the sudoers rule and `deploy/sysusers.conf` under a root directory, the image's |
+| `deploy/standby-frame.py`, `deploy/standby.qml` | Make the standby picture from the shell just built: its own first frame at the first start of a boot, offscreen; run by the image build |
+| `deploy/mun-standby`, `deploy/mun-standby.service` | Show the standby picture on the kernel's framebuffer as soon as the image's root is mounted |
 
 Separation: the UI (QML) never touches the system; `SystemInfo` reads it;
-`PowerControl` asks a root helper through a sudoers rule that names one binary
-and two arguments. The service runs unprivileged with `ProtectSystem=strict`.
+`PowerControl` asks a root helper through a sudoers rule that names three
+exact commands: `mun-power` with `poweroff` or `reboot`, and `mun-reset
+request`, which only asks for a reset and refuses with a card in the slot or
+a game running ([mun-reset](../mun-reset/README.md)); the reset itself is
+never the shell's to run. The service runs unprivileged with
+`ProtectSystem=strict`, and its unit bounds its memory (`MemoryMax=2G`,
+`OOMPolicy=stop`): by itself the shell holds 150 to 250 MiB and what a Game
+Card may add is bounded, so only a fault reaches the ceiling, and it then
+ends the shell alone, which starts again (*Recovery*), instead of the
+kernel choosing a process among all of the console's.
 
 ## Identity
 
@@ -69,7 +94,9 @@ network, the console's LED white `#DDE9FF`. Type: Archivo, a variable font
 (labels are bold at 118 % width), for everything read; Michroma, the mark's
 face, for short upper-case labels, the path at the bottom and the clock.
 
-Home: on the left a large object for the entry in focus (the Game Card, a
+Home, in the previous design (kept, behind `MUN_SHELL_DESIGN=previous`, as
+the reference the checks compare with): on the left a large object for the
+entry in focus (the Game Card, a
 fan of cards, a gear, the power sign; in Settings a person with a globe, a
 screen with sound, the network's arcs, a chip) floats at the centre of a
 network of light: rings drifting out of it, slowly turning spokes, two
@@ -84,6 +111,39 @@ the path, starting at the console's mark (MUN™ › SETTINGS › SYSTEM), and
 the keys (A Select, B Back). The card's crescent on the Game Card object
 (the logo's moon) fills while a card is in the slot. The ambient light at the orb follows the local hour:
 cold at night, pale at dawn, grey-white by day, copper at dusk.
+
+Home's design is the orbital one, on a graphics API and on the software
+renderer alike (`OrbitalBackdrop`, `OrbitalMenu`): a warm night, darker
+downwards, with an eclipse's warm
+haze, lit edge and halo at the top left; an orbit of rings whose gaps widen
+outwards, its centre clear, a faint polar grid and a ring of dots; two
+waves along the bottom. The entries (MUN Disk, Universe, Settings, Turn off)
+are nodes on the orbit's node ring, each joined by a line to a pill of glass
+with its icon and label. Each section has its own light, from MUN OS's
+palette (`Theme.palette`: night, moon grey, moonlight, cyan and rose):
+MUN Disk and Universe moonlight, Settings (and its sections) moon grey,
+Turn off rose; cyan is kept, for now, for the network's light while
+Ethernet or Wi-Fi is connected. The
+chosen pill fills with its light, grows to the right and shows its detail
+after a thin rule in place of its icon, its node lit in the same colour,
+which the large icon and the panel's focus take too; with a game's MUN
+Shape on, the game's colours lead as before. The entry in focus also stands large at the orbit's centre, where its
+axes cross: when the focus comes to it, it grows in and plays a gesture of
+its own, then rests (the disk turns a quarter, the satellite goes once
+round the planet and settles, the gear turns a quarter, the power sign is
+pressed; each of Settings' sections its own), drawn on every frame while
+it runs, and hidden while a game's world covers the background. With a
+card's MUN Shape, MUN Disk's large icon gives way to the card object
+(`OrbitalCard`): the card's window on the disc, in its outline and light,
+as below, over MUN's night or the game's world. The small icons rest. At each move the ring of dots
+turns a step, as a dial. On a graphics API the waves and the eclipse move
+slowly, at 10 frames a second; on the software renderer, as in the virtual
+console, the background is drawn once and stays still. The panel leans
+back a little from its right edge (7 degrees), in the same glass.
+`MUN_SHELL_DESIGN=previous` brings back the previous design.
+Only the shown design's pieces are made, so neither costs the other memory
+or time; the navigation, the card's states, the sounds and MUN Shape are
+the same in both.
 
 Motion: the start-up plays once per boot, over the start-up sound (13.05
 s): the console waking in the dark, under the vignette of a tube, still
@@ -102,13 +162,59 @@ service and the launcher have answered, "A Skip" shows at the bottom right
 and A (or Enter, or Space) ends the start-up; until then no key does
 anything. When the picture has faded (11.75 s), Home comes in if they have
 answered, while the sound rings on; if not, the LED waits, breathing, until
-they do, or 20 s after the start whatever they do. The picture keeps time
-with the sound: on every frame its clock is what has been heard of it, the
-samples written to the device less what the device still holds. The black
-screen waits up to 3 s for the sound's first samples, and the picture holds
-while the sound stalls, up to 2 s, then follows it again; with System sounds
-off, no device, or a longer wait, it plays on its own clock from where it
-was. The journal says each time the picture changes clock. *Reduce motion*
+they do, or 20 s after the start whatever they do. Before the start-up
+begins the console is in standby: the dark screen with its LED lit, from
+the shell's first frame, held 0.4 s, then breathing, fading as the
+start-up begins. The system shows the same picture earlier: the image
+build makes it from the shell just built, its own first frame grabbed
+offscreen (`deploy/standby-frame.py`), and `mun-standby.service` writes it
+to the kernel's framebuffer as soon as the image's root is mounted, when
+that framebuffer is 1920x1080 at 32 bits; so from there the console shows
+MUN instead of black, and nothing changes on screen when the shell takes
+the display over. Where the unit's environment caps the display link's
+bits per channel (`MUN_DISPLAY_MAX_BPC`, a board's), the service sets the
+cap first (`mun-shell --cap-display`): setting it reconfigures the link and
+a display goes dark for a moment, which left to the shell's start came
+with the picture already shown. The shell then clears the framebuffer to black, which
+the kernel shows again whenever no program drives the display (between
+the shell and a game). The sound's first notes
+are never the first thing the display hears: a display given a new stream
+plays it only a moment later (on a board's HDMI display, about two
+seconds), so the shell opens the sound device as it starts, before the
+interface loads, feeding it silence, and the start-up begins only once the
+device has played well for 2 s: not open, but playing at its rate, as what
+it says it has played shows after every write (`src/playbackhealth.h`);
+meanwhile the LED breathes in the dark. That is usually over before the
+interface has loaded. Where the sound card comes up after the shell starts
+(a board's audio DSP), the unit sets `MUN_SHELL_SOUND_WAIT` (seconds): the
+shell looks for the device every 0.25 s until then, and the start-up waits
+for one that plays well; `MUN_SHELL_SOUND_READY` may name a file the system
+writes once the device is ready (a board's route to HDMI), before which it
+is not opened within that wait; after it the device is opened whatever the
+file, so a route that is never set costs no more than a card that never
+comes. The `q6a-dev` profile sets both: 30 s, and
+`/run/mun-board-audio/route-set`, which the board's route script writes.
+Once the device has come, the start-up waits for it to play
+well up to 5 s from its first opening, then goes on without it; after the
+wait, without a device it does not wait, and for a device that is open but
+does not play well, up to 3 s. A device that opens and fails without
+playing anything twice in a row is tried again only after a wait (0.25 s
+while one is expected, then 5 s), and the journal says so once and no more
+until it plays. The
+journal says how long it waited, and follows the device: when it opened and
+after how many attempts, when it played and when at its rate, its problems,
+failed writes and their recovery, all with the time since boot. The picture
+keeps time with the sound (`src/startupclock.h`): on every frame its clock
+is what has been heard of it, the samples written to the device less what
+the device still holds. The black screen waits up to 3 s for the sound's
+first samples, and the picture holds while the sound stalls, up to 2 s,
+then follows it again. A sound that does not advance from its start within
+3 s, stalls longer, goes back, runs slower than 0.8 or faster than 1.25
+times real time over a second, or whose device recovers twice, is not
+followed any more: the picture goes on alone, at real speed, from where it
+was, never back and never again from its start; with System sounds off or
+no device it plays alone from the start. The journal says each time the
+picture changes clock. *Reduce motion*
 takes out the shake, the tremor and the flicker; every time stays. Moving to another entry: the chosen bar
 turns light at once while its copper edge, glow and text colour settle in
 0.3 s and it slides 4 px out; the new object loads in 0.9 s, a radar-like
@@ -117,11 +223,13 @@ filling in over the second half while the previous object fades; a wave
 leaves the object through the rings and spokes; the panel's content
 changes and it slides to stay centred. Entering Settings, the main arc
 fades and moves away and the Settings arc comes in its place; while a
-panel's options have the focus, its arc dims. Three minutes after the last
-input the network, the float and the gear slow to a stop in 1.5 s and the
-scene holds still until the next key, which brings the motion back the same
-way, so a console left alone draws nothing. The menus' sounds are described
-under *Sounds*.
+panel's options have the focus, its arc dims. Left alone, the scene keeps
+moving (*Reduce motion* holds it still); ten minutes after the last input the
+interface dims to half its brightness, in 2 s, and the next key, wheel turn or click only
+brings it back, in 0.25 s: it does nothing else, and that key does nothing
+while it is held. The times count on the monotonic clock, so setting the
+date or time does not move them. The menus' sounds are described under
+*Sounds*.
 
 ### How it is drawn
 
@@ -165,8 +273,105 @@ about 10 % (a frame takes 5.5 ms to paint and compose, and linuxfb then
 composes the screen and copies it to the display), and 0 % at rest; one move about
 13 % over the 3 s around it; Settings in focus (the gear turning) about
 20 %; moving through the menu every 0.7 s about 31 %, while QEMU counts
-about 73 display updates a second. These are virtual-machine figures; a
-console with a GPU renderer was not measured.
+about 73 display updates a second. These are virtual-machine figures; the
+graphics path's are below.
+
+#### On a graphics API
+
+The software renderer's economies above cost a GPU more than they save it.
+`RenderInfo` (`src/renderinfo.*`) says which renderer draws the window: what
+was asked for before the window exists, then what the scene graph actually
+started with (a graphics API that cannot start makes Qt fall back), and,
+from the scene graph's own context, whether that API is accelerated (an
+OpenGL renderer can itself be software, Mesa's llvmpipe). Its decision goes
+to the journal once, as "mun-shell: renderer: …", with the renderer's name
+and the render loop. On a graphics API:
+
+- `ProjectedLayer` shows its flat content itself, rendered into a layer (a
+  texture, so that an opacity on it applies to the whole, as on the copy)
+  and drawn through the projection by the GPU, which renders the layer again
+  only when the content changes; nothing is grabbed or projected on the CPU.
+  Sampling a layer through the projection softens thin lines (a 2-pixel
+  focus frame lost a tenth of its contrast), so the panel, which never fades
+  as a whole, has no layer: the GPU draws its lines and glyphs through the
+  projection at the display's own pixels, and its text and focus frame keep
+  the contrast they have on the software path.
+  The transform is the projection the copy uses, the plane's projective map
+  with no depth: the design's perspectives would otherwise send parts of a
+  panel outside the depth range a graphics API clips to.
+- Under the threaded render loop that such an API usually runs, frames are
+  presented on the render thread: `FrameWatch` reads a frame's time there
+  and hands only that time to the GUI thread, where everything it keeps
+  lives.
+- The network is one geometry, built once (`NetworkNode`): every line of
+  the rings, the spokes, the stretches a wave lights, the orbits and the
+  floor, as vertices with the light `hairline` gives a line. Its vertex
+  shader (`shaders/network.vert`) places them on every frame from a few
+  numbers (how far the rings have drifted and the spokes turned, the waves
+  in flight, the dashes' offsets, the floor's slide); the CPU computes those
+  numbers, nothing else. The gradients under it are a texture, painted and
+  uploaded once per change of the light, the image then let go. The
+  shaders are compiled when the shell is built (Qt Shader Tools' `qsb`,
+  `qt6-shadertools-dev`), not at run time. Up to eight waves at once: a
+  ninth takes the place of the oldest.
+- Surfaces and their shadows (`Box`, `BoxShadow`) are drawn by the GPU
+  from their parameters (`src/surfacenode.*`): the rounded box from its
+  distance, its gradient and its inset lines, and each outer shadow as
+  its shape blurred by a Gaussian computed in the shader, exactly across
+  and by eight samples along, the corners following each row. Nothing is
+  painted or kept when a panel grows or a bar's glow changes colour. What
+  the shaders do not draw (an inset with blur, more than four stops,
+  insets or shadows; none is used today) is painted as before.
+- The large object's layers (`HeroIcon`) are painted on a thread of their
+  own, never where frames are made, and each becomes a texture, the image
+  let go once uploaded. A frame sets their opacities, the load's sweep (a
+  clip), the gear's turn (a transform) and the copper line (a little
+  geometry), which the GPU applies; the whole loaded object is composed
+  from the three layers already painted instead of being painted again.
+  Until an object's layers are ready the previous one stays and the load
+  waits, so navigation never waits for a painting. Only the layers of the
+  object in focus and of the one fading out are kept.
+- On an accelerated renderer, and only there, `SceneClock` ticks on the
+  frames the window renders (Qt Quick's animation driver, which the threaded
+  render loop paces by the display) instead of its timer, and the network
+  drifts, its waves run, the gear turns and the object floats (by fractions
+  of a pixel) on every frame: what moves costs the GPU, not a repaint. The journal says which ("mun-shell: motion: …"). While
+  only lower rates are asked for (a slow layer at 10 or 20 frames a second)
+  the clock ticks on its timer even there, so the window draws only the
+  frames that change; for 600 ms after each key (`FrameWatch`) it ticks on
+  every frame, so the motion a key starts is drawn at the display's rate
+  from its first frame. With the software renderer, or OpenGL in software,
+  the rates above stay. Rest and *Reduce motion* stop the motion as before,
+  and a still screen draws nothing.
+
+Measured once, on 31 October 2026, on the Radxa Dragon Q6A we develop on
+([MUN Dev](../../docs/mun-dev.md)), with Home's earlier design (the network
+and the gear below are that design's) and before MUN Shape's motion
+existed. It has not been measured again with the orbital Home, and it is
+what that day's runs gave, not a frame rate the console promises (OpenGL ES
+3.2 on Mesa's freedreno, 1920×1080 at 60 Hz, the threaded render loop;
+percent of one core used by the shell, sampled while a virtual keyboard
+played the same keys): Home at
+rest with the network drifting, 60 frames/s for about 18 %; moving through
+Home's menu, about 60 frames/s, 99 % of frames within 25 ms and none over
+40 ms in four runs, for about 60 %; moving through Settings' sections
+about 58 frames/s, entering Settings still taking up to 90 ms once; the
+gear turning, 60 frames/s for about 18 %. Before this path, the shell managed 10 to 13
+frames/s on the same board and display.
+
+`tests/behaviour.py` ("paths") draws the same still screen both ways in the
+same binary, the software renderer offscreen and OpenGL on Mesa's llvmpipe
+under Xvfb (in the image build's overlay), checks that each says in the
+journal which renderer and clock it took, and compares the frames: Home's
+network, objects loaded after a change, the panel's surface and shadow, a
+chosen entry's bar, glow and knob. Where Xvfb is missing the case fails:
+the OpenGL path is required. It cannot show an accelerated renderer's
+timing; that is measured on hardware.
+
+The same screen drawn by both renderers (the software renderer and OpenGL on
+llvmpipe, in the same binary) differs by about one level in 255 on average,
+the moving network and the clock aside; Home's network held still differs
+by 0.03 levels on average, the orbits' dashes falling on the same pixels.
 
 The objects are drawn, not images, so they stay sharp at any resolution.
 The logo's letters and arc are vector paths (`qml/Logo.js`).
@@ -192,6 +397,29 @@ display through `/dev/fb0` and about 44 through DRM. Games keep drawing on
 `/dev/fb0` (or DRM, for the GL profile): the launcher stops the shell
 first, and the shell takes the display again when it restarts.
 
+The device is `/dev/dri/card0`: Qt 6.8's linuxfb plugin opens that one
+whatever its KMS configuration names. Before Qt starts, the shell waits for
+card0 to be a usable display (`src/displaydevice.*`): driven by the real
+display driver, not a framebuffer the firmware left (simpledrm and the
+like), with a connector `connected`. It looks every 250 ms, and has the
+kernel read the connectors again every 2 s while none is, for
+`MUN_DISPLAY_WAIT_SECONDS` (30 by default; 0 to 600). The journal says what
+it found:
+
+```text
+mun-shell: display: card0 HDMI-A-1 (virtio_gpu)
+```
+
+or, when the wait ran out, every DRM device with its driver and connectors,
+the framebuffer devices, and why none is usable; a display connected on
+another card is named, since only the image (its kernel and command line)
+can make it card0. The shell then exits with 69, and the unit, which has no
+condition on the display, starts it again 5 seconds later, with no limit.
+So a display driver that comes up late, or a display plugged in later,
+still gets the interface. An interface that does not load exits with 70;
+both are failures, never the clean stop (1) or the restart for a new mode
+(75).
+
 ### A Game Card's identity (MUN Shape)
 
 A valid Game Card dresses Home while it is the active card
@@ -203,6 +431,44 @@ code (`src/shape.*`, `src/shapeworld.*`, `src/shapefront.h`):
   - The world behind Home (`ShapeWorld`): the package's backdrop, layers,
     sprite emitters and light textures, in motion (docs/shape.md, "How the
     console draws a world").
+  - For a package with motion (format `mun-shape/1.1`, a draft in no
+    release), its scene in place of the world (`MotionScene`,
+    [docs/shape-motion.md](../../docs/shape-motion.md)): its planes,
+    characters, particles and lights, the moments of activity, and its
+    reactions to Play in focus, Play pressed, the card coming in, coming
+    back after a game and being released; a launch that is refused, or
+    accepted and ended before its game started (matched to this shell's own
+    launch by its session), gives back what Play pressed changed. If it cannot be loaded (an image that
+    does not decode, its images over 64 MiB decoded, its export gone, nothing in it to draw) the
+    journal says why and Home draws the package's v1 world instead. The
+    motion, its export and its insertion reach the scene together, and the
+    export must be the insertion's own (`<insertion>.<attempt>`, as the card
+    service names it). Each image is read as PNG and nothing else: its
+    chunks scanned before any reader opens it (`src/pngchunks.h`), then its
+    header, its sides within 2048, and only then its pixels, within what
+    the motion may still decode. Before its images are decoded, the marker
+    `shape-decoding-motion` in the runtime directory is written naming the
+    insertion; if it cannot be, nothing is decoded and the v1 world is
+    drawn. If decoding takes the shell down, the next start skips that
+    insertion's motion and shows its v1 look, and keeps the insertion in
+    `shape-skipped-motion` so that its later starts do too; other insertions
+    are not affected. A clean stop (the launcher's, around every game)
+    removes the markers (`ExecStopPost` in `deploy/mun-shell.service`), so a
+    motion that was only being decoded is not skipped, and leaves what is
+    kept, so one that ended the shell stays skipped after every game, until
+    the card is put in again or the console restarts. MUN's panel sits on
+    its plate over the motion as over a world.
+    It is drawn by one of two ways
+    (`MUN_SHELL_MOTION_BACKEND`, laboratory only): `cpu` composes each frame
+    into one image at the look's resolution on a worker thread; `graph`
+    (the default) puts one scene graph node per thing (on a graphics API,
+    one node per run of things from one image). The journal says the way,
+    the look and the images decoded, and every 10 s the ticks, the frames
+    composed, the ticks skipped and the composition times. With
+    `MUN_SHELL_MOTION_TRACE` set (laboratory only) it also logs, each second
+    of scene time, a digest of what the simulation decided (actors,
+    particles, lights): the same events at the same steps give the same
+    digests on any console, which is how two machines' runs are compared.
   - The main arc's entries: the game's plate under each label, in its
     material and at the opacity its text needs over any world; its text
     colour; a chosen bar of that colour with the plate's colour as label;
@@ -224,7 +490,12 @@ code (`src/shape.*`, `src/shapeworld.*`, `src/shapefront.h`):
     package asks (reached during the transition, then still) and its light
     in the game's colour. It is all of that or none: without that image
     (missing, or not decoded) the object is MUN's crescent, with neither the
-    game's outline nor its light.
+    game's outline nor its light. In the orbital design the object is MUN
+    Disk's disc at the orbit's centre while MUN Disk is in focus: the image
+    covers the disc around its hole, the organic outline swells and
+    recedes its edge, the light is a halo; without the image, MUN's disk
+    icon stays whole. The transitions grow from the object where it
+    stands, the orbit's centre there.
   - Outside the world (while it comes in, or when a package has none): the
     ambient light at the orb (the object's light while the object is the
     game's, else the palette's light) and a tint of MUN's world, both in the
@@ -310,13 +581,31 @@ code (`src/shape.*`, `src/shapeworld.*`, `src/shapefront.h`):
     of a world's paint time; at 1440p the VM is at the watchdog's edge.
 - **Decoding**: the export's `shape.json` (bound to the insertion), the
   window image, the cover and the world's images are read and decoded off
-  the GUI thread, with the dimensions checked first (1024 × 1024 for the
+  the GUI thread. Before any image reader opens one of them its chunk
+  headers are scanned (`src/pngchunks.h`): the checker's bounds on what a
+  PNG carries besides its pixels, as stored (64 ancillary chunks and
+  256 KiB; of them 16 text chunks and 32 KiB; one colour profile), held
+  here again so that the shell does not lean on the card service alone. A
+  reader asked only for a size already keeps, and inflates, every text
+  chunk and the profile, outside Qt's allocation limit, which covers
+  pixels. Then the dimensions are checked (1024 × 1024 for the
   window and the cover, 2048 for the world's large images, 256 for a
-  sprite) and an allocation limit of 16 MiB. The shell reads only
+  sprite), and the pixels decoded under an allocation limit of 16 MiB. An
+  image over a bound is not shown, as one that does not decode, and the
+  journal says which. The shell reads only
   `/run/mun/shape/<insertion>.<attempt>/` for the insertion in the record.
   A marker in the runtime directory (`shape-decoding`) names the insertion
-  being decoded: if the shell ends meanwhile, its next start skips that
-  insertion's identity, so a decoder that crashes cannot do it in a loop.
+  whose images are being read, the world's headers and pixels included,
+  and they are read only once it is written: if it cannot be, no image of
+  that insertion is decoded and the journal says so. If the shell ends
+  meanwhile, its next start finds the marker and skips that
+  insertion's identity, so a decoder that crashes cannot do it in a loop,
+  and keeps the insertion in `shape-skipped`: a clean stop removes the
+  markers and not what is kept, so the insertion stays skipped over the
+  shell's later starts, the ones after each game included, until the card
+  is put in again (another insertion) or the console restarts (the runtime
+  directory outlives the shell's restarts and not a reboot). A shell that
+  ends for another reason while it reads leaves the same marker.
   Sounds are read in the mixer's format and within the contract's
   durations, the set whole or not at all.
 - **Settings** (Appearance and accessibility; Sound): *MUN Shape* Full (default), Colours only
@@ -329,8 +618,13 @@ code (`src/shape.*`, `src/shapeworld.*`, `src/shapefront.h`):
   512x512; sounds back/enter/insert/move; world; arrival tide/tide 3.2 s;
   cue due`), when it comes in and leaves, and the world's detail level.
   With `MUN_SHELL_TIMING=FILE` (laboratory only), the interface's frame and
-  key timings go to that file, and the world's and the card object's paint
-  times to the journal.
+  key timings go to that file, with the long frames while the interface
+  moves (100 ms or more between two frames of the same motion: stutters,
+  counted but not judged), and the world's and the card object's paint
+  times to the journal. A key's judged time ends at the next frame on
+  screen, which may have been on its way before the key; the file also
+  gives the time to the frame that shows it (`shown`: the first one whose
+  scene was taken after the key).
 - **Behaviour regressions**: `tests/behaviour.py BUILD_DIR/mun-shell` runs
   the compiled binary offscreen with a scene of `tests/scenes/` in place of
   `Main.qml` (`MUN_SHELL_QML_DIR`), against exports made with the card
@@ -343,15 +637,41 @@ code (`src/shape.*`, `src/shapeworld.*`, `src/shapefront.h`):
     another card, a changed choice, a result that waits;
   - the world alone: its detail, its frames in motion, still and at rest,
     its steps down, a world that does not decode;
+  - the motion player alone (draft), both ways: it keeps drawing while
+    what it draws grows on screen, simulating at its rate; a still frame
+    holds and matches between the two ways, the character and the glow
+    compared where they are; a plant bends from its foot in bands alike
+    both ways; Play in focus takes a character to its path's end; an
+    export gone, an image missing and images over their budget draw
+    nothing and say so; a frame's list is bounded; events while held still
+    do not pile up; the focus coming and going quickly; the same events at
+    the same steps give the same simulation both ways, with particles, a
+    light and reactions;
+  - the motion with the shell's own `Main.qml`, in both designs: the
+    reef's school mills below the card object with Play in focus, every
+    fish of it in sight all the way round; Play
+    pressed and the launch refused (the scene given back) or accepted (the
+    dive), and pressed while the focus reaction settled; coming back after
+    a game; released and removed; MUN's panel on its plate over a white
+    motion; a motion that does not decode, drawn as the v1 world; a motion
+    whose decoding took the shell down, skipped;
   - the world's memory at 1080p and 1440p, the shell's own peak measured
     against the estimate: layers and a backdrop that scale large, 16-bit
     and palette images, a sample stepped down to still (composed in place);
     and how the extreme ones look (covered to the edges, the backdrop's
     middle);
-  - the shell's own `Main.qml` against the stand-ins: an arrival's tide, a
-    dialog that makes it wait, a return under a dialog, a removal mid-tide,
-    *Eject safely* confirmed and refused, another card, Reduce motion,
-    Colours only, Off, a defective world, Settings over the world;
+  - the shell's own `Main.qml` against the stand-ins, three ways, each
+    required: the previous design on the software renderer (the
+    reference), the orbital design on the software renderer (as the
+    virtual console draws it) and the orbital design through OpenGL (on
+    Xvfb, or a board's GPU with `--platform eglfs`); each way must come up
+    in its design and on its renderer, with its menu entries and card
+    object found, and one that cannot run fails. The cases: an arrival's
+    tide, a dialog that makes it wait, a return under a dialog, a removal
+    mid-tide, *Eject safely* confirmed and refused, another card, Reduce
+    motion, Colours only, Off, a defective world, Settings over the world,
+    the card object (a card block alone, with a world, a window that does
+    not decode), the idle dimming and the key that wakes it;
   - with the options focused, frame by frame: a package ready after the
     options took the focus (a fade and a tide), *Eject safely*, a changed
     choice (Colours only, Off, Full), another card; the dressed entries are
@@ -362,8 +682,24 @@ code (`src/shape.*`, `src/shapeworld.*`, `src/shapefront.h`):
     world, on Home, with the options focused, and mid-transition; and on
     the real world during a tide.
 
-  The image build runs it after compiling the shell and fails with it; its
-  measurements are the build's `logs/shell-behaviour.json`.
+  A player's steps and a card's events follow the shell's states rather
+  than two clocks: a scene's step waits for the state it needs, a stand-in
+  service sends what comes next once the scene has shown it, and a state
+  or moment that does not come within its limit fails the case (a
+  stand-in that waited for it sends nothing more). How long things take
+  (a transition's length, a cue's moment), and whether a frame fell at a
+  given point of a moving transition to be grabbed there, is a duration:
+  judged with `--timing check`, the default, on a steady machine; with
+  `--timing record` measured and kept in the report without being judged.
+  What lasts is always judged: a dressed entry whole on every frame, the
+  first dressed frame's and the settled screen's contrast.
+
+  The image build runs it after compiling the shell, with `--timing
+  record` (a builder's frames are the builder's, not the shell's), and
+  fails with it; its measurements are the build's
+  `logs/shell-behaviour.json`. Before a release, Home's durations are
+  judged once on the release's commit
+  ([releasing](../../docs/releasing.md#2-the-image-from-that-commit)).
 
 ## Resolution
 
@@ -399,11 +735,67 @@ The choice is the console's: a game on the GL profile starts in it, the
 launcher keeping the display in that mode between the shell and the game
 ([docs/runtime.md](../../docs/runtime.md#display)); a framebuffer game gets
 the size the kernel set at boot. One display is handled, the first connected
-connector of `/dev/dri/card0`. An explicit `QT_SCALE_FACTOR` in the
+connector of `/dev/dri/card0` (*Display path*); its modes are read from DRM
+(libdrm). An explicit `QT_SCALE_FACTOR` in the
 environment wins over the scale, and a KMS configuration given in the
 environment (`QT_QPA_KMS_CONFIG`, `QT_QPA_EGLFS_KMS_CONFIG`) over the choice,
 which is then not offered. *Safe area* scales the interface to 97, 94 or 91 % for
 displays that crop their edges.
+
+A board's image may cap Automatic: `MUN_DISPLAY_MAX=1920x1080@60` in the
+unit's environment (a drop-in of the board's profile; the QEMU image sets
+none, and Automatic is then the display's own mode). The shell then starts
+in, from the modes the display lists:
+
+1. the cap's size at its rate, 60.000 Hz before 59.940 Hz (the television
+   rate, 60/1.001), then the preferred mode, then the list's order;
+2. the largest mode within the cap at that rate (1280×720 at 60 Hz);
+3. the cap's size at a lower rate (1920×1080 at 50 Hz);
+4. the largest mode within the cap at any rate up to it;
+5. the display's preferred mode, above the cap, so that there is a picture.
+
+Interlaced modes are never chosen. The mode is given to Qt as its own
+modeline (the connector's timings, its clock written so that Qt's parser
+reads it back exact), since a size and a whole rate would get the first
+mode that matches them. Options 2 to 5 are logged as warnings. Once Qt has
+opened the display, the shell reads the mode actually set and logs it
+against the request:
+
+```text
+mun-shell: display: requested 1920x1080@60.000 (the cap 1920x1080@60), applied 1920x1080@60.000 on card0 HDMI-A-1
+```
+
+A difference is logged as an error. The player's own choice in Settings is
+not capped.
+
+### Colour range and bits per channel
+
+Settings › Display › Colour range sets how the console sends its colours:
+*Automatic* (the default), *Full* or *Limited*. A TV that expects one and
+gets the other shows grey blacks, or merges its darkest shades into black.
+The shell sets it before Qt opens the display (`src/displaymode.cpp`, the
+rules in `src/displaydevice.*`), in the few calls for which card0 is its
+own, and it stays in the display's state for Qt, which sets neither. A
+connector with a `Broadcast RGB` property takes the choice there and tells
+the display (Automatic follows the kernel, by the display's EDID). A
+connector without one, where a bridge decides what to tell the display (the
+Radxa Dragon Q6A's RA620), sends the pixels as they are, in full range,
+which the displays tried on that path showed right; *Limited* is then made
+by the display controller's gamma table, 0–255 into 16–235, at no cost to
+the CPU or GPU. A change restarts the shell, as one of resolution does,
+without a trial (every range shows a picture), and returns to the option.
+Reset settings returns to Automatic. Games inherit what is set, since they
+take the display as the shell leaves it.
+
+A board's image may also cap the bits per channel on the wire:
+`MUN_DISPLAY_MAX_BPC` (6 to 16) sets the connector's `max bpc`. The Q6A's
+profile sets 8: its bridge turns 10-bit input into a washed-out, light grey
+picture, and the shell draws 8 bits a channel anyway. The journal says what
+was set:
+
+```text
+mun-shell: display: signal: at most 8 bits per channel (the board's cap); range auto: full, the pixels as they are (HDMI-A-1 has no Broadcast RGB)
+```
 
 ## Settings
 
@@ -416,14 +808,13 @@ it cannot do.
 | --- | --- | --- |
 | Display | Resolution | Works: Automatic (default), or 720p, 1080p or 1440p where the display takes them; kept once confirmed, back to the previous one on its own otherwise (*Resolution*) |
 | | Safe area | Works: 100 (default), 97, 94 or 91 %; kept |
+| | Colour range | Works: Automatic (default), Full or Limited; kept; a change restarts the shell (*Colour range and bits per channel*) |
 | | HDR, refresh rate | Not available yet |
 | Sound | System sounds | Works: On (default) or Off, the menus' sounds and the start-up's (*Sounds*); kept |
 | | Game sounds on the menus | Works: On (default) or Off, a Game Card's own menu sounds and cue (*A Game Card's identity*); kept |
-| | Startup sound | Informs: on or off with System sounds |
 | | Output, format | Not available yet |
 | Appearance and accessibility | MUN Shape | Works: Full (default), Colours only or Off (*A Game Card's identity*); kept |
 | | Reduce motion | Works: Off (default) or On; Home's world and objects hold still, every transition is a fade, the start-up loses its shake, tremor and flicker; kept |
-| | Status light | Not available yet |
 | Language and time | Language | Works: English (default) or Español; kept |
 | | Time format | Works: 24-hour (default) or 12-hour; kept |
 | | Time zone | Informs: the system's zone, set by the image |
@@ -449,14 +840,25 @@ console: games and saves live on their Game Cards.
 ## Sounds
 
 Moving the focus or changing a choice plays `move`, going in or running an
-action `enter`, going back or closing a dialog `back`: only when a key or
-the pointer changed something, never for the console's own changes (a card
-arriving, a result shown). The start-up sound, `startup` (13.05 s), plays
-once per boot with the start-up (*Motion*), at the level it was mastered at
-rather than the menus' 3/4; skipping the start-up fades it out in 0.1 s. They are MUN's own, compiled in from `sounds/`, all in one chosen
-format: PCM, 16-bit, 48 kHz, stereo, only the format and the samples (no
-metadata chunks), the menus' under a second each and the start-up's under
-13.1 (`tests/test_os.py` checks all of that); the start-up's was made from
+action `enter` (Play plays `launch` instead, and Reset settings `success`),
+going back or closing a dialog `back`: only when a key or the pointer
+changed something. The console's own events have theirs: `game_return`
+when a game's result is first shown, `shape_exit` as Shape leaves, `eject`
+when a safe release is done and `warning` when it is refused, `shutdown`
+as the console turns off (it goes down once the sound has played, 3.5 s,
+the screen dark; at once when no sound device is open to play it, as with
+System sounds off), `error` when launching, turning off or saving a choice
+fails, and `controller_connect` and `controller_disconnect` when a
+controller comes or goes while the shell runs. A card arriving is greeted
+by the game's own cue (*MUN Shape*), not by these. All of them follow
+Settings › Sound › System sounds. The start-up sound, `startup` (13.05 s),
+plays once per boot with the start-up (*Motion*), at the level it was
+mastered at rather than the others' 3/4; skipping the start-up fades it
+out in 0.1 s. They are MUN's own, compiled in from `sounds/`, all in one
+chosen format: PCM, 16-bit, 48 kHz, stereo, only the format and the
+samples (no metadata chunks), the menus' under a second each, the
+events' under 3.5 and the start-up's under 13.1 (`tests/test_os.py`
+checks all of that, and that every one is used); the start-up's was made from
 its 96 kHz, 24-bit master, resampled with a linear-phase filter (no sample
 moves in time) and dithered to 16 bits. The shell asks ALSA for that format and lets it convert
 when a device plays another; it has been heard only through the virtual
@@ -473,11 +875,21 @@ each other, with about 40 ms buffered ahead. The device is opened on the
 first sound, fed silence between sounds so that it never runs dry (the
 laboratory's virtual device, played through the Mac's CoreAudio, did not
 resume a stream that had: the first sound played, later ones failed with an
-I/O error), and let go after three seconds of silence; the shell holds none
-of it while a game runs (the launcher stops the shell first). A device that
+I/O error). That silence is a noise far below hearing (at most 2 of 32768)
+rather than exact zeros. While the menus are shown with their sounds on,
+dimmed too, the device stays open, at about one percent of a core on a
+board: an HDMI display may need a moment to hear a stream that starts
+again, and the first move after a pause would be lost in it. For the same
+reason, at the first start of a boot it is opened as the shell starts,
+before the start-up (*Motion*). Otherwise it
+is let go after three seconds of silence; the shell holds none of it while
+a game runs (the launcher stops the shell first). A device that
 fails is opened afresh at once; no device, or one that fails again, means
-silence and one line in the journal, and the next sound tries again after
-five seconds. Settings › Sound › System
+silence and one line in the journal, after ALSA's own lines about that
+failure. It is tried again after five seconds, by the next sound or, while
+the menus are shown with their sounds on, by itself, and those tries say
+nothing, ALSA's lines included, until a device plays: a console without a
+sound card does not write to its journal every five seconds. Settings › Sound › System
 sounds turns them off. In the laboratory the guest's sound device
 is silent unless it plays to the Mac (`--window`, or `--audio coreaudio`)
 or records to `audio.wav` (`--audio wav`).
@@ -497,13 +909,20 @@ results) and shows the service's own words only when it has nothing better.
 | Reader unavailable | "Reader unavailable" | "No reader"; the panel says the console cannot reach its card reader and reconnects on its own. Shown while the socket is down, never confused with "no card" |
 | Absent | "Slot empty" | "Empty"; "Insert a Game Card…" |
 | Reading | "Reading the card…" | "Reading…"; the rest of the UI stays usable |
-| Valid | The title, the slot's light in the LED's white | The title; the crescent fills; options *Play* (a game with an entry and a reachable, idle launcher) and *Eject safely* |
+| Valid | The title, the slot's light in the LED's white | The title; the crescent fills; options *Play* (a game with an entry and a reachable, idle launcher) and *Eject safely*. While the launcher does not answer both say "Unavailable", with a note: the console cannot do it right now and, if that does not pass by itself, to turn the console off and on again to play, or off before taking the card out |
 | Invalid | "Card not valid" | "Not valid"; the panel gives the reason; *Details* opens the code, the service's detail and what to do |
 | Released | "Remove the card" | "Remove it"; "You can remove the Game Card" |
 | Another card waiting | — | The panel adds that another Game Card is waiting: it will be read when the current one is removed |
 
-My games lists the games the console has in front of it: today the Game
-Card in the slot. The console itself holds no games, and says so.
+The table gives the entry's words in the previous design (*Game Card*). In
+the orbital design the same entry is *MUN Disk*: with the slot empty it
+says "Insert a disk" and its panel "Insert a MUN Disk"; the other states
+keep the words above, which still say Game Card.
+
+Universe (My games in the previous design) lists the games the console has
+in front of it: today the Game Card in the slot. The console itself holds
+no games, and says so ("Nothing here yet. Your games travel on their MUN
+Disks.").
 
 ## Playing
 
@@ -515,7 +934,11 @@ through the start-up (it plays once per boot), with the session's result in
 a dialog (A or B acknowledges it): "Session ended", "The game closed
 unexpectedly", "The Game Card was removed", "The card reader was lost", "The
 Game Card has no valid program", "The game could not start", "The session
-was interrupted", with what happened to the progress. The result may arrive
+was interrupted", with what happened to the progress ("Progress saved on the
+Game Card.", "Progress after HH:MM was not saved on the Game Card." when the
+card left with changes it does not hold, "The latest progress was not saved
+on the Game Card."; in Spanish the launcher's own words,
+[docs/saves.md](../../docs/saves.md#what-the-player-is-told)). The result may arrive
 a moment after the shell starts (the launcher records it on its next poll);
 the dialog then opens over whatever is shown. A refused launch is said
 under the panel's options. Wording is the console's; nothing in these
@@ -533,8 +956,7 @@ Home says "You can remove the Game Card". The shell never touches the device.
 | Input | Action |
 | --- | --- |
 | Up / Down | Move within the arc or the options, wrapping |
-| Right | Enter an entry, or change a choice forwards |
-| Left | Back, or change a choice backwards |
+| Left / Right | Change a choice backwards or forwards; nothing elsewhere |
 | A, Enter, Return, Space | Enter, run the option, or answer a dialog |
 | B, Esc, Backspace | Back one level, or close the dialog; inside a game, the game decides (MUN Collect exits) |
 | Pointer | A click on an entry focuses it, or enters it when it has the focus; on an option runs it; on a dialog's answer chooses it; the wheel moves (a convenience of the laboratory's window) |
@@ -542,11 +964,32 @@ Home says "You can remove the Game Card". The shell never touches the device.
 In a dialog, Up, Down, Left and Right move between its answers. Back from
 the Settings arc returns to Settings on the main arc.
 
-Controller: not wired in this increment. Qt 6 has no gamepad module; the plan
-is a small evdev-to-key bridge (D-pad → arrows, A → Return, B → Escape) or a
-libinput/SDL input source feeding the same key handlers, decided when a real
-controller is attached to the VM. Nothing controller-related has been tested
-yet.
+Controllers (`src/gamepads.*`, rules in `src/gamepadmap.*`): every pad
+Linux's input layer reports with a gamepad's south button drives the menus
+as the keyboard does. Its directional pad and left stick are Up, Down, Left
+and Right; the bottom face button (the kernel's south) is Return and the
+right one (east) Escape, delivered to the window as those keys, so waking,
+a key held and the sounds behave the same. A pad that presents itself as
+Nintendo's (vendor 057e) keeps Nintendo's layout: A, on the right, is
+Return and B, at the bottom, Escape. A direction held repeats after
+400 ms, then every 80 ms; the stick counts once pushed past 60 % of its
+travel and until it is back within 40 %, and diagonally the axis pushed
+further counts. Pads are found as they connect and let go of when they
+disconnect, nothing held after. When the kernel drops a pad's events, the
+rest of that report is ignored and the shell resumes from the pad's state,
+read from its node: no stale event acts, and Accept or Back is never
+pressed by it; a button or direction pressed meanwhile acts once let go and
+pressed again, and a direction held since before keeps acting, taking over
+from one let go. The shell reads `/dev/input` through its `input` group;
+nothing goes back through the kernel.
+
+Tested: GameSir Nova Lite over Bluetooth, on a laboratory board, in its
+Android mode (kernel `hid-generic`) and its Switch mode (a Pro Controller to
+the kernel, `hid-nintendo`). Planned, not tested: DualShock 4 and DualSense
+(`hid-playstation`), Xbox controllers (`xpad`, `hid-microsoft`) and
+Nintendo's own (`hid-nintendo`), which the kernel reports with the same
+codes.
+Pairing is the system's (BlueZ), not the shell's.
 
 ## Build and run
 
@@ -573,13 +1016,20 @@ Under a desktop session (X11/Wayland) the same binary runs in a window: unset
 - The unit treats exit status 1 as success: Qt's framebuffer VT handler exits
   with 1 after SIGTERM, which is how the launcher stops the shell for a game.
   Status 75 is the shell asking to be started again (a new resolution).
+  Status 69 (no usable display) and 70 (the interface did not load) are
+  failures, restarted after 5 seconds without a limit; `./mun vm shell-log`
+  shows the shell's own account of each.
+- A shell that reaches its memory ceiling (`MemoryMax=2G`) is killed alone,
+  with the result `oom-kill`, and started again like any failure. The
+  decoding markers stay, so if a card's image was being read, that
+  insertion is skipped from then on (*A Game Card's identity*).
 - A resolution that leaves the screen dark goes back by itself after 15
   seconds, and a restart or power cut before it is kept does the same. The
   choice is `display/resolution` in the settings file; removing the line
   returns to Automatic.
 - qemu-ga keeps answering regardless of the shell: `./mun vm run -- …`.
 - If the launcher dies mid-session, systemd starts the shell when the game unit
-  stops (`ExecStopPost`), and the launcher's restart adopts a running game; see
+  stops (the session's cleanup unit), and the launcher's restart adopts a running game; see
   `services/mun-launchd/README.md`.
 - `sudo systemctl stop mun-shell && sudo systemctl start getty@tty1` returns
   a text login on the console display.

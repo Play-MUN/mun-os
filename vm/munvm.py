@@ -28,6 +28,7 @@ import secrets
 import shlex
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -80,7 +81,6 @@ PATHS = {
     "screens": _GUEST_ROOT / "screens",
     "audio": _GUEST_ROOT / "audio.wav",
     "lifecycle_lock": _GUEST_ROOT / "lifecycle.lock",
-    "control": _GUEST_ROOT / "control.json",
     "qemu_log": _GUEST_ROOT / "qemu.log",
 }
 
@@ -92,13 +92,45 @@ def socket_path(root: Path, name: str) -> Path:
     """A UNIX socket path QEMU can bind. macOS limits sun_path to 104 bytes
     (Linux to 108); a checkout in a deep directory would exceed it, so a long
     path moves to a private per-user directory named after the instance
-    directory. On Windows the path only names the loopback port recorded
-    next to it (see control_address)."""
+    directory. On Windows every socket goes to such a directory under the
+    user's local application data (host.connect)."""
     path = root / name
-    if len(str(path).encode()) <= 100 or not HOST.unix_sockets:
+    if HOST.system == "windows":
+        # A socket's file decides who may connect; a checkout may lie where
+        # other users can write. The user's own local application data folder
+        # is closed to them by default (host.connect).
+        base = os.environ.get("LOCALAPPDATA")
+        if not base:
+            raise LabError("LOCALAPPDATA is not set, and QEMU's control sockets go in this user's own folder there")
+        # QEMU reads its command line in the system's ANSI code page and the
+        # tools address the socket in UTF-8: a path outside ASCII would name
+        # two different files. A profile folder such as C:\Users\Iván is
+        # reached by its short (8.3) name, which is plain ASCII.
+        if not base.isascii():
+            base = host.short_path(base)
+            if not base.isascii():
+                raise LabError(f"{os.environ['LOCALAPPDATA']} has no name in plain ASCII (its volume keeps no short "
+                               "names), and QEMU's control sockets must be addressed by one; set LOCALAPPDATA to a "
+                               "folder of this user's whose path is ASCII")
+        short = Path(base) / "mun" / "sockets" / hashlib.sha1(str(root).encode()).hexdigest()[:12]
+        short.mkdir(parents=True, exist_ok=True)
+        return short / name
+    if len(str(path).encode()) <= 100:
         return path
     short = Path(tempfile.gettempdir()) / f"mun-{os.getuid()}" / hashlib.sha1(str(root).encode()).hexdigest()[:12]
-    short.mkdir(mode=0o700, parents=True, exist_ok=True)
+    # Whoever connects to QMP runs commands as this user, and on a shared
+    # temporary directory anyone can make these names first. So both must be
+    # this user's own directories, not links: the sockets' one closed to
+    # everybody else, its parent not writable by them (or the name could be
+    # given to another directory).
+    for directory, closed in ((short.parent, 0o022), (short, 0o077)):
+        with contextlib.suppress(FileExistsError):
+            directory.mkdir(mode=0o700)
+        info = os.lstat(directory)
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & closed:
+            raise LabError(f"{directory} is not a directory of this user alone (owner {info.st_uid}, mode "
+                           f"{stat.S_IMODE(info.st_mode):04o}): QEMU's control sockets are not put there; remove "
+                           "it, or set another TMPDIR")
     return short / name
 
 
@@ -116,7 +148,6 @@ def instance_paths(root: Path) -> Dict[str, Path]:
         "screens": root / "screens",
         "audio": root / "audio.wav",
         "lifecycle_lock": root / "lifecycle.lock",
-        "control": root / "control.json",
         "qemu_log": root / "qemu.log",
     }
 
@@ -186,11 +217,26 @@ def accelerator() -> str:
 
 
 def read_pid() -> Optional[int]:
+    """The pid of this guest's running QEMU, or None.
+
+    The pid file outlives a host that went down, and its number is then
+    given to another process: alive, and not this guest. QEMU is started
+    with `-pidfile <this file>`, so a live process is the guest only if its
+    command line names the file. Where the command line cannot be read
+    (vm/host.py), a live pid counts as the guest, as it always did. The
+    path is compared without case: taking a running guest for a stale file
+    is the worse mistake, and a checkout on a file system that ignores case
+    can be entered under another spelling."""
     try:
         pid = int(PATHS["pidfile"].read_text().strip())
     except (OSError, ValueError):
         return None
-    return pid if pid_alive(pid) else None
+    if not pid_alive(pid):
+        return None
+    command = host.process_command(HOST, pid)
+    if command is not None and str(PATHS["pidfile"]).casefold() not in command.casefold():
+        return None
+    return pid
 
 
 # ------------------------------------------------------------------- lab locks
@@ -289,6 +335,25 @@ def pid_alive(pid: int) -> bool:
     return host.process_alive(HOST, pid)
 
 
+def holder_alive(holder: Dict[str, Any]) -> bool:
+    """Whether the process the registry names as a card's holder still is
+    that holder. A pid alone is no proof (read_pid): a guest's QEMU names its
+    instance's pidfile on its command line, and a card tool's reservation is
+    a run of mun-card. Where the command line cannot be read (vm/host.py), a
+    live pid counts as the holder, as it always did."""
+    pid = int(holder.get("pid", 0) or 0)
+    if not pid_alive(pid):
+        return False
+    command = host.process_command(HOST, pid)
+    if command is None:
+        return True
+    command = command.casefold()
+    if holder.get("purpose") in ("convert", "create"):
+        return "card" in command and "mun" in command
+    pidfile = GUESTS_ROOT / str(holder.get("instance", "")) / "qemu.pid"
+    return str(pidfile).casefold() in command
+
+
 def load_registry() -> Dict[str, Any]:
     try:
         return json.loads(ATTACH_REGISTRY.read_text())
@@ -311,12 +376,16 @@ def registry_claim(name: str, attachment: Optional[str] = None) -> None:
         registry = load_registry()
         holder = registry.get(name)
         if holder and holder.get("instance") != INSTANCE:
-            if pid_alive(int(holder.get("pid", 0) or 0)):
+            if holder_alive(holder):
                 if holder.get("purpose") == "convert":
                     # mun-card convert holds its source and destination here
                     # for the whole conversion (docs/game-cards.md).
                     raise LabError(f"{name} is reserved by a card conversion (pid {holder['pid']}); "
                                    "attach it when the conversion has finished")
+                if holder.get("purpose") == "create":
+                    # mun-card create --force holds the card while its image is replaced.
+                    raise LabError(f"{name} is being replaced by mun-card create (pid {holder['pid']}); "
+                                   "attach it when the new image is there")
                 raise LabError(f"{name} is attached to instance {holder['instance']} (QEMU pid {holder['pid']}); "
                                f"detach it there first: a card is never a writable medium in two guests")
             del registry[name]
@@ -359,16 +428,9 @@ def clear_cards() -> None:
 
 def control_address(path: Path) -> Optional["host.Address"]:
     """Where QEMU listens for the channel `path` names (qmp.sock or
-    qga.sock): the UNIX socket itself, or on Windows the loopback port it was
-    started with, recorded next to it in control.json. None while nothing
-    listens there."""
-    if HOST.unix_sockets:
-        return path if path.exists() else None
-    try:
-        ports = json.loads((path.parent / "control.json").read_text())
-        return (host.LOOPBACK, int(ports[path.stem]))
-    except (OSError, ValueError, KeyError):
-        return None
+    qga.sock): the UNIX socket itself, or None while it is not there. (lexists:
+    on Windows a socket's file is a reparse point a stat does not follow.)"""
+    return path if os.path.lexists(path) else None
 
 
 class Qmp:
@@ -378,7 +440,11 @@ class Qmp:
         address = control_address(path)
         if address is None:
             raise LabError("QMP socket missing; is the VM running? (./mun vm status)")
-        self.sock = host.connect(address, timeout)
+        try:
+            self.sock = host.connect(address, timeout)
+        except OSError as exc:
+            raise LabError(f"QEMU's control socket does not answer ({exc}); is the VM running? "
+                           "(./mun vm status)") from exc
         self.buf = b""
         self.events: List[Dict[str, Any]] = []
         self._read()  # greeting
@@ -519,6 +585,17 @@ AUDIO_BACKENDS = ("none", "wav", "off") + AUDIBLE_BACKENDS
 SOUND_DEVICE_QEMU = (8, 2)
 
 
+def option_path(path: Any) -> str:
+    """`path` as it goes into a QEMU option made of comma-separated fields
+    (`-drive`, `-chardev`, `-qmp`, `-audiodev`, `-serial`). QEMU ends a
+    field at a comma, so a path holding one would be cut there and its rest
+    read as more fields: it is refused before QEMU is started."""
+    if "," in str(path):
+        raise LabError(f"{path} has a comma in it, and a comma separates the fields of QEMU's options: keep the "
+                       "checkout, QEMU and the temporary directory in paths without one")
+    return str(path)
+
+
 def audio_arguments(backend: Optional[str]) -> List[str]:
     if backend is None or backend == "off":
         return []
@@ -530,7 +607,7 @@ def audio_arguments(backend: Optional[str]) -> List[str]:
             raise LabError(f"this QEMU has no {backend} sound backend; it offers {', '.join(offered)}")
     audiodev = f"{backend},id=snd0"
     if backend == "wav":
-        audiodev += f",path={PATHS['audio']}"
+        audiodev += f",path={option_path(PATHS['audio'])}"
     # streams=1: playback only. The lab has no use for guest capture and the
     # wav/none backends have no input side to offer anyway.
     return ["-audiodev", audiodev, "-device", "virtio-sound-pci,audiodev=snd0,streams=1"]
@@ -572,29 +649,14 @@ def default_window_audio() -> str:
     return host.default_audio(HOST, host.qemu_offers(which("qemu-system-aarch64"), "audiodev"))
 
 
-def control_ports() -> Dict[str, int]:
-    """Loopback ports for QMP and qemu-ga where there are no UNIX sockets:
-    those recorded for this guest if any, otherwise new ones."""
-    try:
-        ports = json.loads(PATHS["control"].read_text())
-        return {"qmp": int(ports["qmp"]), "qga": int(ports["qga"])}
-    except (OSError, ValueError, KeyError):
-        return {"qmp": host.free_port(), "qga": host.free_port()}
-
-
-def qemu_command(display: str, audio: Optional[str] = None, ports: Optional[Dict[str, int]] = None) -> List[str]:
+def qemu_command(display: str, audio: Optional[str] = None) -> List[str]:
     """The guest's machine: display, input, card slots and sound device, with
     no network interface (`-nic none`: the guest sees only `lo`) and qemu-ga's
     virtio-serial port as the host's only way in besides QMP. `display` is
-    `none` or `window` (the host's window backend); `ports` are the loopback
-    ports of a host without UNIX sockets."""
+    `none` or `window` (the host's window backend)."""
     qemu = which("qemu-system-aarch64")
-    if HOST.unix_sockets:
-        qmp: "host.Address" = PATHS["qmp"]
-        qga: "host.Address" = PATHS["qga"]
-    else:
-        ports = ports or control_ports()
-        qmp, qga = (host.LOOPBACK, ports["qmp"]), (host.LOOPBACK, ports["qga"])
+    qmp: "host.Address" = Path(option_path(PATHS["qmp"]))
+    qga: "host.Address" = Path(option_path(PATHS["qga"]))
     if display == "window":
         try:
             display = host.window_display(HOST, host.qemu_offers(qemu, "display"))
@@ -612,8 +674,8 @@ def qemu_command(display: str, audio: Optional[str] = None, ports: Optional[Dict
         # The host's time zone for the development image's clock and light
         # (its unit mun-lab-timezone reads it; os/mkosi, profile qemu-dev).
         "-fw_cfg", f"name=opt/mun/timezone,string={guest_timezone()}",
-        "-drive", f"if=pflash,format=raw,readonly=on,file={firmware_path()}",
-        "-drive", f"if=pflash,format=raw,file={PATHS['efivars']}",
+        "-drive", f"if=pflash,format=raw,readonly=on,file={option_path(firmware_path())}",
+        "-drive", f"if=pflash,format=raw,file={option_path(PATHS['efivars'])}",
         "-blockdev", json.dumps({"driver": "qcow2", "node-name": "sys",
                                  "file": {"driver": "file", "filename": str(PATHS["system_disk"])}}),
         # Not NPT-: the card service only ever considers NPT- serials.
@@ -629,7 +691,7 @@ def qemu_command(display: str, audio: Optional[str] = None, ports: Optional[Dict
         "-device", "virtio-serial-pci,id=vser0",
         "-chardev", host.chardev_socket("qga0", qga),
         "-device", "virtserialport,bus=vser0.0,chardev=qga0,name=org.qemu.guest_agent.0",
-        "-serial", f"file:{PATHS['console_log']}",
+        "-serial", f"file:{option_path(PATHS['console_log'])}",
         "-monitor", "none",
         "-qmp", host.qmp_option(qmp),
         "-pidfile", str(PATHS["pidfile"]),
@@ -667,19 +729,16 @@ def cmd_start(args: argparse.Namespace) -> None:
         if not PATHS[key].exists():
             raise LabError(f"{PATHS[key]} missing; recreate the guest with `./mun dev run --guest {INSTANCE}`")
     audio = getattr(args, "audio", None)
-    ports = None if HOST.unix_sockets else {"qmp": host.free_port(), "qga": host.free_port()}
-    cmd = qemu_command(args.display, audio, ports)
+    cmd = qemu_command(args.display, audio)
     if args.print_command:
         print(" ".join(repr(part) if " " in part or "{" in part else part for part in cmd))
         return
     check_qemu()
     check_sound_device(audio)
-    for stale in (PATHS["qmp"], PATHS["qga"], PATHS["pidfile"], PATHS["control"]):
-        if stale.exists():
+    for stale in (PATHS["qmp"], PATHS["qga"], PATHS["pidfile"]):
+        if os.path.lexists(stale):
             stale.unlink()
     clear_cards()
-    if ports is not None:
-        write_json_atomically(PATHS["control"], ports)
     accel = accelerator()
     if accel == "tcg":
         print(f"{HOST.label}: the guest's ARM64 processor is emulated (TCG); it runs, more slowly than with "
@@ -891,6 +950,10 @@ def cmd_stop(args: argparse.Namespace) -> None:
         clear_cards()
         finalize_capture()
         print("VM is not running")
+        if PATHS["pidfile"].exists():
+            # Left by a QEMU that did not end by itself (the host went down).
+            PATHS["pidfile"].unlink()
+            print(f"removed {PATHS['pidfile'].name}, left by an earlier run")
         return
     qmp = Qmp(PATHS["qmp"])
     try:
@@ -935,8 +998,16 @@ def cmd_status(args: argparse.Namespace) -> None:
     print(json.dumps(info, indent=2))
 
 
+SCREENSHOT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
+
+
 def cmd_screenshot(args: argparse.Namespace) -> None:
     """Dump the guest framebuffer (virtio-gpu console) to a PNG for evidence."""
+    # QEMU writes the file itself, wherever the name leads: it is a name in
+    # this guest's screens directory, never a path.
+    if args.name and (not SCREENSHOT_NAME.fullmatch(args.name) or ".." in args.name):
+        raise LabError("screenshot name must be a file name of letters, digits, '.', '_' or '-' (it is written in "
+                       f"{PATHS['screens']})")
     if read_pid() is None:
         raise LabError("VM is not running")
     PATHS["screens"].mkdir(parents=True, exist_ok=True)
@@ -992,7 +1063,15 @@ def cmd_card_create(args: argparse.Namespace) -> None:
     if path.exists() and not args.force:
         raise LabError(f"{path} exists; use --force to overwrite")
     CARD_ROOT.mkdir(parents=True, exist_ok=True)
-    run([which("qemu-img"), "create", "-q", "-f", "raw", str(path), args.size])
+    # This guest's own state says nothing of the others: the registry is
+    # where every guest (and a card conversion) records the cards it holds.
+    # Held while the image is made, so none attaches a half-made one.
+    with registry_lock():
+        holder = load_registry().get(args.name)
+        if holder and holder_alive(holder):
+            raise LabError(f"{args.name} is held by instance {holder.get('instance')} (pid {holder.get('pid')}); "
+                           "detach it there before replacing the image")
+        run([which("qemu-img"), "create", "-q", "-f", "raw", str(path), args.size])
     print(f"created {path} ({args.size}, unformatted)")
 
 
@@ -1584,6 +1663,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     except subprocess.CalledProcessError as exc:
         print(f"error: command failed ({exc.returncode}): {' '.join(map(str, exc.cmd))}", file=sys.stderr)
         return exc.returncode or 1
+    except (ConnectionError, socket.timeout) as exc:
+        # QEMU went away, or stopped answering, in the middle of a command.
+        print(f"error: the connection to QEMU's control socket was lost: {exc}", file=sys.stderr)
+        return 1
     return 0
 
 

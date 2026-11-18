@@ -238,7 +238,15 @@ class SessionManager:
                      "serial": self.session["serial"], "version": self.session.get("version"),
                      "game": self.session.get("card_id"), "session": sid, "schema": schema, "payload": request["data"]}
         log(f"session {sid}: save requested ({size} bytes, schema {schema})")
-        self.saver(forwarded, lambda outcome: self.schedule(lambda: self._save_done(sid, outcome, reply)))
+        try:
+            self.saver(forwarded, lambda outcome: self.schedule(lambda: self._save_done(sid, outcome, reply)))
+        except Exception as exc:
+            # Nothing was forwarded and no answer will come back: the save is
+            # over, so the session must not stay "saving" and refuse every
+            # later save as busy.
+            self.session["saving"] = False
+            log(f"session {sid}: save could not be forwarded: {exc}")
+            return fail("save_failed", "No se pudo enviar el guardado al lector de tarjetas")
 
     def _save_done(self, sid: str, outcome: dict, reply: Callable[[dict], None]) -> None:
         if self.session and self.session["id"] == sid:
@@ -1498,7 +1506,16 @@ class DirectorySync:
         log(f"session {self.sid}: saving {len(snapshot)} unit(s), {sum(len(d) for d in snapshot.values())} bytes, to the card"
             + (f" (game frozen {self.frozen_ms} ms)" if self.frozen_ms is not None else " (game stopped)"))
         self.frozen_ms = None
-        self.sender(path, len(raw), hashlib.sha256(raw).hexdigest(), self._written)
+        try:
+            self.sender(path, len(raw), hashlib.sha256(raw).hexdigest(), self._written)
+        except Exception as exc:
+            # Nothing was sent and no answer will come back: a write that
+            # stayed in flight would keep every later save point from writing.
+            log(f"session {self.sid}: save could not be sent to the card service: {exc}")
+            if self.in_flight is not None and self.in_flight.get("path") == path:
+                self._written({"ok": False, "error": {"code": "save_failed",
+                                                      "message": "No se pudo enviar la partida al lector de tarjetas",
+                                                      "detail": str(exc)}})
 
     def _written(self, outcome: dict) -> None:
         flight, self.in_flight = self.in_flight, None
@@ -2086,7 +2103,14 @@ def stage_via_cardd(request: dict, reply: Callable[[dict], None]) -> None:
         except (OSError, ValueError) as exc:
             code = "save_failed" if request.get("type") == "save" else "prepare_failed"
             reply({"ok": False, "error": {"code": code, "message": "No se pudo hablar con el lector de tarjetas", "detail": str(exc)}})
-    threading.Thread(target=work, name="stage", daemon=True).start()
+    try:
+        threading.Thread(target=work, name="stage", daemon=True).start()
+    except RuntimeError as exc:
+        # No thread to be had (a task or memory limit): the request is
+        # answered as failed, as when the card service cannot be reached, so
+        # that whoever asked clears its own state.
+        code = "save_failed" if request.get("type") == "save" else "prepare_failed"
+        reply({"ok": False, "error": {"code": code, "message": "No se pudo hablar con el lector de tarjetas", "detail": str(exc)}})
 
 
 def encode_line(message: dict) -> bytes:

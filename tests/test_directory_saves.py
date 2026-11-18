@@ -247,6 +247,29 @@ class CaptureRuleTests(SyncCase):
         self.answer()
         self.assertTrue(self.sync.summary("exited")["ok"])
 
+    def test_a_write_that_cannot_be_sent_is_reported_and_the_next_save_point_writes(self):
+        self.prepare()
+        sender, calls = self.sync.sender, []
+
+        def no_thread(path, size, digest, done):
+            calls.append(path)
+            raise RuntimeError("can't start new thread")
+        self.sync.sender = no_thread
+        self.game_writes("save-0000.sav", SLOT); self.sync.poll()
+        self.assertEqual(len(calls), 1)
+        self.assertIsNone(self.sync.in_flight, "nothing is waiting for an answer that cannot come")
+        self.assertFalse(calls[0].exists(), "the payload that was not sent is not left behind")
+        self.assertIn("La última partida no se guardó", self.sync.summary("exited")["message"])
+        self.sync.sender = sender
+        self.game_writes("save-0000.sav", SLOT2); self.sync.poll()
+        self.assertEqual(self.files_sent(), {"save-0000.sav": SLOT2})
+        self.game_writes("save-0000.sav", SLOT); self.sync.poll()
+        self.assertEqual(len(self.sent), 1, "still one write at a time")
+        self.answer(); self.sync.poll()
+        self.assertEqual(self.files_sent(), {"save-0000.sav": SLOT}, "the waiting save goes once the first is answered")
+        self.answer()
+        self.assertTrue(self.sync.summary("exited")["ok"])
+
     def test_a_close_during_a_write_waits_for_the_answer(self):
         self.prepare()
         self.game_writes("save-0000.sav", SLOT); self.sync.poll()

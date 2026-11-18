@@ -1726,8 +1726,21 @@ def enumerate_devices() -> List[tuple]:
 # becomes ~1.37 MiB of base64 plus metadata. Every consumer of this socket
 # (shell CardClient, launchd feed reader) accepts at least this much per line.
 MAX_FRAME_BYTES = 2 * 1024 * 1024
-# Bytes a client may leave unread before it is considered dead and dropped.
+# Bytes a client may leave unread before it is considered dead and dropped:
+# room for a snapshot and a run of card events with covers while a reader is
+# busy for a moment.
 OUTBOX_MAX_BYTES = 8 * 1024 * 1024
+# Bytes all clients together may leave unread. Past it, the clients with the
+# most unread bytes are dropped first (the newest of equals): a reader that
+# keeps up has next to nothing queued, so it is never the one chosen while one
+# that does not read holds more.
+OUTBOX_TOTAL_MAX_BYTES = 16 * 1024 * 1024
+# Connections kept at once. The socket's readers are the shell, the launcher
+# (its feed, and a short read when it starts) and the console reset: four at
+# most, with room for a reconnection that overlaps the connection it
+# replaces. A connection past this replaces a client that leaves bytes unread,
+# or is refused when every client reads.
+MAX_CLIENTS = 8
 
 
 def _without_cover(value):
@@ -1806,6 +1819,21 @@ class Outbox:
     def forget(self, conn: socket.socket) -> None:
         self.pending.pop(conn, None)
 
+    def total(self) -> int:
+        """Bytes all clients leave unread."""
+        return sum(len(queued) for queued in self.pending.values())
+
+    def most_behind(self) -> Optional[socket.socket]:
+        """The client with the most unread bytes, or None when none has any.
+
+        Of clients equally behind, the one that connected last: the
+        long-lived readers (the launcher's feed, the shell) connected first,
+        and a frame just sent leaves them as far behind as any other until
+        they read it.
+        """
+        conn = max(reversed(list(self.pending)), key=lambda key: len(self.pending[key]), default=None)
+        return conn if conn is not None and self.pending[conn] else None
+
     def _interest(self, conn: socket.socket, want_write: bool) -> None:
         if self.selector is None:
             return
@@ -1870,6 +1898,14 @@ class Server:
 
     def accept(self) -> Optional[socket.socket]:
         conn, _ = self.listener.accept()
+        if len(self.clients) >= MAX_CLIENTS:
+            behind = self.outbox.most_behind()
+            if behind is None:
+                log(f"refusing a connection: {len(self.clients)} clients already read card events")
+                conn.close()
+                return None
+            log("dropping a client that does not read its card events, to admit a new connection")
+            self.drop(behind)
         conn.setblocking(False)
         self.clients.append(conn)
         if self.manager:
@@ -1878,11 +1914,33 @@ class Server:
         return conn if conn in self.clients else None
 
     def broadcast(self, message: dict) -> None:
+        frame = encode_frame(message)
+        self._make_room(len(frame), everyone=True)
         for conn in list(self.clients):
-            self._send(conn, message)
+            self._send_frame(conn, frame)
+
+    def _make_room(self, frame: int, everyone: bool) -> None:
+        """Drop the clients furthest behind until a frame of `frame` bytes
+        fits, sent to every client or to one.
+
+        Judged before a frame goes out, on what each client has left unread
+        of earlier frames: during a broadcast the client sent the frame first
+        would otherwise look furthest behind only for having been first.
+        """
+        while self.outbox.total() + frame * (len(self.clients) if everyone else 1) > OUTBOX_TOTAL_MAX_BYTES:
+            behind = self.outbox.most_behind()
+            if behind is None:
+                return
+            log(f"dropping the client furthest behind: clients would leave over {OUTBOX_TOTAL_MAX_BYTES} bytes unread")
+            self.drop(behind)
 
     def _send(self, conn: socket.socket, message: dict) -> None:
         frame = encode_frame(message)
+        self._make_room(len(frame), everyone=False)
+        if conn in self.clients:
+            self._send_frame(conn, frame)
+
+    def _send_frame(self, conn: socket.socket, frame: bytes) -> None:
         if not self.outbox.send(conn, frame):
             log("dropping a client that does not read its card events")
             self.drop(conn)

@@ -69,15 +69,15 @@
       "translation": "docs/es/guides/see-shape-in-action.md",
       "source": "docs/guides/see-shape-in-action.md",
       "language": "es",
-      "reviewed": "2026-11-14",
-      "source_sha256": "9d39c7d60797a65d90c641f05cea0ff84dba60df20adfd6ca1c8e6aabbb2351c"
+      "reviewed": "2026-11-18",
+      "source_sha256": "87b73e4ffb33fe718616bc4fa85fd812dbffeb8829af9280b6a1b60ce489bf01"
     },
     {
       "translation": "docs/es/guides/shape-your-game.md",
       "source": "docs/guides/shape-your-game.md",
       "language": "es",
-      "reviewed": "2026-11-14",
-      "source_sha256": "70a528c4e13bc7298978e600c2c403822530aeda691930466d1d393f6e76654b"
+      "reviewed": "2026-11-18",
+      "source_sha256": "0be1df1132bdbfe08260a9b4fb23ed595feb1964ea88ec3c5e2a0c84365b62eb"
     },
     {
       "translation": "examples/README.es.md",

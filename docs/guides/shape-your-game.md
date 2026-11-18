@@ -262,7 +262,7 @@ one small defective package per case, to see them in the console.
 - **Reduce motion** (Settings › Appearance and accessibility): every
   transition is a fade and your world holds still. Design it to read well
   still.
-- **MUN Shape: Full, Colours only, Off.** Colours only keeps your palette
+- **MUN Shape: Full, Colors only, Off.** Colors only keeps your palette
   and plates, without world, images or sounds; Off is MUN alone.
 - **Sounds.** *System sounds* off silences all of them, yours included;
   *Game sounds on the menus* off keeps MUN's sounds on your menus and leaves

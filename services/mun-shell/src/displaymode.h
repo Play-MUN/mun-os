@@ -22,7 +22,7 @@
 //
 // The signal is set here too, before Qt opens the display: the board's cap
 // on bits per channel (MUN_DISPLAY_MAX_BPC) and the player's colour range
-// (Settings › Display › Colour range: automatic, full or limited), as
+// (Settings › Display › Color range: automatic, full or limited), as
 // displaydevice.h describes. A change of range restarts the shell, as a
 // change of resolution does, without a trial: every range shows a picture.
 //

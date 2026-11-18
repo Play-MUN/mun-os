@@ -123,7 +123,7 @@ If none records it, get v0.1.0-dev.5
 6. **Turn off** (*Turn off* › *Turn off*).
 
 On the way, try *Settings › Appearance and accessibility*: *MUN Shape*
-(Full, Colours only, Off) and *Reduce motion* (every transition a fade, the
+(Full, Colors only, Off) and *Reduce motion* (every transition a fade, the
 world still); and *Settings › Sound*: *System sounds*, *Game sounds on the
 menus*. Settings and
 dialogs stay MUN's over any world.

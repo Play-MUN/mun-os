@@ -1474,7 +1474,7 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
     out, phases, _ = run("home-colours", cardd, launchd, [{"when": {"phase": "present"}, "wait": 500, "probe": "after"}],
                          settings="[shape]\nmode=colours\n", end=1000)
     after = first(phases, label="after")
-    checks.expect("home-colours", "Colours only: the identity comes in without a world",
+    checks.expect("home-colours", "Colors only: the identity comes in without a world",
                   after is not None and after["phase"] == "present" and not after["world"] and not after["worldDrawn"], after)
 
     x, rx = card(SAMPLES / "sea")

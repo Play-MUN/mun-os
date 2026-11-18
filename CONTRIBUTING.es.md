@@ -50,15 +50,25 @@ o una pull request contra `dev`, como explica el resto de esta página:
 
 ### Primeras tareas
 
-- Sigue los primeros pasos en Linux o en Windows con ventana y sonido, y
-  cuenta lo que viste en cada paso.
-- Ejecuta `./mun play` en un ordenador ARM64 con Linux y KVM: las
-  herramientas lo admiten y nadie lo ha probado todavía.
-- Lee una guía como alguien que llega de nuevas y convierte en una
-  corrección cada paso que tuviste que adivinar.
-- Una más grande: un tercer ejemplo de MUN Shape, con el arte y los sonidos
-  generados con código como en `examples/shape/generate.py`, que dé `LISTO`
-  al comprobarlo.
+Tres que necesitamos hoy:
+
+1. **Pruébalo con ventana, teclado y sonido en Linux o en Windows,** o
+   ejecuta `./mun play` en un ordenador ARM64 con Linux y KVM. Nada de eso
+   se ha probado fuera de la CI. Cuenta lo que viste en cada paso con la
+   plantilla de informe de errores; un informe de que funciona cuenta tanto
+   como uno de que no.
+2. **Lleva un juego de código abierto a un MUN Disk.** Sigue
+   [traer un juego a MUN](docs/es/guides/port-a-game.md) con un juego SDL u
+   OpenGL que puedas redistribuir, y convierte en una corrección cada paso
+   que la guía no explicaba. MUN Collect es, por ahora, el único juego de
+   ejemplo.
+3. **Haz un paquete de MUN Shape v1 con arte propio** para un juego cuyos
+   derechos tengas, que `./mun card shape check DIR --report` dé como
+   `LISTO`, y cuéntanos lo que el contrato no te dejó expresar. La v1 es el
+   contrato estable y necesita autores de fuera del proyecto.
+
+Una más pequeña: lee una guía como alguien que llega de nuevas y convierte
+en una corrección cada paso que tuviste que adivinar.
 
 ## Quién decide
 

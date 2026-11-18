@@ -35,7 +35,8 @@ def clean_environment():
 
 
 def git(repo, environment, *args):
-    return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True,
+    # The test's own fixed git command in its own repository.
+    return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True,  # nosec B603
                           env=environment).stdout
 
 

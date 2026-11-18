@@ -354,7 +354,7 @@ class ClientBoundTests(unittest.TestCase):
         # AF_UNIX paths are short: the socket goes in /tmp, not in a long TMPDIR.
         # TemporaryDirectory makes its own directory there, private (0700) and
         # with a random name, so a shared parent is safe.
-        directory = tempfile.TemporaryDirectory(prefix="cardd-", dir="/tmp" if os.name == "posix" else None)
+        directory = tempfile.TemporaryDirectory(prefix="cardd-", dir="/tmp" if os.name == "posix" else None)  # nosec B108
         self.addCleanup(directory.cleanup)
         self.path = Path(directory.name) / "cardd.sock"
         self.server = cardd.Server(self.path, "nobody")

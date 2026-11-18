@@ -36,6 +36,22 @@ Item {
     property var canvas: null
     property var world: null
     property var modalLayer: null
+    // A dialog's layer as it shows and hides (LAYER lines): when it stops
+    // being visible, and with CONFIG.trace each opacity it passes through.
+    // Animations follow the frames, not the clock, so a fade's progress is
+    // judged on these, not on a span of time.
+    Connections {
+        target: scene.modalLayer
+        function onVisibleChanged() {
+            console.log("LAYER " + JSON.stringify({ t: scene.now(), visible: scene.modalLayer.visible,
+                                                    opacity: scene.modalLayer.opacity }))
+        }
+        function onOpacityChanged() {
+            if (scene.config.trace)
+                console.log("LAYER " + JSON.stringify({ t: scene.now(), visible: scene.modalLayer.visible,
+                                                        opacity: scene.modalLayer.opacity }))
+        }
+    }
     property var motion: null
     property int next: 0
     // When the step before acted, and since when the step in turn has been
@@ -196,7 +212,10 @@ Item {
             phase: Shape.phase, entry: Shape.entry, exit: Shape.exit, kind: Shape.kind, source: Shape.source,
             insertion: Shape.insertion, world: Object.keys(Shape.world).length > 0,
             modal: main ? !!main.modal : false, level: main ? main.level : -1, dimmed: main ? main.dimmed : false,
-            mainIndex: main ? main.mainIndex : -1, card: main ? main.cardMode : ""
+            mainIndex: main ? main.mainIndex : -1, card: main ? main.cardMode : "",
+            // A dialog's layer wholly on screen: a step that closes a dialog
+            // waits for it, for a fade to follow.
+            layerShown: !!scene.modalLayer && scene.modalLayer.visible && scene.modalLayer.opacity === 1
         }
         for (const key in when) {
             if (state[key] !== when[key])

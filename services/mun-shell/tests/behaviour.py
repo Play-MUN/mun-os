@@ -1628,13 +1628,28 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
     whole_when_dressed("home-from-settings", out)
     x, rx = card(SAMPLES / "sea")
     cardd, launchd = serve("home-dialog-closed", [[(0, snapshot()), (0.6, {"type": "card", "card": rx})]], [[(0, result)]])
+    # The dialog is closed once its layer is wholly on screen, for a fade to
+    # follow: a busy shell may not have shown it yet a fixed time after Home
+    # was ready, and a layer never shown has nothing to fade. Animations
+    # follow the frames, not the clock (the same 0.5 s fade has taken 0.42
+    # to 0.61 s of clock on the OpenGL path), so the order (the arrival only
+    # once the layer has faded out, through the values between) is judged
+    # always, and the 0.5 s, a duration, where durations are (--timing).
     out, phases, _ = run("home-dialog-closed", cardd, launchd,
-                         [{"when": {"phase": "ready"}, "wait": 1000, "call": "dismissResult", "probe": "dismissed"}],
+                         [{"when": {"phase": "ready", "layerShown": True}, "wait": 1000, "call": "dismissResult",
+                           "probe": "dismissed"}],
                          end=1000, trace=True, until={"phase": "present"})
     entering, dressed, dismissed = first(phases, phase="entering"), first_dressed(out), first(phases, label="dismissed")
-    checks.expect("home-dialog-closed", "the dialog closed: it comes in once its layer has faded (0.5 s after)",
-                  entering is not None and dismissed is not None and entering["t"] >= dismissed["t"] + 400
-                  and dressed is not None and not dressed["modalShown"], (dismissed, entering, dressed))
+    layer = [line for line in lines(out, "LAYER") if dismissed is not None and line["t"] >= dismissed["t"]]
+    hidden = next((line for line in layer if not line["visible"]), None)
+    between = [line for line in layer if 0 < line["opacity"] < 1 and (hidden is None or line["t"] <= hidden["t"])]
+    checks.expect("home-dialog-closed", "the dialog closed: its layer fades out, then the card comes in",
+                  entering is not None and dismissed is not None and hidden is not None and bool(between)
+                  and entering["t"] >= hidden["t"] and dressed is not None and not dressed["modalShown"],
+                  (dismissed, hidden, len(between), entering, dressed))
+    checks.duration("home-dialog-closed", "the layer's fade takes its 0.5 s: the card 0.4 s or more after the dialog closed",
+                    entering is not None and dismissed is not None and entering["t"] >= dismissed["t"] + 400,
+                    (dismissed, entering))
     whole_when_dressed("home-dialog-closed", out)
 
     # Idle: once dimmed, the first key only brings the interface back (and

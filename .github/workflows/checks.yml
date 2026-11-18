@@ -36,3 +36,22 @@ jobs:
           fi
       - name: make check
         run: make check
+
+  shell:
+    # The shell compiled as the image compiles it, its host tests with the
+    # sound worker's exit under AddressSanitizer, and its behaviour harness on
+    # the real binary (settings and Home, the orbital menu included), in
+    # Debian 13 with the image's own packages. A missing Qt fails the job.
+    name: shell (Debian 13, Qt 6.8)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    container:
+      image: debian:trixie@sha256:9c6e381421d0f48d1b8133e573f33c185ee16cbf505eda9c4a8a4791b25ea8a6
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Packages from the image's Debian snapshot
+        run: sh services/mun-shell/tests/ci/setup.sh
+      - name: Shell built and exercised
+        run: sh services/mun-shell/tests/ci/check.sh

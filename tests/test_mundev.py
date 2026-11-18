@@ -18,6 +18,8 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "vm"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import gitenv  # noqa: E402
 import mundev  # noqa: E402
 
 vm = mundev.vm
@@ -34,16 +36,12 @@ class Fixture(unittest.TestCase):
         return result
 
     def setUp(self):
-        # Git runs hooks with the repository being committed in the environment
-        # (GIT_DIR, GIT_INDEX_FILE, ...), and the pre-commit hook runs these tests:
-        # the repositories they make must not inherit it, or `git -C DIR init` would
-        # reinitialise that repository and the fixtures be committed into it
-        # (tests/test_hook_safety.py).
-        self.enterContext(patch.dict(os.environ, {key: value for key, value in os.environ.items()
-                                                  if not key.startswith("GIT_")}, clear=True))
         directory = tempfile.TemporaryDirectory(prefix="mundev-")
         self.addCleanup(directory.cleanup)
         self.root = Path(directory.name)
+        # The repositories these tests make run none of the contributor's Git
+        # nor the hook's GIT_DIR (tests/gitenv.py, tests/test_hook_safety.py).
+        gitenv.isolate(self, self.root)
         self.enterContext(patch.object(mundev, "BUILDS_ROOT", self.root / "builds"))
         self.enterContext(patch.object(mundev, "BUILDERS_ROOT", self.root / "builders"))
         self.enterContext(patch.object(mundev, "GUESTS_ROOT", self.root / "guests"))

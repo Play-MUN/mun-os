@@ -99,9 +99,19 @@ class HookEnvironmentTests(unittest.TestCase):
             (home / ".gitconfig").write_text(configuration)
             (home / ".config" / "git" / "config").write_text(configuration)
             (hostile / "system.gitconfig").write_text(configuration)
+            # The machine's own configuration too: this host's `git`, first on
+            # PATH, reads the hostile file as its system configuration
+            # (GIT_CONFIG_SYSTEM set as it starts, where no caller's cleaning
+            # of GIT_* variables reaches it), as /etc/gitconfig would be read.
+            machine = hostile / "machine"
+            machine.mkdir()
+            (machine / "git").write_text(f'#!/bin/sh\nGIT_CONFIG_SYSTEM="{hostile / "system.gitconfig"}"\n'
+                                          f'export GIT_CONFIG_SYSTEM\nexec "{GIT}" "$@"\n')
+            (machine / "git").chmod(0o755)
             environment = clean_environment()
             environment.update(HOME=str(home), XDG_CONFIG_HOME=str(home / ".config"),
-                               GIT_CONFIG_SYSTEM=str(hostile / "system.gitconfig"))
+                               GIT_CONFIG_SYSTEM=str(hostile / "system.gitconfig"),
+                               PATH=f"{machine}{os.pathsep}{environment.get('PATH', '')}")
             run = subprocess.run([sys.executable, "-m", "unittest", "tests.test_mundev.SourceTests", "tests.test_recipes",
                                   "tests.test_shape_export"],
                                  cwd=ROOT, env=environment, capture_output=True, text=True)

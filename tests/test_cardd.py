@@ -435,6 +435,41 @@ class ClientBoundTests(unittest.TestCase):
         refused.settimeout(5)
         self.assertEqual(refused.recv(1), b"", "the refused connection is closed")
 
+    def small_snapshot(self):
+        """A console with no disk: a snapshot the kernel's buffers hold whole,
+        so a client that never reads has nothing queued in the outbox."""
+        self.server.manager = type("Manager", (), {"snapshot": lambda _: {"type": "snapshot", "cards": []}})()
+
+    @unittest.skipUnless(sys.platform.startswith("linux"),
+                         "only Linux says how much a Unix socket's peer left unread (where the service runs)")
+    def test_clients_that_never_read_a_small_snapshot_do_not_keep_a_reader_out(self):
+        self.small_snapshot()
+        idle = [self.connect() for _ in range(cardd.MAX_CLIENTS)]
+        self.assertIsNone(self.server.outbox.most_behind(), "nothing queued here: the kernel holds each snapshot")
+        reader, conn = self.connect(reading=True)
+        self.assertIsNotNone(conn, "admitted in place of a client that left its snapshot unread")
+        self.assertEqual(len(self.server.clients), cardd.MAX_CLIENTS)
+        self.assertEqual(sum(1 for _, kept in idle if kept in self.server.clients), cardd.MAX_CLIENTS - 1)
+        self.assertEqual(self.drain(reader, conn)[0]["type"], "snapshot")
+
+    def test_the_client_that_left_most_unread_in_the_kernel_makes_room(self):
+        self.small_snapshot()
+        clients = [self.connect()[1] for _ in range(cardd.MAX_CLIENTS)]
+        unread = dict.fromkeys(clients, 0)
+        with patch.object(cardd, "unread_by_peer", lambda conn: unread.get(conn)):
+            unread[clients[2]], unread[clients[3]], unread[clients[4]] = 5, 9, 9
+            _, conn = self.connect()
+            self.assertIsNotNone(conn)
+            self.assertNotIn(clients[4], self.server.clients, "the most unread, the later of equals, makes room")
+            self.assertIn(clients[3], self.server.clients)
+            for client in clients:
+                unread[client] = 0
+            _, refused = self.connect()
+            self.assertIsNone(refused, "everyone has read everything: the newcomer is refused")
+        with patch.object(cardd, "unread_by_peer", lambda conn: None):
+            _, refused = self.connect()
+            self.assertIsNone(refused, "where the kernel does not say, a full socket refuses")
+
 
 class SpecialFileTests(unittest.TestCase):
     """R4: objects that are not regular files under a save name are rejected without

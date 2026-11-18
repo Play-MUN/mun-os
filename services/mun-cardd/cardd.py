@@ -1739,8 +1739,28 @@ OUTBOX_TOTAL_MAX_BYTES = 16 * 1024 * 1024
 # (its feed, and a short read when it starts) and the console reset: four at
 # most, with room for a reconnection that overlaps the connection it
 # replaces. A connection past this replaces a client that leaves bytes unread,
-# or is refused when every client reads.
+# here or in the kernel's buffers (unread_by_peer), or is refused when every
+# client has read everything.
 MAX_CLIENTS = 8
+
+
+def unread_by_peer(conn: socket.socket) -> Optional[int]:
+    """How much of what was sent on `conn` its peer has not read yet and the
+    kernel still holds, or None where the kernel does not say.
+
+    Linux, where this service runs, says (SIOCOUTQ): for a Unix socket it is
+    the memory of the messages the peer has not wholly read, so not their
+    exact bytes, and 0 once the peer has read everything. Elsewhere (macOS
+    answers 0 for a Unix socket whatever is unread) it is None.
+    """
+    if not sys.platform.startswith("linux"):
+        return None
+    try:
+        import fcntl
+        import termios
+        return int.from_bytes(fcntl.ioctl(conn.fileno(), termios.TIOCOUTQ, bytes(4)), sys.byteorder, signed=True)
+    except (ImportError, OSError, ValueError):
+        return None
 
 
 def _without_cover(value):
@@ -1899,7 +1919,7 @@ class Server:
     def accept(self) -> Optional[socket.socket]:
         conn, _ = self.listener.accept()
         if len(self.clients) >= MAX_CLIENTS:
-            behind = self.outbox.most_behind()
+            behind = self.outbox.most_behind() or self._behind_in_kernel()
             if behind is None:
                 log(f"refusing a connection: {len(self.clients)} clients already read card events")
                 conn.close()
@@ -1912,6 +1932,20 @@ class Server:
             self._send(conn, self.manager.snapshot())
         # The snapshot send may already have dropped a dead peer.
         return conn if conn in self.clients else None
+
+    def _behind_in_kernel(self) -> Optional[socket.socket]:
+        """The client that has left the most unread in the kernel's buffers
+        (the one that connected last, of equals), or None when every client
+        has read everything or the kernel does not say.
+
+        A client that never reads but was sent only what the kernel's buffers
+        hold (a small snapshot, a console with no disk) has nothing queued in
+        the outbox: without this, clients like that would hold every slot and
+        keep a reader that reconnects out until a larger event arrived.
+        """
+        unread = [(unread_by_peer(conn) or 0, conn) for conn in self.clients]
+        most, conn = max(reversed(unread), key=lambda item: item[0], default=(0, None))
+        return conn if most > 0 else None
 
     def broadcast(self, message: dict) -> None:
         frame = encode_frame(message)

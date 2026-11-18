@@ -85,8 +85,10 @@ never disconnects a slow shell or launcher. The service keeps at most 8
 connections (its readers are the shell, the launcher and the console reset)
 and at most 16 MiB unread by all of them together: past that, the client
 furthest behind is dropped first (the newest of equals), and a connection
-past the eighth replaces a client that leaves bytes unread, or is refused
-when every client reads. Text that UTF-8 cannot carry (a
+past the eighth replaces a client that leaves bytes unread, in the service
+or, on Linux, in the kernel's buffers (a client that never reads a small
+snapshot holds nothing in the service), or is refused when every client has
+read everything. Text that UTF-8 cannot carry (a
 lone surrogate in a card's file) crosses the socket, and reaches the journal,
 as `?`.
 

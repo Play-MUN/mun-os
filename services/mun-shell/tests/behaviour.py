@@ -1654,6 +1654,10 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
     checks.expect("home-idle-dim", "that key held down does nothing; let go, its next press moves the focus",
                   len(at) == 5 and at["held"]["mainIndex"] == at["awake"]["mainIndex"]
                   and at["moved"]["mainIndex"] != at["awake"]["mainIndex"], at)
+    checks.expect("home-idle-dim", "the menu shows the entry in focus as chosen, and the next one once the focus moves",
+                  len(at) == 5 and at["awake"]["focused"] != "" and at["moved"]["focused"] != at["awake"]["focused"]
+                  and at["awake"]["chosen"] == [at["awake"]["focused"]] and at["moved"]["chosen"] == [at["moved"]["focused"]],
+                  {label: (at[label]["focused"], at[label]["chosen"]) for label in at})
     # The key that woke it stays spent until it is let go, whatever is
     # pressed meanwhile: held Enter wakes, Down moves to Settings, a repeat
     # of Enter must not open it; let go, a fresh Enter does.

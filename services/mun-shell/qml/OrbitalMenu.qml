@@ -1,3 +1,6 @@
+// Bound: the delegate reaches `root` as this file's own type, so tools can
+// check every property it reads there.
+pragma ComponentBehavior: Bound
 import QtQuick
 import MUN.Shell
 

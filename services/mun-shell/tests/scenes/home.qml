@@ -175,6 +175,12 @@ Item {
             sections: main ? main.settingsEntries.map(e => e.key) : [],
             design: main ? (main.orbital ? "orbital" : "previous") : "",
             entriesFound: canvas ? findAll(canvas, isEntry, []).length : 0,
+            // The menu entries drawn as chosen, and the one Main has in focus
+            // (Home's level): the menu must show the focus it has.
+            chosen: canvas ? findAll(canvas, isEntry, [])
+                                 .filter(it => it.on && it.visible && effective(it) > 0.5).map(it => it.label) : [],
+            focused: main && main.level === 0 && main.mainEntries[main.mainIndex]
+                     ? main.mainEntries[main.mainIndex].label : "",
             cardsFound: canvas ? findAll(canvas, isCard, []).length : 0,
             card: main ? main.cardMode : "",
             // Texts on screen cut short (an elided label).

@@ -225,10 +225,12 @@ exit 0
             def unmount(self, card, strict=False):
                 card.mount = None
 
-            def mounted(self, target):
+            @staticmethod
+            def mounted(target):
                 return True
 
-            def read_only(self, target):
+            @staticmethod
+            def read_only(target):
                 return state.read_text().strip() == "ro"
 
         for p in (patch.dict(os.environ, {"PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}"}),):

@@ -352,6 +352,8 @@ class ClientBoundTests(unittest.TestCase):
     def setUp(self):
         import socket
         # AF_UNIX paths are short: the socket goes in /tmp, not in a long TMPDIR.
+        # TemporaryDirectory makes its own directory there, private (0700) and
+        # with a random name, so a shared parent is safe.
         directory = tempfile.TemporaryDirectory(prefix="cardd-", dir="/tmp" if os.name == "posix" else None)
         self.addCleanup(directory.cleanup)
         self.path = Path(directory.name) / "cardd.sock"
@@ -380,8 +382,8 @@ class ClientBoundTests(unittest.TestCase):
         peer.setblocking(False)
         received = bytearray()
         for _ in range(100000):
-            for conn in list(self.server.outbox.pending):
-                self.server.on_event(conn, __import__("selectors").EVENT_WRITE)
+            for other in list(self.server.outbox.pending):
+                self.server.on_event(other, __import__("selectors").EVENT_WRITE)
             try:
                 chunk = peer.recv(1 << 20)
             except BlockingIOError:
@@ -1434,7 +1436,8 @@ class UnmountWithoutProcessesTests(unittest.TestCase):
                 mounted.add(target)
                 return target
 
-            def mounted(self, target):
+            @staticmethod
+            def mounted(target):
                 return target in mounted
 
         def run(argv, **kwargs):

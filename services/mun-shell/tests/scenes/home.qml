@@ -52,6 +52,16 @@ Item {
                                                         opacity: scene.modalLayer.opacity }))
         }
     }
+    // The loader of Home's menus: its main menu's opacity as it fades (MENU
+    // lines, with CONFIG.trace), for the same reason.
+    property var menus: null
+    Connections {
+        target: scene.menus
+        function onMainOpacityChanged() {
+            if (scene.config.trace)
+                console.log("MENU " + JSON.stringify({ t: scene.now(), opacity: scene.menus.mainOpacity }))
+        }
+    }
     property var motion: null
     property int next: 0
     // When the step before acted, and since when the step in turn has been
@@ -215,7 +225,9 @@ Item {
             mainIndex: main ? main.mainIndex : -1, card: main ? main.cardMode : "",
             // A dialog's layer wholly on screen: a step that closes a dialog
             // waits for it, for a fade to follow.
-            layerShown: !!scene.modalLayer && scene.modalLayer.visible && scene.modalLayer.opacity === 1
+            layerShown: !!scene.modalLayer && scene.modalLayer.visible && scene.modalLayer.opacity === 1,
+            // Home's main menu: 0 once Settings has wholly replaced it.
+            menuOpacity: scene.menus ? scene.menus.mainOpacity : -1
         }
         for (const key in when) {
             if (state[key] !== when[key])
@@ -343,6 +355,7 @@ Item {
         canvas = find(main.contentItem, it => it.width === Theme.canvasWidth && it.height === Theme.canvasHeight && it.focus === true)
         world = find(canvas, it => it.covering !== undefined && it.transition !== undefined)
         modalLayer = find(canvas, it => it.shownContent !== undefined)
+        menus = find(canvas, it => it.sourceComponent !== undefined && it.mainOpacity !== undefined)
         motion = find(canvas, it => it.failed !== undefined && it.runs !== undefined)
         report("start")
         run()

@@ -2,38 +2,29 @@
 
 **English** · [Español](README.es.md)
 
-MUN™ is a game console we are building in the open, for games you own on
-Game Cards. MUN OS is its operating system, open source and developed in
-public. You can already run it on your computer as a virtual console, try
-it, take it apart and take part. We also run it on a development board,
-MUN Dev; the console's own hardware comes later.
+MUN OS is the open operating system of MUN, a console in development for
+physical games you own. You can already try it on your computer with QEMU.
 
-![MUN Shell's Home in the virtual console, with the MUN Collect Game Card inserted](docs/images/home-collect.en.jpg)
+> **v0.1.0-dev.5 is a development preview:** an experimental ARM64 image
+> for a virtual console, not the console itself.
+> [What works and what does not yet](#what-works-today-and-what-does-not-yet).
 
-## What you can do today
+[![MUN OS v0.1.0-dev.5 in the virtual console: Home with MUN Collect dressed in Reef, the reef behind the menus](docs/images/home-reef.en.jpg)](docs/getting-started.md#7-see-mun-shape)
 
-1. **Try MUN OS, without compiling.** Download the tools and a ready-made
-   image, start the virtual console, insert a Game Card, play, save, eject
-   it safely and continue later: [getting started](docs/getting-started.md).
-   You need Python and QEMU.
-2. **Create for MUN.** Put a game on a Game Card, and dress the console in
-   its identity with MUN Shape: [create a Game Card](docs/guides/create-game-card.md),
-   [bring a game to MUN](docs/guides/port-a-game.md) and
-   [dress the console in your game](docs/guides/shape-your-game.md). The
-   card tools also need e2fsprogs.
-3. **Build and adapt the system.** Build the image yourself from pinned
-   inputs, change it and run your own: [build the image yourself](docs/getting-started.md#build-the-image-yourself),
-   [image build](os/README.md) and [architecture](docs/architecture.md).
-   Building is checked on a Mac with Apple Silicon.
-4. **Contribute and follow.** Try it on your computer, report what fails or
-   confuses, translate, make sample packages and games, work on the services
-   and tools: [contributing](CONTRIBUTING.md#ways-to-help). The
-   [releases](https://github.com/Play-MUN/mun-os/releases) and the
-   [pull requests](https://github.com/Play-MUN/mun-os/pulls) show where it
-   is going.
+A MUN Disk dressed in Reef. **MUN Shape v1**, the stable contract, gives a
+game's disk its colors, materials and sounds on the console; the moving reef
+is Shape's motion, an **experimental draft** whose names and limits may
+change in any version.
 
-Playing, making cards and building each have their own requirements:
-[compatibility](docs/compatibility.md).
+- **[Try MUN OS](docs/getting-started.md).** Download the preview and start
+  the virtual console, without compiling: you need Python and QEMU
+  ([compatibility](docs/compatibility.md)).
+- **[Create for MUN](docs/guides/create-game-card.md).** Put your game on a
+  MUN Disk, called a *Game Card* in its format and tools, and
+  [dress the console in it](docs/guides/shape-your-game.md) with MUN Shape.
+- **[Contribute](CONTRIBUTING.md#ways-to-help).** Try it on your computer,
+  report what fails, translate, or take one of the
+  [three tasks we need today](CONTRIBUTING.md#first-tasks).
 
 ## BOP — Buy. Own. Play.
 
@@ -93,7 +84,7 @@ MUN OS v0.1.0-dev.5 is a development preview. In the virtual console:
 
 | MUN Collect, without a package | The same card dressed in Reef |
 | --- | --- |
-| ![Home with the MUN Collect Game Card, in MUN's own look](docs/images/home-collect.en.jpg) | ![The same Home with MUN Collect carrying Reef: the reef behind the menus, in the game's colours](docs/images/home-reef.en.jpg) |
+| ![Home with the MUN Collect Game Card, in MUN's own look](docs/images/home-collect.en.jpg) | ![The same Home with MUN Collect carrying Reef: the reef behind the menus, in the game's colors](docs/images/home-reef.en.jpg) |
 
 These are screenshots of the virtual console
 ([where each image comes from](docs/images/README.md)). A picture holds
@@ -116,7 +107,7 @@ is planned.
 
 MUN OS's own work is under the [Apache License 2.0](LICENSE): you may study
 the code, change it, rebuild the image and distribute it under the terms of
-its licences. Each release publishes the corresponding source of every
+its licenses. Each release publishes the corresponding source of every
 package in its image; third-party components keep their own terms, and the
 MUN and Play MUN names and logos have [their own](NAME-AND-LOGO.txt)
 ([licensing](docs/licensing.md)).
@@ -132,7 +123,10 @@ not run yet; the assembled console and DIY builds on it will use the same
 official image. Open and adaptable does not mean it runs on any board
 today: a physical port needs its own integration (boot, display, sound,
 input, storage, the card reader), as MUN Dev's profile shows, and ports to
-other hardware are welcome as independently maintained forks.
+other hardware are welcome as independently maintained forks. The
+[releases](https://github.com/Play-MUN/mun-os/releases) and the
+[pull requests](https://github.com/Play-MUN/mun-os/pulls) show where it is
+going.
 
 ## Where it runs
 
@@ -177,6 +171,9 @@ of its own: [what has been checked there](docs/mun-dev.md#what-has-been-checked)
 ## Documentation
 
 - [Getting started](docs/getting-started.md) and [compatibility](docs/compatibility.md)
+- [Build the image yourself](docs/getting-started.md#build-the-image-yourself)
+  from pinned inputs, change it and run your own (checked on a Mac with Apple
+  Silicon)
 - [Create a Game Card](docs/guides/create-game-card.md) and
   [bring a game to MUN](docs/guides/port-a-game.md)
 - [Dress the console in your game](docs/guides/shape-your-game.md) with MUN
@@ -208,7 +205,7 @@ of its own: [what has been checked there](docs/mun-dev.md#what-has-been-checked)
 Python syntax check, the host regressions and, with a C compiler, the example
 game's save tests: no network, no VM.
 
-## Who makes it, and the licence
+## Who makes it, and the license
 
 MUN is made by **Play MUN**, the studio of **Iván Moreno Mendoza**, who
 founded the project and maintains MUN OS: he reviews the changes and decides

@@ -9,8 +9,7 @@ physical games you own. You can already try it on your computer with QEMU.
 > for a virtual console, not the console itself.
 > [What works and what does not yet](#what-works-today-and-what-does-not-yet).
 
-[![MUN OS v0.1.0-dev.5 in the virtual console: a MUN Disk dressed in Reef, the reef behind Home's menus and a school of fish gathered under the disk, Play in focus](docs/images/dev5-reef.en.jpg)](https://github.com/user-attachments/assets/cfbd2371-ca5a-46b0-8a82-014e34362d1d)
-
+[![MUN OS v0.1.0-dev.5 in the virtual console: a MUN Disk dressed in Reef, the reef behind Home's menus and a school of fish gathered under the disk, Play in focus](docs/images/dev5-reef.en.jpg)](https://github.com/user-attachments/assets/cfbd2371-ca5a-46b0-8a82-014e34362d1d)<br>
 ▶ [Watch 26 seconds of v0.1.0-dev.5](https://github.com/user-attachments/assets/cfbd2371-ca5a-46b0-8a82-014e34362d1d): a MUN Disk dressed in Reef
 goes in, the reef answers Play, and the disk is ejected safely. Recorded in
 real time from the published image, with the console's own sound

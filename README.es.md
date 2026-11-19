@@ -10,9 +10,9 @@ QEMU.
 > ARM64 experimental para una consola virtual, no la consola en sí.
 > [Lo que funciona y lo que todavía no](#lo-que-funciona-hoy-y-lo-que-todavía-no).
 
-[![MUN OS v0.1.0-dev.5 en la consola virtual: un MUN Disk vestido con Reef, el arrecife detrás de los menús de la pantalla principal y un banco de peces reunido bajo el disco, con Jugar en foco](docs/images/dev5-reef.es.jpg)](https://github.com/user-attachments/assets/d38d3bb4-c1d5-47b0-9b63-5512e4d8797e)
+[![MUN OS v0.1.0-dev.5 en la consola virtual: un MUN Disk vestido con Reef, el arrecife detrás de los menús de la pantalla principal y un banco de peces reunido bajo el disco, con Jugar en foco](docs/images/dev5-reef.es.jpg)](https://github.com/user-attachments/assets/cd53cfca-da51-44ce-bae6-20aa61908423)
 
-▶ [Mira 27 segundos de la v0.1.0-dev.5](https://github.com/user-attachments/assets/d38d3bb4-c1d5-47b0-9b63-5512e4d8797e): entra un MUN Disk vestido
+▶ [Mira 27 segundos de la v0.1.0-dev.5](https://github.com/user-attachments/assets/cd53cfca-da51-44ce-bae6-20aa61908423): entra un MUN Disk vestido
 con Reef, el arrecife responde a Jugar y el disco se retira con seguridad.
 Grabado en tiempo real de la imagen publicada, con el sonido de la propia
 consola ([cómo](docs/images/README.md#the-recording), en inglés).

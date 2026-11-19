@@ -1,3 +1,7 @@
+pragma ComponentBehavior: Bound
+// Bound: the loaded components and the delegates below read `window`,
+// `canvas`, `menus`, `status` and other ids of this file; the delegates take
+// their model data as required properties.
 import QtQuick
 import MUN.Shell
 
@@ -20,14 +24,14 @@ Window {
     color: Theme.screen
     title: "MUN Shell"
 
-    // The start-up plays once per boot (the binary tells: shellFirstStart);
+    // The start-up plays once per boot (the binary tells, SystemInfo.firstStart);
     // the launcher restarts the shell around every game, and coming back
     // from one lands on Home with the session's result.
-    readonly property bool firstStart: typeof shellFirstStart === "undefined" ? true : shellFirstStart
-    // The orbital design (src/main.cpp): on a graphics API; the software
-    // renderer keeps the previous one. The navigation, the states, the
-    // sounds and Shape are the same in both.
-    readonly property bool orbital: typeof shellOrbital === "undefined" ? false : shellOrbital
+    readonly property bool firstStart: SystemInfo.firstStart
+    // The orbital design (src/main.cpp, SystemInfo.orbital), unless
+    // MUN_SHELL_DESIGN=previous asks for the previous one. The navigation,
+    // the states, the sounds and Shape are the same in both.
+    readonly property bool orbital: SystemInfo.orbital
     // Where the card object stands, which the transitions grow from and Play's
     // colour fills from: the orbit's centre, or the previous design's orb.
     readonly property point objectCentre: orbital ? Theme.orbitalCentre : Theme.orb
@@ -882,7 +886,9 @@ Window {
                 morph: Shape.morph
                 cardGlow: Shape.glow
                 cardReveal: Shape.objectProgress
-                onIconChanged: if (backdropLoader.item) backdropLoader.item.ripple()
+                // The previous design's backdrop answers a new focus with a ripple
+                // (the Loader holds it, typed only as an object).
+                onIconChanged: (backdropLoader.item as Backdrop)?.ripple()
             }
         }
 
@@ -918,12 +924,14 @@ Window {
                 anchors.fill: parent
                 sourceComponent: window.orbital ? orbitalMenus : arcMenus
                 // The main menu's opacity: Home is whole once it has faded in.
-                readonly property real mainOpacity: item ? item.mainOpacity : 0
+                // Each menus' component sets it (a Binding), so it is read
+                // from a typed property, not from the loaded item.
+                property real mainOpacity: 0
             }
             Component {
                 id: arcMenus
                 Item {
-                    readonly property real mainOpacity: mainArc.opacity
+                    Binding { target: menus; property: "mainOpacity"; value: mainArc.opacity }
                     ArcMenu {
                         id: mainArc
                         anchors.fill: parent
@@ -952,7 +960,7 @@ Window {
             Component {
                 id: orbitalMenus
                 Item {
-                    readonly property real mainOpacity: mainOrbit.opacity
+                    Binding { target: menus; property: "mainOpacity"; value: mainOrbit.opacity }
                     OrbitalFocus {
                         icon: window.focusedEntry.icon || ""
                         tint: window.sectionLight
@@ -1028,6 +1036,7 @@ Window {
                 Repeater {
                     model: [["A", I18n.t("Select", "Seleccionar")], ["B", I18n.t("Back", "Atrás")]]
                     Row {
+                        id: hint
                         required property var modelData
                         spacing: 12
                         Rectangle {
@@ -1039,7 +1048,7 @@ Window {
                             border.color: window.hintsLook.text
                             UiText {
                                 anchors.centerIn: parent
-                                text: modelData[0]
+                                text: hint.modelData[0]
                                 size: 17
                                 weight: 700
                                 color: window.hintsLook.strong
@@ -1047,7 +1056,7 @@ Window {
                         }
                         UiText {
                             anchors.verticalCenter: parent.verticalCenter
-                            text: modelData[1]
+                            text: hint.modelData[1]
                             size: 23
                             color: window.hintsLook.text
                         }
@@ -1128,7 +1137,7 @@ Window {
             states: State {
                 name: "dimmed"
                 when: window.dimmed
-                PropertyChanges { target: idleVeil; opacity: Theme.idleDim }
+                PropertyChanges { idleVeil.opacity: Theme.idleDim }
             }
             transitions: [
                 Transition {

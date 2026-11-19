@@ -16,6 +16,7 @@
 #include "gamepads.h"
 #include "shellsettings.h"
 #include "systemsounds.h"
+#include "systeminfo.h"
 
 #include <algorithm>
 #include <chrono>
@@ -150,14 +151,13 @@ int main(int argc, char *argv[])
     QQmlApplicationEngine engine;
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app,
                      [] { QCoreApplication::exit(kInterfaceFailedStatus); }, Qt::QueuedConnection);
-    engine.rootContext()->setContextProperty(QStringLiteral("shellFirstStart"), firstStart);
     // Home's design is the orbital one, on a graphics API and on Qt Quick's
     // software renderer alike (there, as in the virtual console, its
     // background is drawn once and stays still). MUN_SHELL_DESIGN=previous
     // brings back the previous design, kept as the reference the checks
     // compare with; "orbital" asks for the default.
     const bool orbital = qEnvironmentVariable("MUN_SHELL_DESIGN") != QLatin1String("previous");
-    engine.rootContext()->setContextProperty(QStringLiteral("shellOrbital"), orbital);
+    SystemInfo::setStart(firstStart, orbital);
     qInfo("mun-shell: design: %s", orbital ? "orbital" : "previous");
 
     // Optional UI iteration path: load QML from a directory instead of the

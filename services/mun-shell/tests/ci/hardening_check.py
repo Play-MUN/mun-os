@@ -38,12 +38,12 @@ import json
 import re
 import shlex
 import shutil
-import subprocess
+import subprocess  # nosec B404: runs readelf, a fixed program, on the build's own files
 import sys
 
 
 def readelf(*args):
-    return subprocess.run(["readelf", "-W", *args], check=True, capture_output=True, text=True).stdout
+    return subprocess.run(["readelf", "-W", *args], check=True, capture_output=True, text=True).stdout  # nosec B603
 
 
 def properties(binary):

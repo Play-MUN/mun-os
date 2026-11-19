@@ -1,3 +1,6 @@
+pragma ComponentBehavior: Bound
+// Bound: the options' delegate reads `root`, `list` and `window`, ids of this
+// file; it takes its index as a required property.
 import QtQuick
 import MUN.Shell
 
@@ -110,7 +113,10 @@ ProjectedLayer {
             const at = panel.mapToItem(list, point.x, point.y)
             for (let i = 0; i < rows.count; ++i) {
                 const entry = rows.itemAt(i)
-                if (entry && !entry.head && at.y >= entry.y && at.y < entry.y + entry.height) {
+                // A heading is not an option: the same rule as the delegate's
+                // `head`, read from the model (itemAt() returns a plain Item).
+                const head = (root.options[i] || {}).kind === "head"
+                if (entry && !head && at.y >= entry.y && at.y < entry.y + entry.height) {
                     root.optionClicked(i)
                     return
                 }

@@ -68,7 +68,7 @@ QtObject {
         switch (Shape.source) {
         case "shape": return " " + t("The game dresses the console while its card is in.",
                                      "El juego viste la consola mientras su tarjeta está dentro.")
-        case "lent": case "read": return " " + t("The console takes the card's colours.", "La consola toma los colores de la tarjeta.")
+        case "lent": case "read": return " " + t("The console takes the card's colors.", "La consola toma los colores de la tarjeta.")
         }
         return ""
     }
@@ -201,8 +201,8 @@ QtObject {
                        t("Brings the interface in from the edges of a TV that crops them.",
                          "Aleja la interfaz de los bordes en un televisor que los recorta.")),
                 // Also chosen in a dialog: a change restarts the shell.
-                Object.assign(action(t("Colour range", "Rango de color"), rangeName(ShellSettings.colourRange), shell.askColourRange,
-                                     t("If blacks look grey, choose Full; if the darkest shades merge into black, Limited.",
+                Object.assign(action(t("Color range", "Rango de color"), rangeName(ShellSettings.colourRange), shell.askColourRange,
+                                     t("If blacks look gray, choose Full; if the darkest shades merge into black, Limited.",
                                        "Si los negros se ven grises, elige Completo; si los tonos más oscuros se funden con el negro, Limitado.")),
                               { key: "range" }),
                 unavailable("HDR"),
@@ -237,7 +237,7 @@ QtObject {
             text: t("How the console looks and moves.", "Cómo se ve y se mueve la consola."),
             options: [
                 // How a Game Card dresses the console (docs/shape.md).
-                choice("MUN Shape", [t("Full", "Completo"), t("Colours only", "Solo colores"), t("Off", "Desactivado")],
+                choice("MUN Shape", [t("Full", "Completo"), t("Colors only", "Solo colores"), t("Off", "Desactivado")],
                        ["full", "colours", "off"].indexOf(ShellSettings.shapeMode),
                        i => ShellSettings.shapeMode = ["full", "colours", "off"][i],
                        t("How a Game Card dresses the console while it is in.",
@@ -411,7 +411,7 @@ QtObject {
                                                run: () => shell.changeColourRange(range) }))
         actions.push({ label: t("Cancel", "Cancelar"), run: shell.closeModal })
         return {
-            title: t("Colour range", "Rango de color"),
+            title: t("Color range", "Rango de color"),
             text: t("Automatic suits most TVs. The screen goes dark for a moment while the console changes it.",
                     "Automático sirve en la mayoría de televisores. La pantalla se apaga un momento mientras la consola lo cambia."),
             actions: actions,

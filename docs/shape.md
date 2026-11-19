@@ -586,7 +586,7 @@ The algorithm, exact so that the console and the checker agree:
   once *Eject safely* is confirmed, quickly on removal or replacement.
 - *Play* never waits: the game's deep colour grows from the card object
   while the launcher takes the screen.
-- Settings: *MUN Shape* Full, Colours only or Off; *Game sounds on the
+- Settings: *MUN Shape* Full, Colors only or Off; *Game sounds on the
   menus*; *Reduce motion* (fades, and a still world and objects).
 - Outside MUN Shape v1: preloading a game's files, a gallery, a game's
   typefaces, a continuous ambient sound, video and advanced graphics effects.

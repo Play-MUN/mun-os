@@ -608,7 +608,7 @@ code (`src/shape.*`, `src/shapeworld.*`, `src/shapefront.h`):
   ends for another reason while it reads leaves the same marker.
   Sounds are read in the mixer's format and within the contract's
   durations, the set whole or not at all.
-- **Settings** (Appearance and accessibility; Sound): *MUN Shape* Full (default), Colours only
+- **Settings** (Appearance and accessibility; Sound): *MUN Shape* Full (default), Colors only
   (colours and plates; no world, images or sounds, MUN's object, the
   palette's light as the ambient) or Off (MUN alone); *Game sounds on the
   menus*; *Reduce motion*, which makes every transition a fade and holds the
@@ -669,12 +669,12 @@ code (`src/shape.*`, `src/shapeworld.*`, `src/shapefront.h`):
     object found, and one that cannot run fails. The cases: an arrival's
     tide, a dialog that makes it wait, a return under a dialog, a removal
     mid-tide, *Eject safely* confirmed and refused, another card, Reduce
-    motion, Colours only, Off, a defective world, Settings over the world,
+    motion, Colors only, Off, a defective world, Settings over the world,
     the card object (a card block alone, with a world, a window that does
     not decode), the idle dimming and the key that wakes it;
   - with the options focused, frame by frame: a package ready after the
     options took the focus (a fade and a tide), *Eject safely*, a changed
-    choice (Colours only, Off, Full), another card; the dressed entries are
+    choice (Colors only, Off, Full), another card; the dressed entries are
     whole on every frame and MUN's ease; an arrival waits for Home's arc to
     be whole after Settings, and for a dialog's layer to fade;
   - the dressed arc's and panel's contrast measured on grabbed frames: the
@@ -768,9 +768,9 @@ mun-shell: display: requested 1920x1080@60.000 (the cap 1920x1080@60), applied 1
 A difference is logged as an error. The player's own choice in Settings is
 not capped.
 
-### Colour range and bits per channel
+### Color range and bits per channel
 
-Settings › Display › Colour range sets how the console sends its colours:
+Settings › Display › Color range sets how the console sends its colours:
 *Automatic* (the default), *Full* or *Limited*. A TV that expects one and
 gets the other shows grey blacks, or merges its darkest shades into black.
 The shell sets it before Qt opens the display (`src/displaymode.cpp`, the
@@ -808,12 +808,12 @@ it cannot do.
 | --- | --- | --- |
 | Display | Resolution | Works: Automatic (default), or 720p, 1080p or 1440p where the display takes them; kept once confirmed, back to the previous one on its own otherwise (*Resolution*) |
 | | Safe area | Works: 100 (default), 97, 94 or 91 %; kept |
-| | Colour range | Works: Automatic (default), Full or Limited; kept; a change restarts the shell (*Colour range and bits per channel*) |
+| | Color range | Works: Automatic (default), Full or Limited; kept; a change restarts the shell (*Color range and bits per channel*) |
 | | HDR, refresh rate | Not available yet |
 | Sound | System sounds | Works: On (default) or Off, the menus' sounds and the start-up's (*Sounds*); kept |
 | | Game sounds on the menus | Works: On (default) or Off, a Game Card's own menu sounds and cue (*A Game Card's identity*); kept |
 | | Output, format | Not available yet |
-| Appearance and accessibility | MUN Shape | Works: Full (default), Colours only or Off (*A Game Card's identity*); kept |
+| Appearance and accessibility | MUN Shape | Works: Full (default), Colors only or Off (*A Game Card's identity*); kept |
 | | Reduce motion | Works: Off (default) or On; Home's world and objects hold still, every transition is a fade, the start-up loses its shake, tremor and flicker; kept |
 | Language and time | Language | Works: English (default) or Español; kept |
 | | Time format | Works: 24-hour (default) or 12-hour; kept |

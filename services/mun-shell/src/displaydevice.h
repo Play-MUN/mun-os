@@ -139,7 +139,7 @@ std::optional<std::string> modeline(const Timing &mode);
 std::optional<int> parseMaxBpc(std::string_view text);
 
 // The RGB range sent to the display: the player's choice (Settings ›
-// Display › Colour range), stored as "auto", "full" or "limited"; anything
+// Display › Color range), stored as "auto", "full" or "limited"; anything
 // else reads as Automatic.
 enum class Range { Automatic, Full, Limited };
 Range parseRange(std::string_view text);

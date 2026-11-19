@@ -1,14 +1,3 @@
-qml/ArcMenu.qml	Unqualified access	unqualified
-qml/ArcMenu.qml	Unqualified access	unqualified
-qml/ArcMenu.qml	Unqualified access	unqualified
-qml/ArcMenu.qml	Unqualified access	unqualified
-qml/ArcMenu.qml	Unqualified access	unqualified
-qml/ArcMenu.qml	Unqualified access	unqualified
-qml/ArcMenu.qml	Unqualified access	unqualified
-qml/ArcMenu.qml	Unqualified access	unqualified
-qml/ArcMenu.qml	Unqualified access	unqualified
-qml/ArcMenu.qml	Unqualified access	unqualified
-qml/ArcMenu.qml	Unqualified access	unqualified
 qml/Main.qml	Member "mainOpacity" not found on type "QObject"	missing-property
 qml/Main.qml	Unqualified access	unqualified
 qml/Main.qml	Unqualified access	unqualified

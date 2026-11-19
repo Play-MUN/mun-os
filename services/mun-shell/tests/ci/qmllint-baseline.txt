@@ -82,7 +82,3 @@ qml/OrbitalIcon.qml	Unqualified access	unqualified
 qml/OrbitalIcon.qml	Unqualified access	unqualified
 qml/OrbitalIcon.qml	Unqualified access	unqualified
 qml/OrbitalIcon.qml	Unqualified access	unqualified
-qml/StatusBar.qml	Unqualified access	unqualified
-qml/StatusBar.qml	Unqualified access	unqualified
-qml/StatusBar.qml	Unqualified access	unqualified
-qml/StatusBar.qml	Unqualified access	unqualified

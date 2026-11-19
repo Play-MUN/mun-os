@@ -9,12 +9,16 @@ physical games you own. You can already try it on your computer with QEMU.
 > for a virtual console, not the console itself.
 > [What works and what does not yet](#what-works-today-and-what-does-not-yet).
 
-[![MUN OS v0.1.0-dev.5 in the virtual console: Home with MUN Collect dressed in Reef, the reef behind the menus](docs/images/home-reef.en.jpg)](docs/getting-started.md#7-see-mun-shape)
+[![MUN OS v0.1.0-dev.5 in the virtual console: a MUN Disk dressed in Reef, the reef behind Home's menus and a school of fish gathered under the disk, Play in focus](docs/images/dev5-reef.en.jpg)](https://github.com/user-attachments/assets/55400db9-dd9c-4ff5-90d8-5100c6db5d2a)
 
-A MUN Disk dressed in Reef. **MUN Shape v1**, the stable contract, gives a
-game's disk its colors, materials and sounds on the console; the moving reef
-is Shape's motion, an **experimental draft** whose names and limits may
-change in any version.
+▶ [Watch 26 seconds of v0.1.0-dev.5](https://github.com/user-attachments/assets/55400db9-dd9c-4ff5-90d8-5100c6db5d2a): a MUN Disk dressed in Reef
+goes in, the reef answers Play, and the disk is ejected safely. Recorded in
+real time from the published image, with the console's own sound
+([how](docs/images/README.md#the-recording)).
+
+**MUN Shape v1**, the stable contract, gives a game's disk its colors,
+materials and sounds on the console; the moving reef is Shape's motion, an
+**experimental draft** whose names and limits may change in any version.
 
 - **[Try MUN OS](docs/getting-started.md).** Download the preview and start
   the virtual console, without compiling: you need Python and QEMU

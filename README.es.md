@@ -10,12 +10,17 @@ QEMU.
 > ARM64 experimental para una consola virtual, no la consola en sí.
 > [Lo que funciona y lo que todavía no](#lo-que-funciona-hoy-y-lo-que-todavía-no).
 
-[![MUN OS v0.1.0-dev.5 en la consola virtual: la pantalla principal con MUN Collect vestido con Reef, el arrecife detrás de los menús](docs/images/home-reef.es.jpg)](docs/es/getting-started.md#7-mira-mun-shape)
+[![MUN OS v0.1.0-dev.5 en la consola virtual: un MUN Disk vestido con Reef, el arrecife detrás de los menús de la pantalla principal y un banco de peces reunido bajo el disco, con Jugar en foco](docs/images/dev5-reef.es.jpg)](https://github.com/user-attachments/assets/d38d3bb4-c1d5-47b0-9b63-5512e4d8797e)
 
-Un MUN Disk vestido con Reef. **MUN Shape v1**, el contrato estable, da al
-disco de un juego sus colores, materiales y sonidos en la consola; el
-arrecife que se mueve es el movimiento de Shape, un **borrador
-experimental** cuyos nombres y límites pueden cambiar en cualquier versión.
+▶ [Mira 27 segundos de la v0.1.0-dev.5](https://github.com/user-attachments/assets/d38d3bb4-c1d5-47b0-9b63-5512e4d8797e): entra un MUN Disk vestido
+con Reef, el arrecife responde a Jugar y el disco se retira con seguridad.
+Grabado en tiempo real de la imagen publicada, con el sonido de la propia
+consola ([cómo](docs/images/README.md#the-recording), en inglés).
+
+**MUN Shape v1**, el contrato estable, da al disco de un juego sus colores,
+materiales y sonidos en la consola; el arrecife que se mueve es el
+movimiento de Shape, un **borrador experimental** cuyos nombres y límites
+pueden cambiar en cualquier versión.
 
 - **[Probar MUN OS](docs/es/getting-started.md).** Descarga la versión
   preliminar y arranca la consola virtual, sin compilar: necesitas Python y

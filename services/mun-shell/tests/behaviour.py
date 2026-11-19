@@ -2218,7 +2218,8 @@ def boot_cases(shell: Shell, checks: Checks):
     checks.expect("boot-ready", "none expected: the LED never waits for one before the start-up",
                   not any(s["warming"] for s in states) and not waits.get("boot-ready"), waits.get("boot-ready"))
     checks.expect("boot-ready", "standby from the first frame: the LED lit at once, as the system's picture has it",
-                  states and states[0]["standby"] and states[0]["led"] == 1 and states[0]["t"] < 0, states[:1])
+                  states and states[0]["standby"] and states[0]["led"] == 1 and states[0]["breath"] == 1
+                  and states[0]["t"] < 0, states[:1])
     running = next((s for s in states if s["t"] >= 0.7), None)
     checks.expect("boot-ready", "standby ends as the start-up begins: its LED faded within 0.7 s of the picture",
                   running is not None and not running["standby"] and running["led"] == 0, running)
@@ -2275,6 +2276,10 @@ def boot_cases(shell: Shell, checks: Checks):
     checks.expect("boot-expected", "while the device is expected the start-up waits, the LED breathing",
                   held and all(s["warming"] and s["standby"] and s["led"] == 1 and s["t"] < 0 and s["playing"]
                                for s in held), held[-2:])
+    breathing = [s["breath"] for s in states if s["warming"]]
+    checks.expect("boot-expected", "the LED begins whole and breathes: its brightness falls below half and comes back",
+                  breathing and breathing[0] == 1 and min(breathing) < 0.5 and max(breathing[breathing.index(min(breathing)):]) > 0.9,
+                  (breathing[:1], min(breathing, default=None)))
     late = next((s for s in states if s["at"] >= 6000), None)
     checks.expect("boot-expected", "once none is expected any more, the picture runs on its own",
                   late is not None and not late["warming"] and late["t"] >= 1.0, late)

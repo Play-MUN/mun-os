@@ -1,3 +1,6 @@
+pragma ComponentBehavior: Bound
+// Bound: the Loader's component and the parts' delegate read `root`, this
+// file's id; the delegate takes its part as a required property.
 import QtQuick
 import MUN.Shell
 
@@ -265,22 +268,31 @@ Rectangle {
                         opacity: root.waiting || root.standby ? 1 : 0
                         visible: opacity > 0
                         Behavior on opacity { NumberAnimation { duration: 600 } }
-                        breath: 1
+                        // Lit at once (breath 1, not BootIntro's -1, which
+                        // draws the start-up's LED instead): set once, not
+                        // bound, as the two animations below write breath.
+                        // Both begin with a pause or from 0, so the first
+                        // frames show it whole.
+                        Component.onCompleted: breath = 1
                         x: area.x; y: area.y; width: area.width; height: area.height
-                        SequentialAnimation on breath {
+                        // Two ways of breathing, never at once (standby ends
+                        // as the start-up begins, waiting comes after it):
+                        // animations aimed at breath, not two value sources
+                        // on one property.
+                        SequentialAnimation {
                             running: root.standby
                             PauseAnimation { duration: 400 }
                             SequentialAnimation {
                                 loops: Animation.Infinite
-                                NumberAnimation { from: 1; to: 0; duration: 1200; easing.type: Easing.InOutSine }
-                                NumberAnimation { from: 0; to: 1; duration: 1200; easing.type: Easing.InOutSine }
+                                NumberAnimation { target: waitingLed; property: "breath"; from: 1; to: 0; duration: 1200; easing.type: Easing.InOutSine }
+                                NumberAnimation { target: waitingLed; property: "breath"; from: 0; to: 1; duration: 1200; easing.type: Easing.InOutSine }
                             }
                         }
-                        SequentialAnimation on breath {
+                        SequentialAnimation {
                             running: root.waiting
                             loops: Animation.Infinite
-                            NumberAnimation { from: 0; to: 1; duration: 1200; easing.type: Easing.InOutSine }
-                            NumberAnimation { from: 1; to: 0; duration: 1200; easing.type: Easing.InOutSine }
+                            NumberAnimation { target: waitingLed; property: "breath"; from: 0; to: 1; duration: 1200; easing.type: Easing.InOutSine }
+                            NumberAnimation { target: waitingLed; property: "breath"; from: 1; to: 0; duration: 1200; easing.type: Easing.InOutSine }
                         }
                     }
                 }

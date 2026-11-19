@@ -9,15 +9,6 @@ qml/ArcMenu.qml	Unqualified access	unqualified
 qml/ArcMenu.qml	Unqualified access	unqualified
 qml/ArcMenu.qml	Unqualified access	unqualified
 qml/ArcMenu.qml	Unqualified access	unqualified
-qml/BootLayer.qml	Cannot combine value source and binding on property "breath"	duplicate-property-binding
-qml/BootLayer.qml	Cannot combine value source and binding on property "breath"	duplicate-property-binding
-qml/BootLayer.qml	Unqualified access	unqualified
-qml/BootLayer.qml	Unqualified access	unqualified
-qml/BootLayer.qml	Unqualified access	unqualified
-qml/BootLayer.qml	Unqualified access	unqualified
-qml/BootLayer.qml	Unqualified access	unqualified
-qml/BootLayer.qml	Unqualified access	unqualified
-qml/BootLayer.qml	Unqualified access	unqualified
 qml/DetailPanel.qml	Member "head" not found on type "QQuickItem"	missing-property
 qml/DetailPanel.qml	Unqualified access	unqualified
 qml/DetailPanel.qml	Unqualified access	unqualified

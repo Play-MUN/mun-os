@@ -69,10 +69,3 @@ qml/Main.qml	Unqualified access	unqualified
 qml/Main.qml	Unqualified access	unqualified
 qml/Main.qml	Unqualified access	unqualified
 qml/Main.qml	Unqualified access	unqualified
-qml/ModalLayer.qml	Unqualified access	unqualified
-qml/ModalLayer.qml	Unqualified access	unqualified
-qml/ModalLayer.qml	Unqualified access	unqualified
-qml/ModalLayer.qml	Unqualified access	unqualified
-qml/ModalLayer.qml	Unqualified access	unqualified
-qml/ModalLayer.qml	Unqualified access	unqualified
-qml/ModalLayer.qml	Unqualified access	unqualified

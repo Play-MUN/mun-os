@@ -2,43 +2,35 @@
 
 [English](README.md) · **Español**
 
-MUN™ es una consola de videojuegos que construimos en abierto, para juegos
-que posees en Game Cards. MUN OS es su sistema operativo, de código abierto y
-desarrollado en público. Ya puedes ejecutarlo en tu ordenador como consola
-virtual, probarlo, desmontarlo y participar. También lo ejecutamos en una
-placa de desarrollo, MUN Dev; el hardware propio de la consola llegará más
-adelante.
+MUN OS es el sistema operativo abierto de MUN, una consola en desarrollo
+para juegos físicos que son tuyos. Ya puedes probarlo en tu ordenador con
+QEMU.
 
-![La pantalla principal de MUN Shell en la consola virtual, con la Game Card de MUN Collect insertada](docs/images/home-collect.es.jpg)
+> **La v0.1.0-dev.5 es una versión preliminar de desarrollo:** una imagen
+> ARM64 experimental para una consola virtual, no la consola en sí.
+> [Lo que funciona y lo que todavía no](#lo-que-funciona-hoy-y-lo-que-todavía-no).
 
-## Lo que puedes hacer hoy
+[![MUN OS v0.1.0-dev.5 en la consola virtual: un MUN Disk vestido con Reef, el arrecife detrás de los menús de la pantalla principal y un banco de peces reunido bajo el disco, con Jugar en foco](docs/images/dev5-reef.es.jpg)](https://github.com/user-attachments/assets/cd53cfca-da51-44ce-bae6-20aa61908423)<br>
+▶ [Mira 27 segundos de la v0.1.0-dev.5](https://github.com/user-attachments/assets/cd53cfca-da51-44ce-bae6-20aa61908423): entra un MUN Disk vestido
+con Reef, el arrecife responde a Jugar y el disco se retira con seguridad.
+Grabado en tiempo real de la imagen publicada, con el sonido de la propia
+consola ([cómo](docs/images/README.md#the-recording), en inglés).
 
-1. **Probar MUN OS, sin compilar.** Descarga las herramientas y una imagen
-   ya hecha, arranca la consola virtual, inserta una Game Card, juega,
-   guarda, retírala con seguridad y continúa después:
-   [primeros pasos](docs/es/getting-started.md). Necesitas Python y QEMU.
-2. **Crear para MUN.** Pon un juego en una Game Card y viste la consola con
-   su identidad gracias a MUN Shape:
-   [crear una Game Card](docs/es/guides/create-game-card.md),
-   [traer un juego a MUN](docs/es/guides/port-a-game.md) y
-   [vestir la consola con tu juego](docs/es/guides/shape-your-game.md). Las
-   herramientas de tarjetas necesitan además e2fsprogs.
-3. **Construir y adaptar el sistema.** Construye tú la imagen a partir de
-   entradas con versión fijada, cámbiala y ejecuta la tuya:
-   [construir la imagen tú mismo](docs/es/getting-started.md#construir-la-imagen-tú-mismo),
-   [construcción de la imagen](os/README.md) y
-   [arquitectura](docs/architecture.md), estas dos en inglés. La
-   construcción está comprobada en un Mac con Apple Silicon.
-4. **Contribuir y seguir el desarrollo.** Pruébalo en tu ordenador, avisa de
-   lo que falla o confunde, traduce, haz paquetes y juegos de ejemplo,
-   trabaja en los servicios y las herramientas:
-   [contribuir](CONTRIBUTING.es.md#cómo-ayudar). Las
-   [versiones](https://github.com/Play-MUN/mun-os/releases) y las
-   [pull requests](https://github.com/Play-MUN/mun-os/pulls) muestran hacia
-   dónde va.
+**MUN Shape v1**, el contrato estable, da al disco de un juego sus colores,
+materiales y sonidos en la consola; el arrecife que se mueve es el
+movimiento de Shape, un **borrador experimental** cuyos nombres y límites
+pueden cambiar en cualquier versión.
 
-Jugar, hacer tarjetas y construir tienen cada uno sus requisitos:
-[compatibilidad](docs/es/compatibility.md).
+- **[Probar MUN OS](docs/es/getting-started.md).** Descarga la versión
+  preliminar y arranca la consola virtual, sin compilar: necesitas Python y
+  QEMU ([compatibilidad](docs/es/compatibility.md)).
+- **[Crear para MUN](docs/es/guides/create-game-card.md).** Pon tu juego en
+  un MUN Disk, que su formato y sus herramientas llaman *Game Card*, y
+  [viste la consola con él](docs/es/guides/shape-your-game.md) gracias a
+  MUN Shape.
+- **[Contribuir](CONTRIBUTING.es.md#cómo-ayudar).** Pruébalo en tu
+  ordenador, avisa de lo que falla, traduce o elige una de las
+  [tres tareas que necesitamos hoy](CONTRIBUTING.es.md#primeras-tareas).
 
 ## BOP: Buy. Own. Play. (Compra. Posee. Juega.)
 
@@ -144,7 +136,10 @@ esa configuración usarán la misma imagen oficial. Abierto y adaptable no
 significa que hoy funcione en cualquier placa: un port físico necesita su
 propia integración (arranque, pantalla, sonido, entrada, almacenamiento, el
 lector de tarjetas), como muestra el perfil de MUN Dev, y los ports a otro
-hardware son bienvenidos como forks mantenidos por separado.
+hardware son bienvenidos como forks mantenidos por separado. Las
+[versiones](https://github.com/Play-MUN/mun-os/releases) y las
+[pull requests](https://github.com/Play-MUN/mun-os/pulls) muestran hacia
+dónde va.
 
 ## Dónde funciona
 
@@ -194,6 +189,9 @@ un perfil propio: [qué se ha comprobado allí](docs/es/mun-dev.md#qué-se-ha-co
 
 - [Primeros pasos](docs/es/getting-started.md) y
   [compatibilidad](docs/es/compatibility.md)
+- [Construir la imagen tú mismo](docs/es/getting-started.md#construir-la-imagen-tú-mismo)
+  a partir de entradas con versión fijada, cambiarla y ejecutar la tuya
+  (comprobado en un Mac con Apple Silicon)
 - [Crear una Game Card](docs/es/guides/create-game-card.md) y
   [traer un juego a MUN](docs/es/guides/port-a-game.md)
 - [Vestir la consola con tu juego](docs/es/guides/shape-your-game.md) con MUN

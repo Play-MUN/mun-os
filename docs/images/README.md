@@ -84,4 +84,4 @@ v0.1.0-dev.5, one take in English (`dev5-reef.en.jpg`) and one in Spanish
   English and 27 s in Spanish. The stills are frames of those files at the
   moment the school gathers under Play, scaled to 1600×900.
 - **Where they are:** attached to the project on GitHub:
-  [English](https://github.com/user-attachments/assets/55400db9-dd9c-4ff5-90d8-5100c6db5d2a), [Spanish](https://github.com/user-attachments/assets/d38d3bb4-c1d5-47b0-9b63-5512e4d8797e).
+  [English](https://github.com/user-attachments/assets/cfbd2371-ca5a-46b0-8a82-014e34362d1d), [Spanish](https://github.com/user-attachments/assets/cd53cfca-da51-44ce-bae6-20aa61908423).

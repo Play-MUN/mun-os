@@ -1,3 +1,6 @@
+pragma ComponentBehavior: Bound
+// Bound: Part and the layers' delegate read `root`, the file's own id; the
+// delegate takes its index as a required property.
 import QtQuick
 import MUN.Shell
 
@@ -231,14 +234,15 @@ Item {
     Repeater {
         model: root.parts.layers.length
         Part {
+            id: layer
             required property int index
             readonly property var motion: root.parts.layers[index] || ({})
             draw: motion.draw
             rotation: motion.rotation ? motion.rotation() : 0
             opacity: motion.opacity ? motion.opacity() : 1
             transform: [
-                Scale { origin.x: root.size / 2; xScale: motion.xScale ? motion.xScale() : 1 },
-                Translate { x: (motion.dx ? motion.dx() : 0) * root.unit; y: (motion.dy ? motion.dy() : 0) * root.unit }
+                Scale { origin.x: root.size / 2; xScale: layer.motion.xScale ? layer.motion.xScale() : 1 },
+                Translate { x: (layer.motion.dx ? layer.motion.dx() : 0) * root.unit; y: (layer.motion.dy ? layer.motion.dy() : 0) * root.unit }
             ]
         }
     }

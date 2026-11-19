@@ -76,9 +76,3 @@ qml/ModalLayer.qml	Unqualified access	unqualified
 qml/ModalLayer.qml	Unqualified access	unqualified
 qml/ModalLayer.qml	Unqualified access	unqualified
 qml/ModalLayer.qml	Unqualified access	unqualified
-qml/OrbitalIcon.qml	Unqualified access	unqualified
-qml/OrbitalIcon.qml	Unqualified access	unqualified
-qml/OrbitalIcon.qml	Unqualified access	unqualified
-qml/OrbitalIcon.qml	Unqualified access	unqualified
-qml/OrbitalIcon.qml	Unqualified access	unqualified
-qml/OrbitalIcon.qml	Unqualified access	unqualified

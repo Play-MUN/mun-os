@@ -13,6 +13,9 @@ mkdir -p "$ART/games"
 
 echo "== components"
 sh "$MUN/services/mun-shell/deploy/build.sh" "$MUN/services/mun-shell" "$BUILDDIR/mun-shell" "$MUN_BUILD_ID"
+# The console's executable carries the hardening its build asks for (stack
+# protector, fortified calls, BTI and PAC, full RELRO), or the build fails.
+python3 "$MUN/services/mun-shell/tests/ci/hardening_check.py" "$BUILDDIR/mun-shell/mun-shell"
 # The shell's behaviour, on the binary just built with the image's own
 # libraries (services/mun-shell/tests/behaviour.py): a failed expectation
 # fails the build. Durations are measured and recorded, not judged: this

@@ -42,7 +42,7 @@ echo "== host tests (MUN_REQUIRE_QT=1)"
 make -s -C services/mun-shell/tests test MUN_REQUIRE_QT=1
 echo "== build (deploy/build.sh)"
 sh services/mun-shell/deploy/build.sh "$PWD/services/mun-shell" "$WORK/shell" ci
-python3 services/mun-shell/tests/ci/hardening_check.py "$WORK/shell/mun-shell"
+python3 services/mun-shell/tests/ci/hardening_check.py "$WORK/shell/mun-shell" --build-dir "$WORK/shell"
 echo "== qmllint, against the warnings already known (tests/ci/qmllint-baseline.txt)"
 cmake --build "$WORK/shell" --target all_qmllint > "$WORK/qmllint.log" 2>&1 || { cat "$WORK/qmllint.log" >&2; exit 1; }
 python3 services/mun-shell/tests/ci/qmllint_check.py "$WORK/qmllint.log" services/mun-shell/tests/ci/qmllint-baseline.txt

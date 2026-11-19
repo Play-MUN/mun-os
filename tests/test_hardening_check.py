@@ -6,6 +6,8 @@ build before its hardening flags and the build after."""
 import contextlib
 import importlib.util
 import io
+import json
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -44,13 +46,32 @@ UNHARDENED = {
 
 
 class HardeningCheckTests(unittest.TestCase):
-    def run_check(self, outputs, which="/usr/bin/readelf"):
+    def run_check(self, outputs, which="/usr/bin/readelf", build_dir=None):
         out = io.StringIO()
         with patch.object(hardening_check, "readelf", lambda flag, binary: outputs[flag]), \
                 patch.object(hardening_check.shutil, "which", lambda name: which), \
                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
-            code = hardening_check.main(["mun-shell"])
+            code = hardening_check.main(["mun-shell"] + (["--build-dir", build_dir] if build_dir else []))
         return code, out.getvalue()
+
+    def build_dir(self, drop=None, link="-Wl,-z,relro -Wl,-z,now -Wl,-z,noexecstack"):
+        """A build directory as CMake writes it for the shell, with `drop`
+        missing from the compile command of src/systemsounds.cpp."""
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        flags = "-O3 -DNDEBUG -fstack-protector-strong -fstack-clash-protection -mbranch-protection=standard -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3"
+        entries = []
+        for name in ("src/main.cpp", "src/systemsounds.cpp", "mun-shell_autogen/mocs_compilation.cpp"):
+            command = f"/usr/bin/c++ {flags} -o CMakeFiles/mun-shell.dir/{name}.o -c /w/{name}"
+            if drop and name == "src/systemsounds.cpp":
+                command = command.replace(f" {drop}", "")
+            entries.append({"directory": "/b", "command": command, "file": f"/w/{name}"})
+        Path(directory.name, "compile_commands.json").write_text(json.dumps(entries))
+        Path(directory.name, "build.ninja").write_text(
+            "build mun-shell: CXX_EXECUTABLE_LINKER__mun-shell_Release CMakeFiles/mun-shell.dir/src/main.cpp.o\n"
+            f"  FLAGS = -O3\n  LINK_FLAGS = {link} -Wl,--dependency-file=CMakeFiles/mun-shell.dir/link.d\n"
+            "  TARGET_FILE = mun-shell\n\nbuild all: phony mun-shell\n")
+        return directory.name
 
     def test_the_hardened_build_passes_every_property(self):
         code, said = self.run_check(HARDENED)
@@ -95,6 +116,34 @@ class HardeningCheckTests(unittest.TestCase):
         code, said = self.run_check(dict(HARDENED, **{"-n": UNHARDENED["-n"]}))
         self.assertEqual(code, 1)
         self.assertIn("MISSING control-flow protection (BTI and PAC; note: none)", said)
+
+    def test_the_build_s_commands_complete_pass(self):
+        code, said = self.run_check(HARDENED, build_dir=self.build_dir())
+        self.assertEqual(code, 0, said)
+        self.assertIn("in the build's commands", said)
+        self.assertIn("ok      -fstack-clash-protection in every compile command (3 of 3)", said)
+
+    def test_stack_clash_protection_dropped_from_one_object_fails_and_names_it(self):
+        # The executable cannot show it: only the build's commands do.
+        code, said = self.run_check(HARDENED, build_dir=self.build_dir(drop="-fstack-clash-protection"))
+        self.assertEqual(code, 1)
+        self.assertIn("MISSING -fstack-clash-protection in every compile command (2 of 3; not in /w/src/systemsounds.cpp)", said)
+        self.assertNotIn("MISSING", said.split("in the build's commands")[0], "the executable's part still passes")
+
+    def test_each_compile_flag_and_link_flag_is_required(self):
+        for flag in ("-fstack-protector-strong", "-D_FORTIFY_SOURCE=3", "-mbranch-protection=standard"):
+            with self.subTest(flag=flag):
+                self.assertEqual(self.run_check(HARDENED, build_dir=self.build_dir(drop=flag))[0], 1)
+        code, said = self.run_check(HARDENED, build_dir=self.build_dir(link="-Wl,-z,relro -Wl,-z,noexecstack"))
+        self.assertEqual(code, 1)
+        self.assertIn("MISSING -Wl,-z,now when mun-shell is linked", said)
+
+    def test_a_build_directory_without_its_commands_fails(self):
+        empty = tempfile.TemporaryDirectory()
+        self.addCleanup(empty.cleanup)
+        code, said = self.run_check(HARDENED, build_dir=empty.name)
+        self.assertEqual(code, 1)
+        self.assertIn("MISSING the build's commands", said)
 
     def test_without_readelf_it_is_a_usage_error(self):
         self.assertEqual(self.run_check(HARDENED, which=None)[0], 2)

@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""The hardening a built MUN Shell carries, read from the executable itself.
+"""The hardening a built MUN Shell carries, read from what was built.
 
-    hardening_check.py BINARY
+    hardening_check.py BINARY [--build-dir DIR]
 
-Reads the ELF file with readelf (binutils) and requires what the build asks
-the compiler and linker for (CMakeLists.txt), so that a flag that stops
+Two kinds of evidence, kept apart in the output, so that a flag that stops
 reaching the binary, or a toolchain that ignores it, fails here instead of
-going unnoticed:
+going unnoticed.
+
+In the executable, read with readelf (binutils):
 
 - position-independent executable (ELF type DYN, flagged PIE);
 - full RELRO: a GNU_RELRO segment and immediate binding (BIND_NOW);
@@ -22,10 +23,20 @@ when every object in it is marked, and Debian 13's x86-64 startup files
 (crt1.o, crti.o, crtn.o) are not, so no x86-64 executable of that system can
 be. The five other properties are required there too.
 
+In the build's own commands (--build-dir, the CMake build directory:
+compile_commands.json and build.ninja), for what an executable cannot show:
+every object compiled with -fstack-protector-strong (the executable only
+shows that some function has a canary), -fstack-clash-protection (it leaves
+no mark at all), -D_FORTIFY_SOURCE=3 (only calls that could be fortified
+show), and the architecture's control-flow flag; and mun-shell linked with
+-z relro, -z now and -z noexecstack.
+
 Prints one line per property and exits 1 if a required one is missing.
 """
 
+import json
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -65,18 +76,55 @@ def properties(binary):
     ]
 
 
+def configuration(build_dir, machine):
+    """What the build directory says each object was compiled and the
+    executable linked with."""
+    try:
+        commands = json.loads(open(f"{build_dir}/compile_commands.json", encoding="utf-8").read())
+        ninja = open(f"{build_dir}/build.ninja", encoding="utf-8").read()
+    except (OSError, ValueError) as error:
+        return [(f"the build's commands ({error})", False)]
+    flags = ["-fstack-protector-strong", "-fstack-clash-protection", "-D_FORTIFY_SOURCE=3"]
+    flags += {"AArch64": ["-mbranch-protection=standard"], "X86-64": ["-fcf-protection=full"]}.get(
+        next((arch for arch in ("AArch64", "X86-64") if arch in machine), ""), [])
+    found = []
+    for flag in flags:
+        lacking = [entry["file"] for entry in commands
+                   if flag not in (entry["arguments"] if "arguments" in entry else shlex.split(entry["command"]))]
+        where = f"; not in {', '.join(lacking[:3])}{', …' if len(lacking) > 3 else ''}" if lacking else ""
+        found.append((f"{flag} in every compile command ({len(commands) - len(lacking)} of {len(commands)}{where})",
+                      bool(commands) and not lacking))
+    edge = re.search(r"^build mun-shell: .*\n((?:[ \t]+.*\n)*)", ninja, re.M)
+    link = re.search(r"^\s*LINK_FLAGS = (.*)$", edge.group(1), re.M) if edge else None
+    linked = link.group(1).split() if link else []
+    for flag in ("-Wl,-z,relro", "-Wl,-z,now", "-Wl,-z,noexecstack"):
+        found.append((f"{flag} when mun-shell is linked", flag in linked))
+    return found
+
+
+def report(title, found):
+    print(title)
+    for name, ok in found:
+        print(f"  {'info   ' if ok is None else 'ok     ' if ok else 'MISSING'} {name}")
+    return all(ok is not False for _, ok in found)
+
+
 def main(argv):
-    if len(argv) != 1:
+    build_dir = None
+    if len(argv) == 3 and argv[1] == "--build-dir":
+        build_dir = argv[2]
+    elif len(argv) != 1:
         print(__doc__.strip().splitlines()[2], file=sys.stderr)
         return 2
     if not shutil.which("readelf"):
         print("hardening: readelf (binutils) not found", file=sys.stderr)
         return 2
     machine, found = properties(argv[0])
-    print(f"hardening of {argv[0]} ({machine}):")
-    for name, ok in found:
-        print(f"  {'info   ' if ok is None else 'ok     ' if ok else 'MISSING'} {name}")
-    return 0 if all(ok is not False for _, ok in found) else 1
+    ok = report(f"hardening of {argv[0]} ({machine}), in the executable:", found)
+    if build_dir is not None:
+        ok = report(f"hardening of {argv[0]}, in the build's commands ({build_dir}):",
+                    configuration(build_dir, machine)) and ok
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":

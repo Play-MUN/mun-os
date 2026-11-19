@@ -283,3 +283,15 @@ the rescan performs at start. The unit restarts the service itself however
 it ends (`Restart=always`, 2 s apart) and has no start limit: a service that
 ended quickly a few times would otherwise stay failed until the next boot,
 and with it the console's only reader.
+
+The unit bounds the service's memory and tasks (`MemoryHigh=256M`,
+`MemoryMax=384M`, `TasksMax=64`), from the service measured in a QEMU image
+guest: about 34 MiB idle, 39 MiB with a card dressed in MUN Shape motion or
+eight clients that never read, 156 MiB for the largest valid save the format
+allows (an 8 MiB directory save written over an earlier one) and 170 MiB with
+those eight clients at once, four tasks at most. `MemoryHigh` stays half again
+above that, so a valid save is never slowed; past `MemoryMax` the kernel ends
+the service, which comes back within seconds and reads its cards again. A
+save cut short that way is lost whole: the card keeps its last complete save
+and the one before it (`save.json`, `save.json.prev`), as measured with the
+service killed in the middle of the largest save.

@@ -50,6 +50,20 @@ DevicePolicy=closed
 DeviceAllow=block-blkext rw
 DeviceAllow=block-virtblk rw
 DeviceAllow=/dev/null rw
+# Resource bounds, from the service measured in a QEMU image guest (a MUN OS
+# development build, Debian 13, Python 3.13): idle about 34 MiB; a card with
+# MUN Shape motion inserted 39 MiB; eight clients that never read 39 MiB; the
+# largest valid save the card format allows (an 8 MiB directory save written
+# over an earlier one) 156 MiB, 170 MiB with eight such clients at once; four
+# tasks at most. MemoryHigh is half again that, so no valid save is slowed;
+# MemoryMax ends a service that runs away, which Restart= brings back within
+# seconds, its cards read again and a save in flight lost whole (writes are
+# atomic: the card keeps its last complete save). tests/test_cardd_unit.py
+# keeps these above what was measured, and asks for a new measurement when
+# the bounds it was measured with change.
+MemoryHigh=256M
+MemoryMax=384M
+TasksMax=64
 
 [Install]
 WantedBy=multi-user.target

@@ -8,6 +8,9 @@ project(mun-shell VERSION 0.1.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
+# compile_commands.json: the commands each object is actually compiled with,
+# which tests/ci/hardening_check.py reads for what the executable cannot show.
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Set by deploy/build.sh so the running shell can show which build it is.
 set(MUN_BUILD_ID "dev" CACHE STRING "Opaque build identifier shown in the system info screen")
@@ -187,6 +190,52 @@ qt_add_shaders(mun-shell "mun-shell-shaders"
 )
 
 target_link_libraries(mun-shell PRIVATE Qt6::Core Qt6::Gui Qt6::Network Qt6::Qml Qt6::Quick PkgConfig::ALSA PkgConfig::DRM Threads::Threads)
+
+# Hardening, on Linux where the console runs: the stack protector, fortified
+# libc calls, stack clash protection, control-flow protection, full RELRO and
+# a stack that is not executable. Debian's compiler adds none of these by
+# itself but PIE. Each flag is tried first, so a toolchain without one still
+# builds; tests/ci/hardening_check.py then requires each property in the
+# built executable, and in the build's own commands what an executable
+# cannot show (stack clash protection leaves no mark in it).
+#
+# Control-flow protection, on AArch64 (the console's architecture): BTI marks
+# where indirect branches may land, PAC signs return addresses. They guard
+# the shell's own code; each library is guarded as far as it is built so too
+# (in Debian 13: Qt, glibc, libstdc++, ALSA and libdrm are). The processor
+# enforces them only where it implements them (PAC from Armv8.3, BTI from
+# Armv8.5) and the kernel enables BTI; elsewhere the instructions do nothing.
+# On x86-64, built only for checks, -fcf-protection marks the shell's own
+# code, but the executable stays unmarked: Debian 13's x86-64 startup files
+# carry no CET marking, and the linker marks only what every object does.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    include(CheckCXXCompilerFlag)
+    include(CheckLinkerFlag)
+    set(mun_hardening_compile -fstack-protector-strong -fstack-clash-protection)
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
+        list(APPEND mun_hardening_compile -mbranch-protection=standard)
+    elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$")
+        list(APPEND mun_hardening_compile -fcf-protection=full)
+    endif()
+    foreach(flag IN LISTS mun_hardening_compile)
+        string(MAKE_C_IDENTIFIER "mun_cxx${flag}" supported)
+        check_cxx_compiler_flag(${flag} ${supported})
+        if(${supported})
+            target_compile_options(mun-shell PRIVATE ${flag})
+        endif()
+    endforeach()
+    # _FORTIFY_SOURCE needs optimization, so only optimized builds get it
+    # (level 3: GCC 12, Clang 16); -U first in case the compiler defines it.
+    target_compile_options(mun-shell PRIVATE
+        "$<$<CONFIG:Release,RelWithDebInfo,MinSizeRel>:-U_FORTIFY_SOURCE;-D_FORTIFY_SOURCE=3>")
+    foreach(flag LINKER:-z,relro LINKER:-z,now LINKER:-z,noexecstack)
+        string(MAKE_C_IDENTIFIER "mun_ld${flag}" supported)
+        check_linker_flag(CXX ${flag} ${supported})
+        if(${supported})
+            target_link_options(mun-shell PRIVATE ${flag})
+        endif()
+    endforeach()
+endif()
 
 include(GNUInstallDirs)
 install(TARGETS mun-shell RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

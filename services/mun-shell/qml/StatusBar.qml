@@ -1,3 +1,5 @@
+pragma ComponentBehavior: Bound
+// Bound: the inline components below read `root`, the file's own id.
 import QtQuick
 import MUN.Shell
 

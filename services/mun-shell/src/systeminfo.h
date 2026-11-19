@@ -22,6 +22,12 @@ class SystemInfo : public QObject {
     // installed outside an image build) the title is "MUN OS", fromImage is
     // false and the environment empty.
     Q_PROPERTY(QString osTitle READ osTitle NOTIFY changed)
+    // How this start was launched, as main() tells before QML loads
+    // (setStart()): the first start of this boot (the start-up plays then),
+    // and Home's orbital design. Without it, as in QML tools, a first start
+    // and the previous design.
+    Q_PROPERTY(bool firstStart READ firstStart CONSTANT)
+    Q_PROPERTY(bool orbital READ orbital CONSTANT)
     Q_PROPERTY(QString environment READ environment NOTIFY changed)
     Q_PROPERTY(bool release READ release NOTIFY changed)
     Q_PROPERTY(bool fromImage READ fromImage NOTIFY changed)
@@ -62,6 +68,11 @@ class SystemInfo : public QObject {
 
 public:
     explicit SystemInfo(QObject *parent = nullptr);
+
+    // Before the QML engine creates the singleton.
+    static void setStart(bool firstStart, bool orbital) { s_firstStart = firstStart; s_orbital = orbital; }
+    bool firstStart() const { return s_firstStart; }
+    bool orbital() const { return s_orbital; }
 
     Q_INVOKABLE void refresh();
     Q_INVOKABLE void refreshNetwork();
@@ -110,4 +121,7 @@ private:
     double m_displayScale = 1;
     QStringList m_inputDevices, m_addresses;
     bool m_wiredPresent = false, m_wiredConnected = false, m_wifiPresent = false, m_wifiConnected = false;
+
+    static inline bool s_firstStart = true;
+    static inline bool s_orbital = false;
 };

@@ -1,3 +1,6 @@
+pragma ComponentBehavior: Bound
+// Bound: the actions' and lines' delegates read `root` and `box`, ids of this
+// file; they take their model data as required properties.
 import QtQuick
 import MUN.Shell
 
@@ -81,6 +84,7 @@ Rectangle {
                 Repeater {
                     model: (root.shownContent.actions || []).length
                     OptionRow {
+                        id: action
                         required property int index
                         width: box.width
                         height: implicitHeight
@@ -91,7 +95,7 @@ Rectangle {
                         MouseArea {
                             anchors.fill: parent
                             enabled: root.shown
-                            onClicked: root.chosen(index)
+                            onClicked: root.chosen(action.index)
                         }
                     }
                 }

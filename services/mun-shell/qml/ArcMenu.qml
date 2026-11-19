@@ -1,3 +1,6 @@
+pragma ComponentBehavior: Bound
+// Bound: the entries' delegate reads `root`, this file's id; it takes its
+// index as a required property.
 import QtQuick
 import MUN.Shell
 

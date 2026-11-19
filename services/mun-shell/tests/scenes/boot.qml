@@ -41,7 +41,8 @@ Item {
         const hint = find(boot, it => it.objectName === "skipHint")
         const led = find(boot, it => it.objectName === "standbyLed")
         return { t: Math.round(boot.t * 100) / 100, playing: boot.playing, waiting: boot.waiting, warming: boot.warming,
-                 standby: boot.standby, led: led ? Math.round(led.opacity * 100) / 100 : -1, canSkip: boot.canSkip,
+                 standby: boot.standby, led: led ? Math.round(led.opacity * 100) / 100 : -1,
+                 breath: led ? Math.round(led.breath * 100) / 100 : -2, canSkip: boot.canSkip,
                  hint: hint ? Math.round(hint.opacity * 100) / 100 : -1, shown: boot.shown,
                  ready: boot.ready, powered: main.powered, settled: Memory.settled }
     }

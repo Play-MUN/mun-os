@@ -1618,23 +1618,50 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
     x, rx = card(SAMPLES / "sea")
     cardd, launchd = serve("home-from-settings", [[(0, snapshot()), ({"on": "in-settings", "after": 0.5},
                                                                       {"type": "card", "card": rx})]])
+    # Back to Home once the card is held (its shape ready, for an arrival)
+    # and Settings has wholly replaced Home's menu, not after a fixed time.
+    # As with a dialog's fade, the order is judged always (the card comes in
+    # only once Home's menu has faded in whole, through the values between,
+    # MENU lines), and the fade's 0.45 s, a duration, where durations are.
     out, phases, _ = run("home-from-settings", cardd, launchd, [
         {"at": 800, "set": {"mainIndex": 2}}, {"wait": 100, "call": "enter"}, {"when": {"level": 1}, "probe": "in-settings"},
-        {"wait": 2000, "call": "back", "probe": "back"}], end=1000, trace=True, until={"phase": "present"})
-    entering, dressed, back = first(phases, phase="entering"), first_dressed(out), first(phases, label="back")
-    checks.expect("home-from-settings", "inserted in Settings: it comes in once Home's arc is whole (0.45 s after)",
-                  entering is not None and back is not None and entering["t"] >= back["t"] + 400
-                  and entering["entry"] == "arrival", (back, entering))
+        {"when": {"level": 1, "phase": "ready", "entry": "arrival", "menuOpacity": 0}, "call": "back", "probe": "back"}],
+        end=1000, trace=True, until={"phase": "present"})
+    entering, back = first(phases, phase="entering"), first(phases, label="back")
+    menu = [line for line in lines(out, "MENU") if back is not None and line["t"] >= back["t"]]
+    whole = next((line for line in menu if line["opacity"] == 1), None)
+    between = [line for line in menu if 0 < line["opacity"] < 1 and (whole is None or line["t"] <= whole["t"])]
+    checks.expect("home-from-settings", "inserted in Settings: it comes in once Home's menu has faded in whole",
+                  entering is not None and back is not None and whole is not None and bool(between)
+                  and entering["t"] >= whole["t"] and entering["entry"] == "arrival",
+                  (back, whole, len(between), entering))
+    checks.duration("home-from-settings", "Home's menu fades in in its 0.45 s: the card 0.4 s or more after the return",
+                    entering is not None and back is not None and entering["t"] >= back["t"] + 400, (back, entering))
     whole_when_dressed("home-from-settings", out)
     x, rx = card(SAMPLES / "sea")
     cardd, launchd = serve("home-dialog-closed", [[(0, snapshot()), (0.6, {"type": "card", "card": rx})]], [[(0, result)]])
+    # The dialog is closed once its layer is wholly on screen, for a fade to
+    # follow: a busy shell may not have shown it yet a fixed time after Home
+    # was ready, and a layer never shown has nothing to fade. Animations
+    # follow the frames, not the clock (the same 0.5 s fade has taken 0.42
+    # to 0.61 s of clock on the OpenGL path), so the order (the arrival only
+    # once the layer has faded out, through the values between) is judged
+    # always, and the 0.5 s, a duration, where durations are (--timing).
     out, phases, _ = run("home-dialog-closed", cardd, launchd,
-                         [{"when": {"phase": "ready"}, "wait": 1000, "call": "dismissResult", "probe": "dismissed"}],
+                         [{"when": {"phase": "ready", "layerShown": True}, "wait": 1000, "call": "dismissResult",
+                           "probe": "dismissed"}],
                          end=1000, trace=True, until={"phase": "present"})
     entering, dressed, dismissed = first(phases, phase="entering"), first_dressed(out), first(phases, label="dismissed")
-    checks.expect("home-dialog-closed", "the dialog closed: it comes in once its layer has faded (0.5 s after)",
-                  entering is not None and dismissed is not None and entering["t"] >= dismissed["t"] + 400
-                  and dressed is not None and not dressed["modalShown"], (dismissed, entering, dressed))
+    layer = [line for line in lines(out, "LAYER") if dismissed is not None and line["t"] >= dismissed["t"]]
+    hidden = next((line for line in layer if not line["visible"]), None)
+    between = [line for line in layer if 0 < line["opacity"] < 1 and (hidden is None or line["t"] <= hidden["t"])]
+    checks.expect("home-dialog-closed", "the dialog closed: its layer fades out, then the card comes in",
+                  entering is not None and dismissed is not None and hidden is not None and bool(between)
+                  and entering["t"] >= hidden["t"] and dressed is not None and not dressed["modalShown"],
+                  (dismissed, hidden, len(between), entering, dressed))
+    checks.duration("home-dialog-closed", "the layer's fade takes its 0.5 s: the card 0.4 s or more after the dialog closed",
+                    entering is not None and dismissed is not None and entering["t"] >= dismissed["t"] + 400,
+                    (dismissed, entering))
     whole_when_dressed("home-dialog-closed", out)
 
     # Idle: once dimmed, the first key only brings the interface back (and
@@ -1654,6 +1681,10 @@ def home_cases(shell: Shell, checks: Checks, exports: Path, packages: Path, repo
     checks.expect("home-idle-dim", "that key held down does nothing; let go, its next press moves the focus",
                   len(at) == 5 and at["held"]["mainIndex"] == at["awake"]["mainIndex"]
                   and at["moved"]["mainIndex"] != at["awake"]["mainIndex"], at)
+    checks.expect("home-idle-dim", "the menu shows the entry in focus as chosen, and the next one once the focus moves",
+                  len(at) == 5 and at["awake"]["focused"] != "" and at["moved"]["focused"] != at["awake"]["focused"]
+                  and at["awake"]["chosen"] == [at["awake"]["focused"]] and at["moved"]["chosen"] == [at["moved"]["focused"]],
+                  {label: (at[label]["focused"], at[label]["chosen"]) for label in at})
     # The key that woke it stays spent until it is let go, whatever is
     # pressed meanwhile: held Enter wakes, Down moves to Settings, a repeat
     # of Enter must not open it; let go, a fresh Enter does.

@@ -12,6 +12,8 @@
 # where Qt 6 (Core, Qml) and ALSA's headers are installed: built with
 # AddressSanitizer against ALSA stand-ins, so a worker that touched the
 # shell's object once it was destroyed stops the test.
+# A tool these need is skipped with a note when missing, unless
+# MUN_REQUIRE_QT is set (tests/ci/check.sh): then its absence fails.
 HOSTCXX ?= c++
 CXXFLAGS = -std=c++20 -O1 -Wall -Wextra -Wpedantic -I../src
 TESTS    = displaydevice_test gamepadmap_test motionclock_test startupclock_test playbackhealth_test \
@@ -25,10 +27,13 @@ test: $(TESTS)
 	./playbackhealth_test
 	./pngchunks_test
 	./decodingmarker_test
-	@if command -v node >/dev/null 2>&1; then node qml_test.js; else echo "no node: MUN Shell interface logic tests skipped"; fi
+	@if command -v node >/dev/null 2>&1; then node qml_test.js; \
+	elif [ -n "$(MUN_REQUIRE_QT)" ]; then echo "node is required here (MUN_REQUIRE_QT): the interface logic tests cannot run" >&2; exit 1; \
+	else echo "no node: MUN Shell interface logic tests skipped"; fi
 	PYTHONDONTWRITEBYTECODE=1 python3 sources_test.py
 	@if [ -n "$(MOC)" ] && pkg-config --exists $(QT_PACKAGES) alsa 2>/dev/null; then \
 		$(MAKE) -s systemsounds_test && ASAN_OPTIONS=detect_leaks=0 ./systemsounds_test; \
+	elif [ -n "$(MUN_REQUIRE_QT)" ]; then echo "Qt 6 (moc, Qt6Core, Qt6Qml) and ALSA's headers are required here (MUN_REQUIRE_QT): the sound worker's exit test cannot run" >&2; exit 1; \
 	else echo "no Qt 6 or no ALSA headers: the sound worker's exit test skipped"; fi
 
 displaydevice_test: displaydevice_test.cpp ../src/displaydevice.cpp ../src/displaydevice.h

@@ -36,6 +36,32 @@ Item {
     property var canvas: null
     property var world: null
     property var modalLayer: null
+    // A dialog's layer as it shows and hides (LAYER lines): when it stops
+    // being visible, and with CONFIG.trace each opacity it passes through.
+    // Animations follow the frames, not the clock, so a fade's progress is
+    // judged on these, not on a span of time.
+    Connections {
+        target: scene.modalLayer
+        function onVisibleChanged() {
+            console.log("LAYER " + JSON.stringify({ t: scene.now(), visible: scene.modalLayer.visible,
+                                                    opacity: scene.modalLayer.opacity }))
+        }
+        function onOpacityChanged() {
+            if (scene.config.trace)
+                console.log("LAYER " + JSON.stringify({ t: scene.now(), visible: scene.modalLayer.visible,
+                                                        opacity: scene.modalLayer.opacity }))
+        }
+    }
+    // The loader of Home's menus: its main menu's opacity as it fades (MENU
+    // lines, with CONFIG.trace), for the same reason.
+    property var menus: null
+    Connections {
+        target: scene.menus
+        function onMainOpacityChanged() {
+            if (scene.config.trace)
+                console.log("MENU " + JSON.stringify({ t: scene.now(), opacity: scene.menus.mainOpacity }))
+        }
+    }
     property var motion: null
     property int next: 0
     // When the step before acted, and since when the step in turn has been
@@ -175,6 +201,12 @@ Item {
             sections: main ? main.settingsEntries.map(e => e.key) : [],
             design: main ? (main.orbital ? "orbital" : "previous") : "",
             entriesFound: canvas ? findAll(canvas, isEntry, []).length : 0,
+            // The menu entries drawn as chosen, and the one Main has in focus
+            // (Home's level): the menu must show the focus it has.
+            chosen: canvas ? findAll(canvas, isEntry, [])
+                                 .filter(it => it.on && it.visible && effective(it) > 0.5).map(it => it.label) : [],
+            focused: main && main.level === 0 && main.mainEntries[main.mainIndex]
+                     ? main.mainEntries[main.mainIndex].label : "",
             cardsFound: canvas ? findAll(canvas, isCard, []).length : 0,
             card: main ? main.cardMode : "",
             // Texts on screen cut short (an elided label).
@@ -190,7 +222,12 @@ Item {
             phase: Shape.phase, entry: Shape.entry, exit: Shape.exit, kind: Shape.kind, source: Shape.source,
             insertion: Shape.insertion, world: Object.keys(Shape.world).length > 0,
             modal: main ? !!main.modal : false, level: main ? main.level : -1, dimmed: main ? main.dimmed : false,
-            mainIndex: main ? main.mainIndex : -1, card: main ? main.cardMode : ""
+            mainIndex: main ? main.mainIndex : -1, card: main ? main.cardMode : "",
+            // A dialog's layer wholly on screen: a step that closes a dialog
+            // waits for it, for a fade to follow.
+            layerShown: !!scene.modalLayer && scene.modalLayer.visible && scene.modalLayer.opacity === 1,
+            // Home's main menu: 0 once Settings has wholly replaced it.
+            menuOpacity: scene.menus ? scene.menus.mainOpacity : -1
         }
         for (const key in when) {
             if (state[key] !== when[key])
@@ -318,6 +355,7 @@ Item {
         canvas = find(main.contentItem, it => it.width === Theme.canvasWidth && it.height === Theme.canvasHeight && it.focus === true)
         world = find(canvas, it => it.covering !== undefined && it.transition !== undefined)
         modalLayer = find(canvas, it => it.shownContent !== undefined)
+        menus = find(canvas, it => it.sourceComponent !== undefined && it.mainOpacity !== undefined)
         motion = find(canvas, it => it.failed !== undefined && it.runs !== undefined)
         report("start")
         run()

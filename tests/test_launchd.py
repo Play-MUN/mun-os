@@ -4,6 +4,7 @@ import json
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "services" / "mun-launchd"))
@@ -432,6 +433,31 @@ class SaveGateTests(unittest.TestCase):
         self.assertEqual(replies[-1], {"type": "saved", "ok": False, "error": {"code": "no_space", "message": "lleno"}})
         h.m.save_request(sid, {"type": "save", "schema": 1, "data": {"a": 3}}, replies.append)
         self.assertEqual(len(h.saves), 2, "after the reply the next save is accepted")
+
+    def test_a_save_that_cannot_be_forwarded_is_answered_and_the_next_one_goes_through(self):
+        h, sid = self.running(); replies = []
+        forward = h.m.saver
+
+        def no_thread(request, reply):
+            raise RuntimeError("can't start new thread")
+        h.m.saver = no_thread
+        h.m.save_request(sid, {"type": "save", "schema": 1, "data": {"a": 1}}, replies.append)
+        self.assertEqual((replies[-1]["ok"], replies[-1]["error"]["code"]), (False, "save_failed"))
+        h.m.saver = forward
+        h.m.save_request(sid, {"type": "save", "schema": 1, "data": {"a": 2}}, replies.append)
+        self.assertEqual([request["payload"] for request, _ in h.saves], [{"a": 2}], "the next save is forwarded")
+        h.m.save_request(sid, {"type": "save", "schema": 1, "data": {"a": 3}}, replies.append)
+        self.assertEqual(replies[-1]["error"]["code"], "save_busy", "still one save at a time")
+        h.saves[-1][1]({"ok": True, "bytes": 10}); h.pump()
+        self.assertEqual(replies[-1], {"type": "saved", "ok": True, "bytes": 10})
+
+    def test_a_forward_without_a_thread_answers_with_the_failure_of_its_kind(self):
+        for kind, code in (("save", "save_failed"), ("stage", "prepare_failed")):
+            replies = []
+            with patch.object(launchd.threading.Thread, "start", side_effect=RuntimeError("can't start new thread")):
+                launchd.stage_via_cardd({"type": kind}, replies.append)
+            self.assertEqual(len(replies), 1, kind)
+            self.assertEqual((replies[0]["ok"], replies[0]["error"]["code"]), (False, code))
 
     def test_the_size_of_a_save_is_that_of_its_compact_utf8_text_as_the_card_stores_it(self):
         h, sid = self.running()

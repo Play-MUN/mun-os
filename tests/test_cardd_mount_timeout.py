@@ -180,42 +180,60 @@ class LateRemountTests(unittest.TestCase):
     """A save's remount that ends after its bound may still take effect: the
     card service then follows what the kernel did, never what the failed
     save believed. The stand-in `mount` keeps the card's read-only or
-    read-write state in a file, as the kernel's table would."""
+    read-write state in a file, as the kernel's table would.
+
+    The scenario is held by events, not by times: the remount meant to be
+    late (`delay`: "rw" or "ro") waits for a gate the test opens only once
+    the service has given up on it, and only that remount has a short bound;
+    every other remount has one no process start reaches. A slow machine
+    therefore still gives the late remount, and nothing else, its timeout."""
 
     def setUp(self):
         self.bin = Path(tempfile.mkdtemp())
         self.state = self.bin / "state"
         self.state.write_text("ro")
         self.log = self.bin / "calls.log"
-        self.delay = self.bin / "delay"          # "rw" or "ro": that remount takes 0.6 s
+        self.delay = self.bin / "delay"          # "rw" or "ro": that remount is the late one
+        self.gate = self.bin / "gate"            # the late remount ends once this exists
         program = self.bin / "mount"
         program.write_text(f'''#!/bin/sh
 echo "mount $*" >> "{self.log}"
+late() {{ [ "$(cat "{self.delay}" 2>/dev/null)" = "$1" ] && while [ ! -e "{self.gate}" ]; do sleep 0.02; done; }}
 case "$*" in
-  *remount,rw*) [ "$(cat "{self.delay}" 2>/dev/null)" = rw ] && sleep 0.6; echo rw > "{self.state}" ;;
-  *remount,ro*) [ "$(cat "{self.delay}" 2>/dev/null)" = ro ] && sleep 0.6; echo ro > "{self.state}" ;;
+  *remount,rw*) late rw; echo rw > "{self.state}" ;;
+  *remount,ro*) late ro; echo ro > "{self.state}" ;;
 esac
 exit 0
 ''')
         program.chmod(program.stat().st_mode | stat.S_IXUSR)
-        state = self.state
+        state, delay = self.state, self.delay
         real_dir = RealDirMounter(Path(tempfile.mkdtemp()))
 
         class Mounter(cardd.Mounter):
+            def _run(self, kind, argv, target, code, message):
+                # The service's own run of the command; only its bound is
+                # chosen here: short for the remount meant to be late (it
+                # waits for the gate, so it always outlasts it), generous for
+                # any other.
+                late = delay.exists() and f"remount,{delay.read_text().strip()}" in " ".join(argv)
+                with patch.object(cardd, "MOUNT_TIMEOUT", 0.3 if late else 30.0):
+                    return super()._run(kind, argv, target, code, message)
+
             def mount(self, card, path):
                 return real_dir.mount(card, path)
 
             def unmount(self, card, strict=False):
                 card.mount = None
 
-            def mounted(self, target):
+            @staticmethod
+            def mounted(target):
                 return True
 
-            def read_only(self, target):
+            @staticmethod
+            def read_only(target):
                 return state.read_text().strip() == "ro"
 
-        for p in (patch.dict(os.environ, {"PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}"}),
-                  patch.object(cardd, "MOUNT_TIMEOUT", 0.3, create=True)):
+        for p in (patch.dict(os.environ, {"PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}"}),):
             p.start()
             self.addCleanup(p.stop)
         info = game_info(naming="mun")
@@ -226,9 +244,20 @@ exit 0
         self.addCleanup(self.finish)
 
     def finish(self):
+        self.gate.touch()
         for _, proc in self.h.manager.mounter.stalled.values():
             proc.kill()
             proc.wait()
+
+    def let_the_late_remount_end(self):
+        """Open the gate, then wait until the service sees nothing running on
+        the card any more (its own `settled`), as the kernel's table would
+        after a remount ends. Bounded: a remount that never ends fails here."""
+        self.gate.touch()
+        deadline = time.monotonic() + 30
+        while not self.h.manager.mounter.settled(self.card.mount):
+            self.assertLess(time.monotonic(), deadline, "the late remount did not end")
+            time.sleep(0.02)
 
     def save(self):
         replies = []
@@ -249,7 +278,7 @@ exit 0
         self.assertTrue(self.card.writable, "the card may become writable: it counts as such")
         self.assertTrue(self.card.closing, "and its return to read-only is due")
         self.assertFalse(self.h.manager._close_card(self.card), "nothing is decided while the remount runs")
-        time.sleep(0.8)                              # the remount to read-write ends after all
+        self.let_the_late_remount_end()              # the remount to read-write ends after all
         self.assertEqual(self.state.read_text().strip(), "rw")
         self.assertTrue(self.h.manager._close_card(self.card))
         self.assertEqual(self.state.read_text().strip(), "ro", "the card was left writable")
@@ -260,7 +289,7 @@ exit 0
         reply = self.save()
         self.assertEqual((reply["ok"], reply["error"]["code"]), (False, "sync_failed"))
         self.assertTrue(self.card.writable)
-        time.sleep(0.8)                              # the remount to read-only ends after all
+        self.let_the_late_remount_end()              # the remount to read-only ends after all
         self.assertEqual(self.state.read_text().strip(), "ro")
         before = self.remounts()
         self.assertTrue(self.h.manager._close_card(self.card))

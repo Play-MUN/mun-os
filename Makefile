@@ -1,4 +1,4 @@
-.PHONY: check test
+.PHONY: check test shell-check
 
 # Documentation, Python syntax and host-side regressions. This does not boot the
 # guest or build the console runtime; see CONTRIBUTING.md.
@@ -13,3 +13,9 @@ check:
 
 test:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_*.py'
+
+# MUN Shell built as the image builds it and exercised on the real binary
+# (services/mun-shell/tests/ci/check.sh): needs Debian 13's Qt and the packages
+# of services/mun-shell/tests/ci/setup.sh, or its Dockerfile.
+shell-check:
+	sh services/mun-shell/tests/ci/check.sh

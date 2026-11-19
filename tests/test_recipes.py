@@ -9,7 +9,6 @@ import contextlib
 import hashlib
 import io
 import json
-import os
 import subprocess
 import sys
 import tempfile
@@ -20,6 +19,8 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "os" / "builder"))
 sys.path.insert(0, str(ROOT / "vm"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import gitenv  # noqa: E402
 import recipes  # noqa: E402
 import mundev  # noqa: E402
 
@@ -38,18 +39,12 @@ def git(repo, *args):
 
 class Fixture(unittest.TestCase):
     def setUp(self):
-        # Git runs hooks with the repository being committed in the environment
-        # (GIT_DIR, GIT_INDEX_FILE, ...), and the pre-commit hook runs these tests:
-        # the repositories they make must not inherit it, or `git -C DIR init` would
-        # reinitialise that repository and the fixtures be committed into it
-        # (tests/test_hook_safety.py).
-        environment = patch.dict(os.environ, {key: value for key, value in os.environ.items()
-                                              if not key.startswith("GIT_")}, clear=True)
-        environment.start()
-        self.addCleanup(environment.stop)
         directory = tempfile.TemporaryDirectory(prefix="mun-recipes-")
         self.addCleanup(directory.cleanup)
         self.root = Path(directory.name)
+        # The repositories these tests make run none of the contributor's Git
+        # nor the hook's GIT_DIR (tests/gitenv.py, tests/test_hook_safety.py).
+        gitenv.isolate(self, self.root)
         upstream = self.root / "upstream"
         upstream.mkdir()
         git(upstream, "init", "-q")

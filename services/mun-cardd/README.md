@@ -81,7 +81,14 @@ exceed the budget, the state is sent with `cover_omitted` instead of the
 picture. Writes are queued per client: a peer that has not drained its socket
 yet keeps its bytes queued until the socket is writable again, and only a
 peer that leaves more than 8 MiB unread is dropped. A partial write therefore
-never disconnects a slow shell or launcher. Text that UTF-8 cannot carry (a
+never disconnects a slow shell or launcher. The service keeps at most 8
+connections (its readers are the shell, the launcher and the console reset)
+and at most 16 MiB unread by all of them together: past that, the client
+furthest behind is dropped first (the newest of equals), and a connection
+past the eighth replaces a client that leaves bytes unread, in the service
+or, on Linux, in the kernel's buffers (a client that never reads a small
+snapshot holds nothing in the service), or is refused when every client has
+read everything. Text that UTF-8 cannot carry (a
 lone surrogate in a card's file) crosses the socket, and reaches the journal,
 as `?`.
 

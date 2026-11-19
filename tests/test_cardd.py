@@ -6,6 +6,7 @@ import os
 import json
 import os
 import stat as statmod
+import tempfile
 import threading
 import unittest
 from pathlib import Path
@@ -335,6 +336,141 @@ class TransportTests(unittest.TestCase):
         got = fast_b.recv(4 * 1024 * 1024)
         self.assertTrue(got.endswith(b"\n") and json.loads(got)["type"] == "snapshot")
         self.assertGreater(len(server.outbox.pending[slow_a]), 0, "the slow one still has bytes queued")
+
+
+class ClientBoundTests(unittest.TestCase):
+    """The shell's socket keeps a bounded number of clients and unread bytes.
+
+    Its readers are the shell, the launcher and the console reset; a client
+    that connects and never reads must not make the service hold the card
+    events it leaves unread without bound, nor keep a reader that does read
+    from reconnecting.
+    """
+
+    COVER = 1400 * 1024   # about the largest legal cover: a 1 MiB PNG in base64
+
+    def setUp(self):
+        import socket
+        # AF_UNIX paths are short: the socket goes in /tmp, not in a long TMPDIR.
+        # TemporaryDirectory makes its own directory there, private (0700) and
+        # with a random name, so a shared parent is safe.
+        directory = tempfile.TemporaryDirectory(prefix="cardd-", dir="/tmp" if os.name == "posix" else None)  # nosec B108
+        self.addCleanup(directory.cleanup)
+        self.path = Path(directory.name) / "cardd.sock"
+        self.server = cardd.Server(self.path, "nobody")
+        self.server.manager = type("Manager", (), {"snapshot": lambda _: TransportTests.big_snapshot(None, self.COVER)})()
+        self.listener = self.server.start()
+        self.addCleanup(self.listener.close)
+        self.addCleanup(lambda: [self.server.drop(conn) for conn in list(self.server.clients)])
+        self.socket = socket
+
+    def connect(self, reading=False):
+        peer = self.socket.socket(self.socket.AF_UNIX, self.socket.SOCK_STREAM)
+        if not reading:
+            peer.setsockopt(self.socket.SOL_SOCKET, self.socket.SO_RCVBUF, 8192)
+        peer.connect(str(self.path))
+        self.addCleanup(peer.close)
+        return peer, self.server.accept()
+
+    def pending(self):
+        return sum(len(queued) for queued in self.server.outbox.pending.values())
+
+    def drain(self, peer, conn):
+        """Everything the service has sent a reading peer so far, as whole lines
+        (`conn` is the service's end of that peer's connection)."""
+        import json
+        peer.setblocking(False)
+        received = bytearray()
+        for _ in range(100000):
+            for other in list(self.server.outbox.pending):
+                self.server.on_event(other, __import__("selectors").EVENT_WRITE)
+            try:
+                chunk = peer.recv(1 << 20)
+            except BlockingIOError:
+                chunk = b""
+            received += chunk
+            if not chunk and received.endswith(b"\n") and not self.server.outbox.pending.get(conn):
+                break
+        return [json.loads(line) for line in bytes(received).splitlines()]
+
+    def test_clients_that_never_read_are_bounded_in_number_and_in_unread_bytes(self):
+        for _ in range(cardd.MAX_CLIENTS + 8):
+            self.connect()
+        self.assertLessEqual(len(self.server.clients), cardd.MAX_CLIENTS)
+        self.assertLessEqual(self.pending(), cardd.OUTBOX_TOTAL_MAX_BYTES)
+        for _ in range(4):
+            self.server.broadcast(self.server.manager.snapshot())
+            self.assertLessEqual(self.pending(), cardd.OUTBOX_TOTAL_MAX_BYTES)
+
+    def test_a_reader_keeps_its_events_while_clients_that_never_read_are_dropped(self):
+        reader, reader_conn = self.connect(reading=True)
+        reader.setsockopt(self.socket.SOL_SOCKET, self.socket.SO_RCVBUF, 4 * 1024 * 1024)
+        for _ in range(cardd.MAX_CLIENTS - 1):
+            self.connect()
+        events = []
+        for number in range(6):
+            event = dict(self.server.manager.snapshot(), type="card", number=number)
+            self.server.broadcast(event)
+            events += self.drain(reader, reader_conn)
+            self.assertLessEqual(self.pending(), cardd.OUTBOX_TOTAL_MAX_BYTES)
+            self.assertIn(reader_conn, self.server.clients, "the reader is never the one dropped")
+        self.assertEqual([event.get("number") for event in events if event["type"] == "card"], list(range(6)))
+        self.assertEqual(events[0]["type"], "snapshot")
+        self.assertEqual(events[-1]["cards"][0]["info"]["cover_data"],
+                         self.server.manager.snapshot()["cards"][0]["info"]["cover_data"], "covers arrive whole")
+
+    def test_a_reader_reconnects_when_the_slots_are_held_by_clients_that_never_read(self):
+        for _ in range(cardd.MAX_CLIENTS):
+            self.connect()
+        reader, conn = self.connect(reading=True)
+        self.assertIsNotNone(conn, "admitted in place of a client that leaves its events unread")
+        self.assertEqual(self.drain(reader, conn)[0]["type"], "snapshot")
+
+    def test_readers_that_read_are_not_dropped_for_a_newcomer(self):
+        readers = [self.connect(reading=True) for _ in range(cardd.MAX_CLIENTS)]
+        for peer, conn in readers:
+            peer.setsockopt(self.socket.SOL_SOCKET, self.socket.SO_RCVBUF, 4 * 1024 * 1024)
+            self.drain(peer, conn)
+        refused, conn = self.connect()
+        self.assertIsNone(conn, "full, and every client reads: the newcomer is refused")
+        self.assertEqual(len(self.server.clients), cardd.MAX_CLIENTS)
+        refused.settimeout(5)
+        self.assertEqual(refused.recv(1), b"", "the refused connection is closed")
+
+    def small_snapshot(self):
+        """A console with no disk: a snapshot the kernel's buffers hold whole,
+        so a client that never reads has nothing queued in the outbox."""
+        self.server.manager = type("Manager", (), {"snapshot": lambda _: {"type": "snapshot", "cards": []}})()
+
+    @unittest.skipUnless(sys.platform.startswith("linux"),
+                         "only Linux says how much a Unix socket's peer left unread (where the service runs)")
+    def test_clients_that_never_read_a_small_snapshot_do_not_keep_a_reader_out(self):
+        self.small_snapshot()
+        idle = [self.connect() for _ in range(cardd.MAX_CLIENTS)]
+        self.assertIsNone(self.server.outbox.most_behind(), "nothing queued here: the kernel holds each snapshot")
+        reader, conn = self.connect(reading=True)
+        self.assertIsNotNone(conn, "admitted in place of a client that left its snapshot unread")
+        self.assertEqual(len(self.server.clients), cardd.MAX_CLIENTS)
+        self.assertEqual(sum(1 for _, kept in idle if kept in self.server.clients), cardd.MAX_CLIENTS - 1)
+        self.assertEqual(self.drain(reader, conn)[0]["type"], "snapshot")
+
+    def test_the_client_that_left_most_unread_in_the_kernel_makes_room(self):
+        self.small_snapshot()
+        clients = [self.connect()[1] for _ in range(cardd.MAX_CLIENTS)]
+        unread = dict.fromkeys(clients, 0)
+        with patch.object(cardd, "unread_by_peer", lambda conn: unread.get(conn)):
+            unread[clients[2]], unread[clients[3]], unread[clients[4]] = 5, 9, 9
+            _, conn = self.connect()
+            self.assertIsNotNone(conn)
+            self.assertNotIn(clients[4], self.server.clients, "the most unread, the later of equals, makes room")
+            self.assertIn(clients[3], self.server.clients)
+            for client in clients:
+                unread[client] = 0
+            _, refused = self.connect()
+            self.assertIsNone(refused, "everyone has read everything: the newcomer is refused")
+        with patch.object(cardd, "unread_by_peer", lambda conn: None):
+            _, refused = self.connect()
+            self.assertIsNone(refused, "where the kernel does not say, a full socket refuses")
 
 
 class SpecialFileTests(unittest.TestCase):
@@ -1300,7 +1436,8 @@ class UnmountWithoutProcessesTests(unittest.TestCase):
                 mounted.add(target)
                 return target
 
-            def mounted(self, target):
+            @staticmethod
+            def mounted(target):
                 return target in mounted
 
         def run(argv, **kwargs):

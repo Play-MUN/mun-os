@@ -23,6 +23,8 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools" / "mun-card"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import gitenv  # noqa: E402
 
 from mun_card import shapeexport  # noqa: E402
 from mun_card.errors import CardError  # noqa: E402
@@ -38,16 +40,11 @@ def git(repo, *args):
 @unittest.skipUnless(HAVE_GIT, "Git is not installed")
 class ExportTests(unittest.TestCase):
     def setUp(self):
-        # Git runs hooks with the repository being committed in the
-        # environment (GIT_DIR, GIT_INDEX_FILE, ...), and the pre-commit
-        # hook runs these tests: the repositories they make must not inherit
-        # it (tests/test_hook_safety.py).
-        environment = patch.dict(os.environ, {key: value for key, value in os.environ.items()
-                                              if not key.startswith("GIT_")}, clear=True)
-        environment.start()
-        self.addCleanup(environment.stop)
         self.tmp = Path(tempfile.mkdtemp(prefix="shape-export-"))
         self.addCleanup(shutil.rmtree, self.tmp, True)
+        # The repositories these tests make run none of the contributor's Git
+        # nor the hook's GIT_DIR (tests/gitenv.py, tests/test_hook_safety.py).
+        gitenv.isolate(self, self.tmp)
         self.repo = self.tmp / "repo"
         shutil.copytree(ROOT / "examples" / "shape" / "sea", self.repo / "shapes" / "sea")
         (self.repo / "studio").mkdir()

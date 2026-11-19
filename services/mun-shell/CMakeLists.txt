@@ -141,6 +141,10 @@ set_source_files_properties(qml/Theme.qml qml/I18n.qml PROPERTIES QT_QML_SINGLET
 qt_add_qml_module(mun-shell
     URI MUN.Shell
     VERSION 1.0
+    # The module's types derive from QtQuick's (QQuickItem): declared, so that
+    # qmllint and the QML compiler resolve them instead of reporting every
+    # property of an item as unknown.
+    DEPENDENCIES QtQuick
     QML_FILES ${MUN_QML_FILES}
     RESOURCES
         fonts/Archivo-Variable.ttf
